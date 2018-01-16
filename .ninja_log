@@ -1,0 +1,25 @@
+# ninja log v5
+1	155	1516105342	CMakeFiles/Main.dir/src/ast/ast.cc.o	c7840ec24c13758e
+0	171	1516105342	CMakeFiles/Main.dir/src/main.cc.o	e47bf795846a543e
+0	18	1516105429	CMakeFiles/Main.dir/src/ast/ast.cc.o	c7840ec24c13758e
+0	81	1516106371	build.ninja	e923dcd44f4bb33e
+1	269	1516106371	CMakeFiles/Main.dir/src/ast/ast.cc.o	eb795aa63d3d48cd
+0	274	1516106371	CMakeFiles/Main.dir/src/main.cc.o	fafcafdc005145bc
+1	80	1516106545	build.ninja	e923dcd44f4bb33e
+1	33	1516106545	CMakeFiles/Main.dir/src/ast/ast.cc.o	2c7a6c45d840fb5e
+0	35	1516106545	CMakeFiles/Main.dir/src/main.cc.o	e39dd51c1a74820e
+0	76	1516107109	build.ninja	e923dcd44f4bb33e
+0	256	1516107350	CMakeFiles/Main.dir/src/isolate.cc.o	6a527220f752e4f0
+0	175	1516107694	CMakeFiles/Main.dir/src/heap.cc.o	cb601687a5675da3
+1	222	1516108154	CMakeFiles/Main.dir/src/unicode.cc.o	726754261afc4de8
+1	590	1516108347	CMakeFiles/Main.dir/src/debug/stacktrace.cc.o	d280e53fbe825be1
+0	177	1516108375	CMakeFiles/Main.dir/src/isolate.cc.o	6a527220f752e4f0
+177	210	1516108375	Main	c01d26291d54e390
+0	77	1516108400	build.ninja	e923dcd44f4bb33e
+1	33	1516108400	CMakeFiles/i6.dir/src/ast/ast.cc.o	f52a77014eaa48f
+0	34	1516108400	CMakeFiles/i6.dir/src/main.cc.o	14a69dadad10056c
+1	186	1516108400	CMakeFiles/i6.dir/src/isolate.cc.o	6517ab5a4b6f0773
+0	187	1516108400	CMakeFiles/i6.dir/src/heap.cc.o	4055783c595b78d
+0	194	1516108400	CMakeFiles/i6.dir/src/unicode.cc.o	ad35c661fa5e465f
+1	541	1516108400	CMakeFiles/i6.dir/src/debug/stacktrace.cc.o	814eba1af1afdde8
+541	572	1516108400	i6	8e64bf9ee10f049f
