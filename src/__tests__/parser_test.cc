@@ -15,20 +15,11 @@
  * @author Taketoshi Aono
  */
 
-#ifndef _I6_SRC_PARSER_H_
-#define _I6_SRC_PARSER_H_
+#include <gtest/gtest.h>
+#include "../parser.h"
 
-namespace i6 {
-class Utf16CodePoint;
-class Parser {
- public:
-  explicit Parser(Utf16CodePoint* sources)
-      : sources_(sources) {}
-
-  void Parse();
- private:
-  Utf16CodePoint* sources_;
-};
-}  // namespace i6
-
-#endif  // _I6_SRC_PARSER_H_
+namespace {
+TEST(ParserTest, Basic) {
+  i6::Parser parser(nullptr);
+}
+}

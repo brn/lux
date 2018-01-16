@@ -7,3 +7,8 @@ i6
 rules.ninja
 /tools
 .DS_Store
+CTestTestfile.cmake
+/build
+/Testing
+/.ninja_deps
+/.ninja_log
