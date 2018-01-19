@@ -28,7 +28,16 @@ class Utf16CodePoint {
   explicit Utf16CodePoint(u32 u)
       : u_(u) {}
 
-  u16 code() {return u_;}
+  Utf16CodePoint()
+      : u_(0) {}
+
+  u16 code() const {return u_;}
+
+  operator u32() const {return u_;}
+
+  bool IsValid() {
+    return u_ != 0;
+  }
 
   bool IsSurrogatePair() {
     return u_ > 0x10000;
@@ -58,19 +67,49 @@ class Utf16StringIterator:
     : index_(0), utf16_codepoint_(nullptr) {}
 
   Utf16StringIterator(Utf16CodePoint* utf16_codepoint, int32_t size)
-    : index_(0), utf16_codepoint_(utf16_codepoint) {}
+      : index_(0), size_(size), utf16_codepoint_(utf16_codepoint) {}
+
+  Utf16StringIterator(const Utf16StringIterator& it)
+      : index_(it.index_), size_(it.size_),
+        utf16_codepoint_(it.utf16_codepoint_) {}
 
   const Utf16CodePoint& operator*() const;
 
-  const Utf16CodePoint& operator->() const;
+  const Utf16CodePoint* operator->() const;
+
+  Utf16StringIterator& operator =(const Utf16StringIterator& it) {
+    index_ = it.index_;
+    utf16_codepoint_ = it.utf16_codepoint_;
+    size_ = it.size_;
+    return *this;
+  }
+
+  const bool operator ==(const Utf16StringIterator& it) const {
+    return index_ == it.index_ && it.utf16_codepoint_ == utf16_codepoint_;
+  }
+
+  const bool operator !=(const Utf16StringIterator& it) const {
+    return !this->operator==(it);
+  }
 
   Utf16StringIterator& operator++() {
-    index_++;
+    if (index_ < size_) {
+      index_++;
+    }
     return *this;
   }
 
   Utf16StringIterator operator++(int value) {
     return Utf16StringIterator(utf16_codepoint_, index_ + value, size_);
+  }
+
+  Utf16StringIterator operator+(int value) {
+    return Utf16StringIterator(utf16_codepoint_, index_ + value, size_);
+  }
+
+  Utf16StringIterator& operator+=(int value) {
+    index_ += value;
+    return *this;
   }
 
  private:
@@ -85,8 +124,9 @@ class Utf16StringIterator:
 
 class Utf16String {
  public:
-  explicit Utf16String(Utf16CodePoint* utf16_codepoint)
-      : utf16_codepoint_(utf16_codepoint) {}
+  using iterator = Utf16StringIterator;
+  explicit Utf16String(Utf16CodePoint* utf16_codepoint, size_t size)
+      : size_(size), utf16_codepoint_(utf16_codepoint) {}
 
   Utf16StringIterator begin() {
     return Utf16StringIterator(utf16_codepoint_, size_);
@@ -95,6 +135,8 @@ class Utf16String {
   Utf16StringIterator end() {
     return Utf16StringIterator(utf16_codepoint_, size_, size_);
   }
+
+  bool IsAsciiEqual(const char* ascii) const;
 
   int32_t size() const {return size_;}
 
@@ -105,17 +147,14 @@ class Utf16String {
   Utf16CodePoint* utf16_codepoint_;
 };
 
-const Utf16CodePoint& Utf16StringIterator::operator*() const {
-  return utf16_codepoint_[index_];
-}
-
-const Utf16CodePoint& Utf16StringIterator::operator->() const {
-  return utf16_codepoint_[index_];
-}
-
 class Unicode {
  public:
-  static const Utf16CodePoint* ConvertUtf8StringToUtf16String(
+  static const Utf16CodePoint InvalidCodePoint() {
+    static Utf16CodePoint invalid(0);
+    return invalid;
+  }
+
+  static const Utf16String ConvertUtf8StringToUtf16String(
       Isolate* isolate, const char*);
 };
 }  // namespace i6

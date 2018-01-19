@@ -16,17 +16,24 @@ if(CMAKE_BUILD_TYPE STREQUAL "Debug")
   link_directories(./googletest/build/googlemock/gtest)
 
   add_executable(parser_test
+    src/node.cc
+    src/isolate.cc
+    src/heap.cc
+    src/reporter.cc
+    src/unicode.cc
     src/parser.cc
+    src/debug/stacktrace.cc
     src/__tests__/parser_test.cc)
   target_link_libraries(parser_test libgtest.a libgtest_main.a)
 endif()
 
 include_directories(./tools/clang+llvm-5.0.1-final-x86_64-apple-darwin/include/c++/v1)
 add_executable(i6
-./src/main.cc
-./src/heap.cc
-./src/unicode.cc
-./src/isolate.cc
-./src/ast/ast.cc
-./src/debug/stacktrace.cc)
+  src/main.cc
+  src/node.cc
+  src/heap.cc
+  src/reporter.cc
+  src/unicode.cc
+  src/isolate.cc
+  src/debug/stacktrace.cc)
 target_link_libraries(i6)

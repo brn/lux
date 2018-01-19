@@ -131,15 +131,42 @@ void ConvertUtf8ToUtf16(Utf8Iterator* it, Utf16CodePoint* buf, int32_t* index) {
   }
 }
 
-const Utf16CodePoint* Unicode::ConvertUtf8StringToUtf16String(
+const Utf16CodePoint& Utf16StringIterator::operator*() const {
+  return utf16_codepoint_[index_];
+}
+
+const Utf16CodePoint* Utf16StringIterator::operator->() const {
+  return &utf16_codepoint_[index_];
+}
+
+bool Utf16String::IsAsciiEqual(const char* ascii) const {
+  auto ascii_len = strlen(ascii);
+  if (size_ != ascii_len) {
+    return false;
+  }
+
+  for (int i = 0; i < size_; i++) {
+    if (utf16_codepoint_[i] != ascii[i]) {
+      return false;
+    }
+  }
+
+  return true;
+}
+
+const Utf16String Unicode::ConvertUtf8StringToUtf16String(
     Isolate* isolate, const char* str) {
+  const int kUtf16CodePointSize = sizeof(Utf16CodePoint);
   auto buf = reinterpret_cast<Utf16CodePoint*>(
-      isolate->heap()->Allocate(strlen(str) * sizeof(Utf16CodePoint)));
+      isolate->heap()->Allocate(strlen(str) * kUtf16CodePointSize
+                                + kUtf16CodePointSize));
   Utf8Iterator it(str);
   int index = 0;
   while (it.HasMore()) {
     ConvertUtf8ToUtf16(&it, buf, &index);
   }
-  return buf;
+  buf[index + 1] = Utf16CodePoint();
+
+  return Utf16String(buf, index);
 }
 }  // namespace i6

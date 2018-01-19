@@ -41,9 +41,30 @@ void Invalidate(bool cond, const char* message) {
   }
 }
 #define INVALIDATE(cond) Invalidate(cond, #cond)
+void Unreachable() {
+  puts("UNREACHABLE!!");
+  debug::StackTrace st;
+  st.Print();
+  exit(1);
+}
+#define UNREACHABLE() Unreachable()
 #else
 #define INVALIDATE(cond)
+#define UNREACHABLE()
 #endif
+
+// The USE(x, ...) template is used to silence C++ compiler warnings
+// issued for (yet) unused variables (typically parameters).
+// The arguments are guaranteed to be evaluated from left to right.
+struct Use__ {
+  template <typename T>
+  Use__(T&&) {}  // NOLINT(runtime/explicit)
+};
+#define USE(...)                                         \
+  do {                                                   \
+    i6::Use__ unused_tmp_array_for_use_macro[]{__VA_ARGS__};  \
+    (void)unused_tmp_array_for_use_macro;                \
+  } while (false)
 
 template <typename T>
 using Shared = std::shared_ptr<T>;
@@ -58,6 +79,84 @@ class Bitmask {
   static const Type full = ~(Type(0));
   static const Type upper = ~((Type(1) << LowerBits) - 1);
   static const Type lower = (Type(1) << LowerBits) - 1;
+};
+
+template <typename T>
+class LazyInitializer {
+ public:
+  LazyInitializer()
+      : ptr_(nullptr) {}
+
+  ~LazyInitializer() {
+    if (ptr_ != nullptr) {
+      ptr_->~T();
+    }
+  }
+
+  template <typename ... Args>
+  T* operator()(Args ... args) {
+    ptr_ = nullptr;
+    return ptr_ = new(heap_) T(args...);
+  }
+
+  T* Get() {return ptr_;}
+
+  const T* Get() const {return ptr_;}
+
+  T& operator * () {
+    return *ptr_;
+  }
+
+  const T& operator * () const {
+    return *ptr_;
+  }
+
+  T* operator -> () {
+    return ptr_;
+  }
+
+
+  const T* operator -> () const {
+    return ptr_;
+  }
+
+  template <typename U>
+  bool operator == (U u) const {
+    return ptr_ == u;
+  }
+
+  template <typename U>
+  bool operator != (U u) const {
+    return ptr_ != u;
+  }
+
+  template <typename U>
+  T& operator >> (U u) {
+    return *ptr_ >> u;
+  }
+
+  template <typename U>
+  const T& operator >> (U u) const {
+    return *ptr_ >> u;
+  }
+
+  template <typename U>
+  T& operator << (U u) {
+    return *ptr_ << u;
+  }
+
+  template <typename U>
+  const T& operator << (U u) const {
+    return *ptr_ << u;
+  }
+
+  inline bool initialized() const {
+    return ptr_ != nullptr;
+  }
+
+ private:
+  Address heap_[sizeof(T) + 1];
+  T* ptr_;
 };
 }  // namespace i6
 

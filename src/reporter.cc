@@ -15,12 +15,17 @@
  * @author Taketoshi Aono
  */
 
-#ifndef _I6_SRC_AST_AST_H_
-#define _I6_SRC_AST_AST_H_
+#include "./reporter.h"
 
 namespace i6 {
-class AstNode {
-};
-}  // namespace i6
+void Reporter::Report(const char* message) {
+  pending_errors_.push_back(std::string(message));
+}
 
-#endif  // _I6_SRC_AST_AST_H_
+void Reporter::PrintError() {
+  if (HasPendingError()) {
+    auto e = pending_errors_.back();
+    printf("%s\n", e.c_str());
+  }
+}
+}  // namespace i6

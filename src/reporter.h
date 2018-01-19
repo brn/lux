@@ -15,8 +15,26 @@
  * @author Taketoshi Aono
  */
 
-#include "./ast.h"
+#ifndef _I6_SRC_REPORTER_H_
+#define _I6_SRC_REPORTER_H_
+
+#include <string>
+#include <vector>
 
 namespace i6 {
+class Reporter {
+ public:
+  void Report(const char* message);
 
+  void PrintError();
+
+  bool HasPendingError() const {
+    return pending_errors_.size() > 0;
+  }
+
+ private:
+  std::vector<std::string> pending_errors_;
+};
 }  // namespace i6
+
+#endif  // _I6_SRC_REPORTER_H_
