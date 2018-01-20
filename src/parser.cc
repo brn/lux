@@ -15,16 +15,41 @@
  * @author Taketoshi Aono
  */
 
+#include <iostream>
+#include <sstream>
+#include <memory>
 #include "./parser.h"
 #include "./reporter.h"
 
-namespace i6 {
-#define REPORT_ERROR(parser, e)                 \
-  reporter_->Report(e)
+namespace lux {
+#define BASE_REPORT_SYNTAX_ERROR_(parser)                               \
+  auto e = std::make_shared<lux::ErrorDescriptor>(parser->position());  \
+  (reporter_->ReportSyntaxError(e))                                     \
+
+#ifdef DEBUG
+#define REPORT_SYNTAX_ERROR(parser, message)                            \
+  BASE_REPORT_SYNTAX_ERROR_(parser)                                     \
+  << "\n [Debug] line:" << __LINE__ << __FUNCTION__ << "\n" << message; \
+  return nullptr;
+#else
+#define REPORT_SYNTAX_ERROR(parser, message)    \
+  BASE_REPORT_SYNTAX_ERROR_(parser) << message  \
+  return nullptr;
+#endif
+
+#define EXPECT(parser, n, token, expect)        \
+  if (n != token) {                             \
+    REPORT_SYNTAX_ERROR(                        \
+        parser, "'" << expect << "' expected"); \
+  } else {                                      \
+    advance();                                  \
+  }
 
 using Token = Parser::Token;
 
 Token Parser::Tokenizer::Next() {
+  current_buffer_ = &buffer_;
+  current_position_ = &position_;
   if (lookahead_ != Token::INVALID) {
     auto ret = lookahead_;
     lookahead_ = Token::INVALID;
@@ -34,6 +59,8 @@ Token Parser::Tokenizer::Next() {
 }
 
 Token Parser::Tokenizer::Peek() {
+  current_buffer_ = &lookahead_buffer_;
+  current_position_ = &lookahead_position_;
   if (lookahead_ != Token::INVALID) {
     return lookahead_;
   }
@@ -53,11 +80,12 @@ Utf16CodePoint Parser::Tokenizer::Advance() {
         Advance();
       }
     case '\n':
-      position_.location++;
-      position_.position = 0;
+      current_position_->set_end_line_number(
+          position_.end_line_number() + 1);
+      current_position_->set_end_col(0);
       break;
     default:
-      position_.position++;
+      current_position_->set_end_col(position_.end_col() + 1);
   }
   return *it_;
 }
@@ -153,6 +181,9 @@ Utf16CodePoint DecodeAsciiEscapeSequence(Utf16String::iterator* it, bool* ok) {
 }
 
 Token Parser::Tokenizer::Tokenize() {
+  current_position_->set_start_col(current_position_->end_col() + 1);
+  current_position_->set_start_line_number(
+      current_position_->end_line_number());
   auto start_value = *it_;
   if (parser_state_.Is(State::IN_TEMPLATE_LITERAL)) {
     return TokenizeTemplateCharacters();
@@ -292,15 +323,15 @@ Utf16CodePoint DecodeEscapeSequence(Utf16String::iterator* it, bool* ok) {
 }
 
 Token Parser::Tokenizer::TokenizeStringLiteral() {
-  buffer_.clear();
+  current_buffer_->clear();
   auto value = *it_;
-  buffer_.push_back(value);
+  current_buffer_->push_back(value);
   u8 start = value.code();
   bool escaped = false;
   while (1) {
     Advance();
     value = *it_;
-    buffer_.push_back(value);
+    current_buffer_->push_back(value);
     switch (value.code()) {
       case '\\':
         if (!escaped) {
@@ -329,7 +360,7 @@ Token Parser::Tokenizer::TokenizeStringLiteral() {
 }
 
 Token Parser::Tokenizer::TokenizeIdentifier() {
-  buffer_.clear();
+  current_buffer_->clear();
   auto value = *it_;
   INVALIDATE(IsIdentifierStart(value));
 
@@ -347,7 +378,7 @@ Token Parser::Tokenizer::TokenizeIdentifier() {
         }
       }
     }
-    buffer_.push_back(value);
+    current_buffer_->push_back(value);
     Advance();
     value = *it_;
   }
@@ -356,7 +387,7 @@ Token Parser::Tokenizer::TokenizeIdentifier() {
 }
 
 Token Parser::Tokenizer::TokenizeTemplateCharacters() {
-  buffer_.clear();
+  current_buffer_->clear();
   auto value = *it_;
   bool escaped = false;
   while (1) {
@@ -385,7 +416,7 @@ Token Parser::Tokenizer::TokenizeTemplateCharacters() {
       case '`':
         return Token::TEMPLATE_CHARACTERS;
     }
-    buffer_.push_back(value);
+    current_buffer_->push_back(value);
     Advance();
     value = *it_;
   }
@@ -411,7 +442,7 @@ Token Parser::Tokenizer::TokenizeRegExp() {
   }
 }
 
-Parser::Parser(Utf16String* sources, Reporter* reporter)
+Parser::Parser(Utf16String* sources, ErrorReporter* reporter)
     : reporter_(reporter),
       sources_(sources) {
   parser_state_();
@@ -443,17 +474,76 @@ void Parser::Parse(ParseType parse_type) {
   }
 }
 
-void Parser::ParseScript() {
-  ParseStatementList();
+#ifdef DEBUG
+// Logging current parse phase.
+#define LOG_PHASE(name)                                                 \
+  if (cur() != Token::INVALID) {                                        \
+    phase_buffer_                                                       \
+      << indent_                                                        \
+      << "Enter "                                                       \
+      << #name                                                          \
+      << ": CurrentToken = "                                            \
+      << ToStringCurrentToken();                                        \
+  } else {                                                              \
+    phase_buffer_                                                       \
+      << indent_                                                        \
+      << "Enter "                                                       \
+      << #name                                                          \
+      << ": CurrentToken = null";                                       \
+  }                                                                     \
+  phase_buffer_ << position().start_line_number() << '\n';              \
+  indent_ += "  ";                                                      \
+  auto err_size = reporter_->size();                                    \
+  LUX_SCOPED([&]{                                                       \
+    indent_ = indent_.substr(0, indent_.size() - 2);                    \
+    if (this->cur() != Token::INVALID) {                                \
+      phase_buffer_                                                     \
+        << indent_                                                      \
+        << "Exit "                                                      \
+        << #name                                                        \
+        << ": CurrentToken = "                                          \
+        << ToStringCurrentToken()                                       \
+        << (err_size != reporter_->size()?                              \
+            "[Error!]": "");                                            \
+    } else {                                                            \
+      phase_buffer_                                                     \
+        << indent_                                                      \
+        << "Exit "                                                      \
+        << #name                                                        \
+        << ": CurrentToken = null"                                      \
+        << (err_size != reporter_->size()?                              \
+            "[Error!]": "");                                            \
+    }                                                                   \
+    phase_buffer_                                                       \
+      << position().start_line_number() << '\n';                        \
+  })
+
+#define ENTER_PARSING                           \
+  LOG_PHASE(__FUNCTION__);
+#else
+// Disabled.
+#define LOG_PHASE(name)
+#define ENTER_PARSING
+#endif
+
+Ast* Parser::ParseScript() {
+  ENTER_PARSING;
+  return ParseStatementList();
 }
 
-void Parser::ParseStatementList() {
+Ast* Parser::ParseStatementList() {
+  ENTER_PARSING;
+  auto statements = new (zone()) Statements();
   while (tokenizer_->HasMore()) {
-    ParseStatementListItem();
+    auto maybe_statement = ParseStatementListItem();
+    INVALIDATE(maybe_statement->IsStatement());
+    statements->Push(maybe_statement->ToStatement());
   }
+  return statements;
 }
 
-void Parser::ParseStatementListItem() {
+Ast* Parser::ParseStatementListItem() {
+  ENTER_PARSING;
   switch (cur()) {
     case CLASS:
     case CONST:
@@ -464,15 +554,16 @@ void Parser::ParseStatementListItem() {
         auto v = value();
         if (v.IsAsciiEqual("async") && peek() == FUNCTION) {
           return ParseDeclaration();
-        } else if(v.IsAsciiEqual("let")) {
+        } else if (v.IsAsciiEqual("let")) {
           return ParseDeclaration();
         }
       }
-      ParseStatement();
+      return ParseStatement();
   }
 }
 
-void Parser::ParseStatement() {
+Ast* Parser::ParseStatement() {
+  ENTER_PARSING;
   switch (cur()) {
     case LEFT_BRACE:
       return ParseBlockStatement();
@@ -500,34 +591,42 @@ void Parser::ParseStatement() {
   }
 }
 
-void Parser::ParseExpressionStatement() {
-  ParseExpression();
+Ast* Parser::ParseExpressionStatement() {
+  ENTER_PARSING;
+  auto ret = ParseExpression();
   if (cur() == TERMINATE) {
-    next();
+    advance();
   }
+  return ret;
 }
 
-void Parser::ParseExpression() {
-  while (1) {
-    ParseAssignmentExpression();
-    if (cur() == COMMA) {
-      ParseAssignmentExpression();
-    } else {
-      break;
+Expression* Parser::ParseExpression() {
+  ENTER_PARSING;
+  auto ret = ParseAssignmentExpression();
+  if (cur() == COMMA) {
+    auto expressions = new(zone()) Expressions();
+    expressions->Push(ret->ToExpression());
+    while (cur() == COMMA) {
+      auto assignment_expression = ParseAssignmentExpression();
+      expressions->Push(assignment_expression->ToExpression());
     }
+    return expressions;
   }
+
+  return ret;
 }
 
-void Parser::ParseAssignmentExpression() {
+Expression* Parser::ParseAssignmentExpression() {
+  ENTER_PARSING;
   switch (cur()) {
     case YIELD:
       if (!MatchStates({IN_GENERATOR_FUNCTION, IN_ASYNC_GENERATOR_FUNCTION})) {
-        REPORT_ERROR(this,
-                     "yield only allowed in generator or async generator.");
+        REPORT_SYNTAX_ERROR(this,
+                            "yield only allowed in generator or async generator.");
       }
       return ParseYieldExpression();
     case NEW:
-      return ParseLeftHandSideExpression();
+      return ParseAssignmentExpressionLhs();
     case AWAIT:
     case DELETE:
     case VOID:
@@ -541,7 +640,7 @@ void Parser::ParseAssignmentExpression() {
         return ParseArrowFunction();
       } else if (value().IsAsciiEqual("async")) {
         Record();
-        next();
+        advance();
         auto next = peek();
         Restore();
         if (next != TERMINATE) {
@@ -549,7 +648,7 @@ void Parser::ParseAssignmentExpression() {
         }
         return ParseIdentifier();
       } else if (cur() == IDENTIFIER && peek() == LEFT_PAREN) {
-        return ParseLeftHandSideExpression();
+        return ParseAssignmentExpressionLhs();
       } else {
         switch (peek()) {
           case QUESTION:
@@ -585,162 +684,356 @@ void Parser::ParseAssignmentExpression() {
   }
 }
 
-void Parser::ParseScriptBody() {}
-void Parser::ParseModule() {}
-void Parser::ParseModuleBody() {}
-void Parser::ParseModuleItemList() {}
-void Parser::ParseModuleItem() {}
-void Parser::ParseImportDeclaration() {}
-void Parser::ParseImportClause() {}
-void Parser::ParseImportedDefaultBinding() {}
-void Parser::ParseNameSpaceImport() {}
-void Parser::ParseNamedImports() {}
-void Parser::ParseFromClause() {}
-void Parser::ParseImportsList() {}
-void Parser::ParseImportSpecifier() {}
-void Parser::ParseModuleSpecifier() {}
-void Parser::ParseImportedBinding() {}
-void Parser::ParseExportDeclaration() {}
-void Parser::ParseExportClause() {}
-void Parser::ParseExportsList() {}
-void Parser::ParseExportSpecifier() {}
+Expression* Parser::ParseAssignmentExpressionLhs() {
+  ENTER_PARSING;
+  auto left = ParseLeftHandSideExpression();
+  if (cur() == Token::OP_ASSIGN || IsAssignmentOperator(cur())) {
+    advance();
+    auto right = ParseAssignmentExpression();
+    return new (zone()) BinaryExpression(
+        left->ToExpression(), right->ToExpression());
+  }
+  return left;
+}
 
-void Parser::ParseIdentifierReference() {}
-void Parser::ParseBindingIdentifier() {}
-void Parser::ParseIdentifier() {}
-void Parser::ParseAsyncArrowBindingIdentifier() {}
-void Parser::ParseLabelIdentifier() {}
-void Parser::ParsePrimaryExpression() {}
-void Parser::ParseCoverParenthesizedExpressionAndArrowParameterList() {}
-void Parser::ParseParenthesizedExpression() {}
-void Parser::ParseLiteral() {}
-void Parser::ParseArrayLiteral() {}
-void Parser::ParseElementList() {}
-void Parser::ParseSpreadElement() {}
-void Parser::ParseObjectLiteral() {}
-void Parser::ParsePropertyDefinitionList() {}
-void Parser::ParsePropertyDefinition() {}
-void Parser::ParsePropertyName() {}
-void Parser::ParseLiteralPropertyName() {}
-void Parser::ParseComputedPropertyName() {}
-void Parser::ParseCoverInitializedName() {}
-void Parser::ParseInitializer() {}
-void Parser::ParseTemplateLiteral() {}
-void Parser::ParseTemplateSpans() {}
-void Parser::ParseTemplateMiddleList() {}
-void Parser::ParseMemberExpression() {}
-void Parser::ParseSuperProperty() {}
-void Parser::ParseNewTarget() {}
-void Parser::ParseNewExpression() {}
-void Parser::ParseCallExpression() {}
-void Parser::ParseCallMemberExpression() {}
-void Parser::ParseSuperCall() {}
-void Parser::ParseArguments() {}
-void Parser::ParseArgumentList() {}
-void Parser::ParseLeftHandSideExpression() {}
-void Parser::ParseUpdateExpression() {}
-void Parser::ParseUnaryExpression() {}
-void Parser::ParseExponentiationExpression() {}
-void Parser::ParseMultiplicativeExpression() {}
-void Parser::ParseMultiplicativeOperator() {}
-void Parser::ParseAdditiveExpression() {}
-void Parser::ParseShiftExpression() {}
-void Parser::ParseRelationalExpression() {}
-void Parser::ParseEqualityExpression() {}
-void Parser::ParseBitwiseANDExpression() {}
-void Parser::ParseBitwiseXORExpression() {}
-void Parser::ParseBitwiseORExpression() {}
-void Parser::ParseLogicalANDExpression() {}
-void Parser::ParseLogicalORExpression() {}
-void Parser::ParseConditionalExpression() {}
-void Parser::ParseAssignmentPattern() {}
-void Parser::ParseObjectAssignmentPattern() {}
-void Parser::ParseArrayAssignmentPattern() {}
-void Parser::ParseAssignmentPropertyList() {}
-void Parser::ParseAssignmentElementList() {}
-void Parser::ParseAssignmentElisionElement() {}
-void Parser::ParseAssignmentProperty() {}
-void Parser::ParseAssignmentElement() {}
-void Parser::ParseAssignmentRestElement() {}
-void Parser::ParseDestructuringAssignmentTarget() {}
-void Parser::ParseDeclaration() {}
-void Parser::ParseHoistableDeclaration() {}
-void Parser::ParseBreakableStatement() {}
-void Parser::ParseBlockStatement() {}
-void Parser::ParseBlock() {}
-void Parser::ParseLexicalDeclaration() {}
-void Parser::ParseBindingList() {}
-void Parser::ParseLexicalBinding() {}
-void Parser::ParseVariableStatement() {}
-void Parser::ParseVariableDeclarationList() {}
-void Parser::ParseVariableDeclaration() {}
-void Parser::ParseBindingPattern() {}
-void Parser::ParseObjectBindingPattern() {}
-void Parser::ParseArrayBindingPattern() {}
-void Parser::ParseBindingPropertyList() {}
-void Parser::ParseBindingElementList() {}
-void Parser::ParseBindingElisionElement() {}
-void Parser::ParseBindingProperty() {}
-void Parser::ParseBindingElement() {}
-void Parser::ParseSingleNameBinding() {}
-void Parser::ParseBindingRestElement() {}
-void Parser::ParseIfStatement() {}
-void Parser::ParseIterationStatement() {}
-void Parser::ParseForDeclaration() {}
-void Parser::ParseForBinding() {}
-void Parser::ParseContinueStatement() {}
-void Parser::ParseBreakStatement() {}
-void Parser::ParseReturnStatement() {}
-void Parser::ParseWithStatement() {}
-void Parser::ParseSwitchStatement() {}
-void Parser::ParseCaseBlock() {}
-void Parser::ParseCaseClauses() {}
-void Parser::ParseCaseClause() {}
-void Parser::ParseDefaultClause() {}
-void Parser::ParseLabelledStatement() {}
-void Parser::ParseLabelledItem() {}
-void Parser::ParseThrowStatement() {}
-void Parser::ParseTryStatement() {}
-void Parser::ParseCatch() {}
-void Parser::ParseFinally() {}
-void Parser::ParseCatchParameter() {}
-void Parser::ParseDebuggerStatement() {}
-void Parser::ParseFunctionDeclaration() {}
-void Parser::ParseFunctionExpression() {}
-void Parser::ParseUniqueFormalParameters() {}
-void Parser::ParseFormalParameters() {}
-void Parser::ParseFormalParameterList() {}
-void Parser::ParseFunctionRestParameter() {}
-void Parser::ParseFormalParameter() {}
-void Parser::ParseFunctionBody() {}
-void Parser::ParseFunctionStatementList() {}
-void Parser::ParseArrowFunction() {}
-void Parser::ParseArrowParameters() {}
-void Parser::ParseConciseBody() {}
-void Parser::ParseArrowFormalParameters() {}
-void Parser::ParseAsyncArrowFunction() {}
-void Parser::ParseAsyncConciseBody() {}
-void Parser::ParseAsyncArrowHead() {}
-void Parser::ParseMethodDefinition() {}
-void Parser::ParsePropertySetParameterList() {}
-void Parser::ParseGeneratorMethod() {}
-void Parser::ParseGeneratorDeclaration() {}
-void Parser::ParseGeneratorExpression() {}
-void Parser::ParseGeneratorBody() {}
-void Parser::ParseYieldExpression() {}
-void Parser::ParseAsyncMethod() {}
-void Parser::ParseAsyncFunctionDeclaration() {}
-void Parser::ParseAsyncFunctionExpression() {}
-void Parser::ParseAsyncFunctionBody() {}
-void Parser::ParseAwaitExpression() {}
-void Parser::ParseClassDeclaration() {}
-void Parser::ParseClassExpression() {}
-void Parser::ParseClassTail() {}
-void Parser::ParseClassHeritage() {}
-void Parser::ParseClassBody() {}
-void Parser::ParseClassElementList() {}
-void Parser::ParseClassElement() {}
+Expression* Parser::ParseConditionalExpression() {
+  ENTER_PARSING;
+  auto logical_or_exp = ParseLogicalORExpression();
+  if (cur() == Token::QUESTION) {
+    auto lhs = ParseAssignmentExpression();
+    if (advance() != Token::COLON) {
+      REPORT_SYNTAX_ERROR(this, "':' expected.");
+    }
+    auto rhs = ParseAssignmentExpression();
+    return new(zone()) ConditionalExpression(
+        logical_or_exp->ToExpression(),
+        lhs->ToExpression(),
+        rhs->ToExpression());
+  }
+  return logical_or_exp;
+}
+
+#define SIMPLE_BINARY_EXPRESSION_PARSER(Name, ChildName, ...) \
+  Expression* Parser::Parse##Name##Expression() {               \
+    ENTER_PARSING;                                              \
+    auto child_exp = Parse##ChildName##Expression();            \
+    if (OneOf(peek(), {__VA_ARGS__})) {                         \
+      advance();                                                \
+      auto rhs_exp = Parse##Name##Expression();                 \
+      return new(zone()) BinaryExpression(                      \
+          child_exp, rhs_exp);                                  \
+    }                                                           \
+    return child_exp;                                           \
+  }
+
+SIMPLE_BINARY_EXPRESSION_PARSER(LogicalOR, LogicalAND, Token::OP_LOGICAL_OR)
+SIMPLE_BINARY_EXPRESSION_PARSER(LogicalAND, BitwiseOR, Token::OP_LOGICAL_AND)
+SIMPLE_BINARY_EXPRESSION_PARSER(BitwiseOR, BitwiseXOR, Token::OP_OR)
+SIMPLE_BINARY_EXPRESSION_PARSER(BitwiseXOR, BitwiseAND, Token::OP_OR)
+SIMPLE_BINARY_EXPRESSION_PARSER(BitwiseAND, Equality, Token::OP_AND)
+SIMPLE_BINARY_EXPRESSION_PARSER(
+    Equality, Relational,
+    Token::OP_EQ, Token::OP_STRICT_EQ,
+    Token::OP_NOT_EQ, Token::OP_STRICT_NOT_EQ)
+SIMPLE_BINARY_EXPRESSION_PARSER(
+    Relational, Shift,
+    Token::OP_GREATER_THAN,
+    Token::OP_GREATER_THAN_EQ,
+    Token::OP_LESS_THAN,
+    Token::OP_LESS_THAN_OR_EQ,
+    Token::INSTANCEOF,
+    Token::IN)
+SIMPLE_BINARY_EXPRESSION_PARSER(
+    Shift, Additive,
+    Token::OP_SHIFT_LEFT,
+    Token::OP_SHIFT_RIGHT,
+    Token::OP_U_SHIFT_RIGHT)
+SIMPLE_BINARY_EXPRESSION_PARSER(
+    Additive, Multiplicative, Token::OP_PLUS, Token::OP_MINUS)
+SIMPLE_BINARY_EXPRESSION_PARSER(
+    Multiplicative, Exponentiation, Token::OP_MUL, Token::OP_DIV, Token::OP_MOD)
+SIMPLE_BINARY_EXPRESSION_PARSER(Exponentiation, Unary, Token::OP_POW)
+
+Expression* Parser::ParseUnaryExpression() {
+  ENTER_PARSING;
+  switch (peek()) {
+    case Token::DELETE:  // FALL_THROUGH
+    case Token::VOID:  // FALL_THROUGH
+    case Token::TYPEOF:  // FALL_THROUGH
+    case Token::OP_PLUS:  // FALL_THROUGH
+    case Token::OP_MINUS:  // FALL_THROUGH
+    case Token::OP_TILDE:  // FALL_THROUGH
+    case Token::OP_NOT: {  // FALL_THROUGH
+      advance();
+      auto n = ParseUnaryExpression();
+      return new(zone()) UnaryExpression(
+          UnaryExpression::PRE, cur(), n);
+    }
+    case Token::AWAIT:
+      advance();
+      return ParseAwaitExpression();
+    default:
+      return ParseUpdateExpression();
+  }
+}
+
+Expression* Parser::ParseUpdateExpression() {
+  ENTER_PARSING;
+  switch (peek()) {
+    case Token::OP_INCREMENT:
+    case Token::OP_DECREMENT: {
+      advance();
+      auto n = ParseLeftHandSideExpression();
+      return new(zone()) UnaryExpression(
+          UnaryExpression::PRE, cur(), n);
+    }
+    default: {
+      auto n = ParseLeftHandSideExpression();
+      switch (peek()) {
+        case Token::OP_INCREMENT:
+        case Token::OP_DECREMENT:
+          advance();
+          return new(zone()) UnaryExpression(
+              UnaryExpression::POST, cur(), n);
+        default:
+          return n;
+      }
+    }
+  }
+}
+
+Expression* Parser::ParseLeftHandSideExpression() {
+  ENTER_PARSING;
+  switch (peek()) {
+    case Token::NEW: {
+      Record();
+      LUX_SCOPED([this]() { this->Restore(); });
+      advance();
+      if (peek() == Token::DOT) {
+        return ParseCallExpression();
+      }
+      return ParseNewExpression();
+    }
+    default:
+      return ParseCallExpression();
+  }
+}
+
+Expression* Parser::ParseNewExpression() {
+  ENTER_PARSING;
+  if (peek() == Token::NEW) {
+    advance();
+    auto callee = ParseNewExpression();
+    return new (zone()) CallExpression(
+        CallExpression::NEW, callee);
+  }
+  return ParseMemberExpression();
+}
+
+Expression* Parser::ParseCallExpression() {
+  ENTER_PARSING;
+  switch (peek()) {
+    case Token::SUPER: {
+      Record();
+      advance();
+      if (peek() == Token::LEFT_PAREN) {
+        Restore();
+        auto n = ParseSuperCall();
+        return ParsePostCallExpression(n);
+      }
+      Restore();
+    }
+    default: {
+      auto n = ParseCoverCallExpressionAndAsyncArrowHead()->ToExpressions();
+      auto callexp = new(zone()) CallExpression(
+          CallExpression::NORMAL,
+          n->at(0), n->at(1));
+      return ParsePostCallExpression(callexp);
+    }
+  }
+}
+
+Expression* Parser::ParsePostCallExpression(Expression* callexp) {
+  switch (cur()) {
+    case Token::LEFT_PAREN: {
+      auto a = ParseArguments();
+      return new(zone()) CallExpression(
+          CallExpression::SUPER, callexp, a);
+    }
+    case Token::LEFT_BRACKET: {
+      advance();
+      auto n = ParseExpression();
+      EXPECT(this, cur(), Token::RIGHT_BRACKET, ']');
+      return new(zone()) PropertyAccessExpression(
+          PropertyAccessExpression::ELEMENT, callexp, n);
+    }
+    case Token::DOT: {
+      advance();
+      auto n = ParseExpression();
+      return new(zone()) PropertyAccessExpression(
+          PropertyAccessExpression::DOT, callexp, n);
+    }
+    case Token::BACK_QUOTE: {
+      auto t = ParseTemplateLiteral();
+      return new(zone()) CallExpression(
+          CallExpression::TEMPLATE, callexp, t);
+    }
+    default:
+      return callexp;
+  }
+}
+
+Expression* Parser::ParseCoverCallExpressionAndAsyncArrowHead() {
+  ENTER_PARSING;
+  auto n = ParseMemberExpression();
+  auto a = ParseArguments();
+  auto ret = new(zone()) Expressions({n->ToExpression(), a->ToExpression()});
+  return ret;
+}
+
+Expression* Parser::ParseMemberExpression() {
+  return nullptr;
+}
+
+Ast* Parser::ParseScriptBody() {return nullptr;}
+Ast* Parser::ParseModule() {return nullptr;}
+Ast* Parser::ParseModuleBody() {return nullptr;}
+Ast* Parser::ParseModuleItemList() {return nullptr;}
+Ast* Parser::ParseModuleItem() {return nullptr;}
+Ast* Parser::ParseImportDeclaration() {return nullptr;}
+Ast* Parser::ParseImportClause() {return nullptr;}
+Ast* Parser::ParseImportedDefaultBinding() {return nullptr;}
+Ast* Parser::ParseNameSpaceImport() {return nullptr;}
+Ast* Parser::ParseNamedImports() {return nullptr;}
+Ast* Parser::ParseFromClause() {return nullptr;}
+Ast* Parser::ParseImportsList() {return nullptr;}
+Ast* Parser::ParseImportSpecifier() {return nullptr;}
+Ast* Parser::ParseModuleSpecifier() {return nullptr;}
+Ast* Parser::ParseImportedBinding() {return nullptr;}
+Ast* Parser::ParseExportDeclaration() {return nullptr;}
+Ast* Parser::ParseExportClause() {return nullptr;}
+Ast* Parser::ParseExportsList() {return nullptr;}
+Ast* Parser::ParseExportSpecifier() {return nullptr;}
+
+Expression* Parser::ParseIdentifierReference() {return nullptr;}
+Expression* Parser::ParseBindingIdentifier() {return nullptr;}
+Expression* Parser::ParseIdentifier() {return nullptr;}
+Expression* Parser::ParseAsyncArrowBindingIdentifier() {return nullptr;}
+Expression* Parser::ParseLabelIdentifier() {return nullptr;}
+Expression* Parser::ParsePrimaryExpression() {return nullptr;}
+Expression* Parser::ParseCoverParenthesizedExpressionAndArrowParameterList() {
+  return nullptr;
+}
+Expression* Parser::ParseParenthesizedExpression() {return nullptr;}
+Expression* Parser::ParseLiteral() {return nullptr;}
+Expression* Parser::ParseArrayLiteral() {return nullptr;}
+Expression* Parser::ParseElementList() {return nullptr;}
+Expression* Parser::ParseSpreadElement() {return nullptr;}
+Expression* Parser::ParseObjectLiteral() {return nullptr;}
+Expression* Parser::ParsePropertyDefinitionList() {return nullptr;}
+Expression* Parser::ParsePropertyDefinition() {return nullptr;}
+Expression* Parser::ParsePropertyName() {return nullptr;}
+Expression* Parser::ParseLiteralPropertyName() {return nullptr;}
+Expression* Parser::ParseComputedPropertyName() {return nullptr;}
+Expression* Parser::ParseCoverInitializedName() {return nullptr;}
+Expression* Parser::ParseInitializer() {return nullptr;}
+Expression* Parser::ParseTemplateLiteral() {return nullptr;}
+Expression* Parser::ParseTemplateSpans() {return nullptr;}
+Expression* Parser::ParseTemplateMiddleList() {return nullptr;}
+Expression* Parser::ParseSuperProperty() {return nullptr;}
+Expression* Parser::ParseNewTarget() {return nullptr;}
+Expression* Parser::ParseCallMemberExpression() {return nullptr;}
+Expression* Parser::ParseSuperCall() {return nullptr;}
+Expression* Parser::ParseArguments() {return nullptr;}
+Expression* Parser::ParseArgumentList() {return nullptr;}
+Expression* Parser::ParseAssignmentPattern() {return nullptr;}
+Expression* Parser::ParseObjectAssignmentPattern() {return nullptr;}
+Expression* Parser::ParseArrayAssignmentPattern() {return nullptr;}
+Expression* Parser::ParseAssignmentPropertyList() {return nullptr;}
+Expression* Parser::ParseAssignmentElementList() {return nullptr;}
+Expression* Parser::ParseAssignmentElisionElement() {return nullptr;}
+Expression* Parser::ParseAssignmentProperty() {return nullptr;}
+Expression* Parser::ParseAssignmentElement() {return nullptr;}
+Expression* Parser::ParseAssignmentRestElement() {return nullptr;}
+Expression* Parser::ParseDestructuringAssignmentTarget() {return nullptr;}
+Ast* Parser::ParseDeclaration() {return nullptr;}
+Ast* Parser::ParseHoistableDeclaration() {return nullptr;}
+Ast* Parser::ParseBreakableStatement() {return nullptr;}
+Ast* Parser::ParseBlockStatement() {return nullptr;}
+Ast* Parser::ParseBlock() {return nullptr;}
+Ast* Parser::ParseLexicalDeclaration() {return nullptr;}
+Ast* Parser::ParseBindingList() {return nullptr;}
+Ast* Parser::ParseLexicalBinding() {return nullptr;}
+Ast* Parser::ParseVariableStatement() {return nullptr;}
+Ast* Parser::ParseVariableDeclarationList() {return nullptr;}
+Ast* Parser::ParseVariableDeclaration() {return nullptr;}
+Ast* Parser::ParseBindingPattern() {return nullptr;}
+Ast* Parser::ParseObjectBindingPattern() {return nullptr;}
+Ast* Parser::ParseArrayBindingPattern() {return nullptr;}
+Ast* Parser::ParseBindingPropertyList() {return nullptr;}
+Ast* Parser::ParseBindingElementList() {return nullptr;}
+Ast* Parser::ParseBindingElisionElement() {return nullptr;}
+Ast* Parser::ParseBindingProperty() {return nullptr;}
+Ast* Parser::ParseBindingElement() {return nullptr;}
+Ast* Parser::ParseSingleNameBinding() {return nullptr;}
+Ast* Parser::ParseBindingRestElement() {return nullptr;}
+Ast* Parser::ParseIfStatement() {return nullptr;}
+Ast* Parser::ParseIterationStatement() {return nullptr;}
+Ast* Parser::ParseForDeclaration() {return nullptr;}
+Ast* Parser::ParseForBinding() {return nullptr;}
+Ast* Parser::ParseContinueStatement() {return nullptr;}
+Ast* Parser::ParseBreakStatement() {return nullptr;}
+Ast* Parser::ParseReturnStatement() {return nullptr;}
+Ast* Parser::ParseWithStatement() {return nullptr;}
+Ast* Parser::ParseSwitchStatement() {return nullptr;}
+Ast* Parser::ParseCaseBlock() {return nullptr;}
+Ast* Parser::ParseCaseClauses() {return nullptr;}
+Ast* Parser::ParseCaseClause() {return nullptr;}
+Ast* Parser::ParseDefaultClause() {return nullptr;}
+Ast* Parser::ParseLabelledStatement() {return nullptr;}
+Ast* Parser::ParseLabelledItem() {return nullptr;}
+Ast* Parser::ParseThrowStatement() {return nullptr;}
+Ast* Parser::ParseTryStatement() {return nullptr;}
+Ast* Parser::ParseCatch() {return nullptr;}
+Ast* Parser::ParseFinally() {return nullptr;}
+Ast* Parser::ParseCatchParameter() {return nullptr;}
+Ast* Parser::ParseDebuggerStatement() {return nullptr;}
+Ast* Parser::ParseFunctionDeclaration() {return nullptr;}
+Ast* Parser::ParseFunctionExpression() {return nullptr;}
+Ast* Parser::ParseUniqueFormalParameters() {return nullptr;}
+Ast* Parser::ParseFormalParameters() {return nullptr;}
+Ast* Parser::ParseFormalParameterList() {return nullptr;}
+Ast* Parser::ParseFunctionRestParameter() {return nullptr;}
+Ast* Parser::ParseFormalParameter() {return nullptr;}
+Ast* Parser::ParseFunctionBody() {return nullptr;}
+Ast* Parser::ParseFunctionStatementList() {return nullptr;}
+Expression* Parser::ParseArrowFunction() {return nullptr;}
+Expression* Parser::ParseArrowParameters() {return nullptr;}
+Ast* Parser::ParseConciseBody() {return nullptr;}
+Expression* Parser::ParseArrowFormalParameters() {return nullptr;}
+Expression* Parser::ParseAsyncArrowFunction() {return nullptr;}
+Ast* Parser::ParseAsyncConciseBody() {return nullptr;}
+Ast* Parser::ParseAsyncArrowHead() {return nullptr;}
+Ast* Parser::ParseMethodDefinition() {return nullptr;}
+Ast* Parser::ParsePropertySetParameterList() {return nullptr;}
+Ast* Parser::ParseGeneratorMethod() {return nullptr;}
+Ast* Parser::ParseGeneratorDeclaration() {return nullptr;}
+Ast* Parser::ParseGeneratorExpression() {return nullptr;}
+Ast* Parser::ParseGeneratorBody() {return nullptr;}
+Expression* Parser::ParseYieldExpression() {return nullptr;}
+Ast* Parser::ParseAsyncMethod() {return nullptr;}
+Ast* Parser::ParseAsyncFunctionDeclaration() {return nullptr;}
+Expression* Parser::ParseAsyncFunctionExpression() {return nullptr;}
+Ast* Parser::ParseAsyncFunctionBody() {return nullptr;}
+Expression* Parser::ParseAwaitExpression() {return nullptr;}
+Ast* Parser::ParseClassDeclaration() {return nullptr;}
+Ast* Parser::ParseClassExpression() {return nullptr;}
+Ast* Parser::ParseClassTail() {return nullptr;}
+Ast* Parser::ParseClassHeritage() {return nullptr;}
+Ast* Parser::ParseClassBody() {return nullptr;}
+Ast* Parser::ParseClassElementList() {return nullptr;}
+Ast* Parser::ParseClassElement() {return nullptr;}
 
 const uint8_t Ast::kStatementFlag;
 const uint8_t Ast::kExpressionFlag;
-}  // namespace i6
+}  // namespace lux

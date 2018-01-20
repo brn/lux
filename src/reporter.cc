@@ -16,16 +16,19 @@
  */
 
 #include "./reporter.h"
+#include "./platform/os.h"
 
-namespace i6 {
-void Reporter::Report(const char* message) {
-  pending_errors_.push_back(std::string(message));
+namespace lux {
+ErrorDescriptor& ErrorReporter::ReportSyntaxError(
+    Shared<ErrorDescriptor> errd) {
+  pending_errors_.push_back(errd);
+  return (*errd) << "SyntaxError";
 }
 
-void Reporter::PrintError() {
+void ErrorReporter::PrintError() {
   if (HasPendingError()) {
     auto e = pending_errors_.back();
-    printf("%s\n", e.c_str());
+    Printf("%s\n", e->message().c_str());
   }
 }
-}  // namespace i6
+}  // namespace lux

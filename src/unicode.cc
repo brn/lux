@@ -20,14 +20,22 @@
 #include "./unicode.h"
 #include "./utils.h"
 
-namespace i6 {
+namespace lux {
 template<std::size_t N, typename CharT>
 inline CharT Mask(CharT ch) {
   return Bitmask<N, u32>::lower & ch;
 }
 
+std::string Utf16CodePoint::ToUtf8String() const {
+  return std::string(Unicode::ConvertUC32ToUC8(u_).data());
+}
+
 class Utf8CodePoint {
  public:
+  LUX_INLINE static bool IsNotNull(u8 c) {
+    return c != 0;
+  }
+
   explicit Utf8CodePoint(u8 u)
       : u_(u) {}
 
@@ -50,7 +58,7 @@ class Utf8CodePoint {
 class Utf8Iterator {
  public:
   explicit Utf8Iterator(const char* str):
-      str_(str), len_(strlen(str)) {}
+      str_(str), len_(strlen(str)), index_(0) {}
 
   Utf8CodePoint Next() {
     if (HasMore()) {
@@ -60,7 +68,14 @@ class Utf8Iterator {
   }
 
   Utf8CodePoint Current() {
-    return Utf8CodePoint(str_[index_]);
+    return Utf8CodePoint(str_[index_ > 0? index_ - 1: index_]);
+  }
+
+  Utf8CodePoint Peek(int n = 0) {
+    if (index_ + n < len_) {
+      return Utf8CodePoint(str_[index_ + n]);
+    }
+    return Utf8CodePoint(0);
   }
 
   bool HasMore() {
@@ -73,62 +88,86 @@ class Utf8Iterator {
   int32_t index_;
 };
 
-int8_t GetU8Length(u8 u) {
-  auto length_bit = Mask<8>(u);
-  if (length_bit < 0x80) {
-    return 1;
-  } else if ((length_bit >> 5) == 0x6) {
-    return 2;
-  } else if ((length_bit >> 4) == 0xE) {
-    return 3;
-  } else if ((length_bit >> 4) == 0x1E) {
-    return 4;
+u32 Convert2ByteUtf8ToUC32(Utf8Iterator* it) {
+  auto c = it->Current().code();
+  if (Utf8CodePoint::IsNotNull(c)) {
+    u32 ret = Mask<5>(it->Current().code()) << 6;
+    c = it->Next().code();
+    if (utf8::IsValidSequence(c)) {
+      ret |= Mask<6>(c);
+      return ret;
+    }
   }
   return 0;
 }
 
-u32 ConvertUtf8ToUC32Case2(Utf8Iterator* it) {
-  u32 ret = Mask<5>(it->Current().code()) << 6;
-  ret |= Mask<6>(it->Next().code());
-  return ret;
+u32 Convert3ByteUtf8ToUC32(Utf8Iterator* it) {
+  const int kMinimumRange = 0x00000800;
+  auto c = it->Current().code();
+  if (Utf8CodePoint::IsNotNull(c)) {
+    u32 ret = Mask<4>(c) << 12;
+    c = it->Next().code();
+    if (utf8::IsValidSequence(c)) {
+      ret |= Mask<6>(c) << 6;
+      c = it->Next().code();
+      if (utf8::IsValidSequence(c)) {
+        ret |= Mask<6>(c);
+        if (ret > kMinimumRange && utf16::IsOutOfSurrogateRange(ret)) {
+          return ret;
+        }
+      }
+    }
+  }
+  return 0;
 }
 
-u32 ConvertUtf8ToUC32Case3(Utf8Iterator* it) {
-  u32 ret = Mask<4>(it->Current().code()) << 12;
-  ret |= Mask<6>(it->Next().code()) << 6;
-  ret |= Mask<6>(it->Next().code());
-  return ret;
-}
-
-u32 ConvertUtf8ToUC32Case4(Utf8Iterator* it) {
-  u32 ret = Mask<3>(it->Current().code()) << 18;
-  ret |= Mask<6>(it->Next().code()) << 12;
-  ret |= Mask<6>(it->Next().code()) << 6;
-  ret |= Mask<6>(it->Next().code());
-  return ret;
+u32 Convert4ByteUtf8ToUC32(Utf8Iterator* it) {
+  const int kMinimumRange = 0x000010000;
+  auto c = it->Current().code();
+  if (Utf8CodePoint::IsNotNull(c)) {
+    u32 next = Mask<3>(c) << 18;
+    c = it->Next().code();
+    if (utf8::IsValidSequence(c)) {
+      next |= Mask<6>(c) << 12;
+      c = it->Next().code();
+      if (utf8::IsValidSequence(c)) {
+        next |= Mask<6>(c) << 6;
+        c = it->Next().code();
+        if (utf8::IsValidSequence(c)) {
+          next |= Mask<6>(c);
+          if (next >= kMinimumRange && next <= 0x10FFFF) {
+            return next;
+          }
+        }
+      }
+    }
+  }
+  return 0;
 }
 
 u32 ConverUtf8ToUC32(Utf8Iterator* it) {
-  int len = GetU8Length(it->Next().code());
+  int len = utf8::GetByteCount(it->Next().code());
   switch (len) {
     case 1:
       return Mask<8>(it->Current().code());
     case 2:
-      return ConvertUtf8ToUC32Case2(it);
+      return Convert2ByteUtf8ToUC32(it);
     case 3:
-      return ConvertUtf8ToUC32Case3(it);
+      return Convert3ByteUtf8ToUC32(it);
     case 4:
-      return ConvertUtf8ToUC32Case4(it);
+      return Convert4ByteUtf8ToUC32(it);
     default:
       return 0;
   }
 }
 
-void ConvertUtf8ToUtf16(Utf8Iterator* it, Utf16CodePoint* buf, int32_t* index) {
+bool ConvertUtf8ToUtf16(Utf8Iterator* it, Utf16CodePoint* buf, int32_t* index) {
   u32 u = ConverUtf8ToUC32(it);
   if (u > 0) {
     buf[(*index)++] = Utf16CodePoint(u);
+    return true;
   }
+  return false;
 }
 
 const Utf16CodePoint& Utf16StringIterator::operator*() const {
@@ -154,19 +193,60 @@ bool Utf16String::IsAsciiEqual(const char* ascii) const {
   return true;
 }
 
+std::string Utf16String::ToUtf8String() const {
+  std::stringstream st;
+  for (int i = 0; i < size_; i++) {
+    st << utf16_codepoint_[i].ToUtf8String();
+  }
+  return st.str();
+}
+
+static const size_t kUtf16CodePointSize = sizeof(Utf16CodePoint);
+
 const Utf16String Unicode::ConvertUtf8StringToUtf16String(
     Isolate* isolate, const char* str) {
-  const int kUtf16CodePointSize = sizeof(Utf16CodePoint);
   auto buf = reinterpret_cast<Utf16CodePoint*>(
-      isolate->heap()->Allocate(strlen(str) * kUtf16CodePointSize
-                                + kUtf16CodePointSize));
+      isolate->heap()->Allocate((strlen(str) * kUtf16CodePointSize)
+                                + (kUtf16CodePointSize * 2)));
   Utf8Iterator it(str);
   int index = 0;
   while (it.HasMore()) {
-    ConvertUtf8ToUtf16(&it, buf, &index);
+    if (!ConvertUtf8ToUtf16(&it, buf, &index)) {
+      break;
+    }
   }
   buf[index + 1] = Utf16CodePoint();
-
   return Utf16String(buf, index);
 }
-}  // namespace i6
+
+unicode::Utf8Bytes Unicode::ConvertUC32ToUC8(u32 uc) {
+  unicode::Utf8Bytes b;
+#define U8(v) static_cast<u8>(v)
+  if (uc < 0x80) {
+    // 0000 0000-0000 007F | 0xxxxxxx
+    b[0] = uc;
+    b[1] = '\0';
+  } else if (uc < 0x800) {
+    // 0000 0080-0000 07FF | 110xxxxx 10xxxxxx
+    b[0] = (uc >> 6) | 0xC0;
+    b[1] = (uc & 0x3F) | 0x80;
+    b[2] = '\0';
+  } else if (uc < 0x10000) {
+    // 0000 0800-0000 FFFF | 1110xxxx 10xxxxxx 10xxxxxx
+    b[0] = (uc >> 12) | 0xE0;
+      b[1] = ((uc >> 6) & 0x3F) | 0x80;
+    b[2] = (uc & 0x3F) | 0x80;
+    b[3] = '\0';
+  } else {
+    INVALIDATE(uc <= unicode::kUnicodeMax);
+    // 0001 0000-0010 FFFF | 11110xxx 10xxxxxx 10xxxxxx 10xxxxxx
+    b[0] = U8((uc >> 18) | 0xF0);
+    b[1] = U8(((uc >> 12) & 0x3F) | 0x80);
+    b[2] = U8(((uc >> 6) & 0x3F) | 0x80);
+    b[3] = U8((uc & 0x3F) | 0x80);
+    b[4] = '\0';
+  }
+#undef U8
+  return b;
+}
+}  // namespace lux

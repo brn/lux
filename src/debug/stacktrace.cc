@@ -23,7 +23,7 @@
 #include <dlfcn.h>
 #include <stdlib.h>
 
-namespace i6 {
+namespace lux {
 namespace debug {
 
 #define MAX_DEPTH 32
@@ -65,4 +65,4 @@ StackTrace::StackTrace(int num_discards) {
 }
 
 }  // namespace debug
-}  // namespace i6
+}  // namespace lux

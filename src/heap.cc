@@ -17,31 +17,48 @@
 
 #include <sys/mman.h>
 #include "./heap.h"
+#include "./platform/os.h"
 
-namespace i6 {
+namespace lux {
 Address MMap(size_t size) {
-  return reinterpret_cast<Address>(mmap(
+  auto ret = mmap(
       nullptr,
       size,
-      PROT_READ | PROT_WRITE | PROT_EXEC ,
-      MAP_ANON | MAP_PRIVATE,
-      -1, 0));
+      PROT_READ | PROT_WRITE | PROT_EXEC,
+      MAP_ANONYMOUS | MAP_PRIVATE,
+      -1, 0);
+  if (ret == reinterpret_cast<void*>(-1)) {
+    std::string b;
+    GetLastError(&b);
+    FATAL(b.c_str());
+  }
+#ifdef DEBUG
+  memset(ret, 0xCE, size);
+  mprotect(ret, size, PROT_NONE);
+#endif
+  return reinterpret_cast<Address>(ret);
 }
 
 Heap::Heap(size_t default_size)
-    : size_(default_size) {
+    : size_(default_size), used_(0) {
   arena_ = MMap(default_size);
 }
 
 Address Heap::Allocate(size_t size) {
-  if (size_ - used_ >= size) {
-    Address ret = arena_;
-    arena_ += size;
-    used_ += size;
-    return ret;
+  size = LUX_ALIGN_OFFSET(size, kAlignment);
+  while (1) {
+    if (size_ - used_ > size) {
+#ifdef DEBUG
+      mprotect(arena_, size, PROT_READ | PROT_WRITE | PROT_EXEC);
+#endif
+      INVALIDATE(*arena_ == 0xCE);
+      Address ret = arena_;
+      arena_ += size;
+      used_ += size;
+      return ret;
+    }
+    Grow();
   }
-  Grow();
-  return Allocate(size);
 }
 
 Heap* Heap::GetHeap() {
@@ -54,7 +71,17 @@ Heap* Heap::GetHeap() {
 Heap* Heap::heap_ = nullptr;
 
 void Heap::Grow() {
-  size_ = size_ * 2;
-  arena_ = MMap(size_);
+  puts("Grow");
+  auto before_size = size_;
+  size_ *= 2;
+  auto n = reinterpret_cast<Address>(MMap(size_));
+  memcpy(n, arena_, before_size);
+  munmap(arena_, before_size);
+  arena_ = n;
+#ifdef DEBUG
+  mprotect(arena_, used_, PROT_READ | PROT_WRITE | PROT_EXEC);
+#endif
 }
-}  // namespace i6
+
+const size_t Heap::kDefaultSize;
+}  // namespace lux

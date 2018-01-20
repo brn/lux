@@ -15,14 +15,14 @@
  * @author Taketoshi Aono
  */
 
-#ifndef _I6_SRC_STACKTRACE_H_
-#define _I6_SRC_STACKTRACE_H_
+#ifndef SRC_STACKTRACE_H_
+#define SRC_STACKTRACE_H_
 
 #include <sstream>
 #include <string>
 #include <vector>
 
-namespace i6 {
+namespace lux {
 namespace debug {
 
 // Based on https://sourceforge.net/p/stacktrace/code/HEAD/tree/stacktrace/
@@ -57,6 +57,6 @@ class StackTrace {
   std::vector<Entry> stack_;
 };
 }  // namespace debug
-}  // namespace i6
+}  // namespace lux
 
-#endif  // _I6_SRC_STACKTRACE_H_
+#endif  // SRC_STACKTRACE_H_

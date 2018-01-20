@@ -18,12 +18,16 @@
 #include "./heap.h"
 #include "./isolate.h"
 
-namespace i6 {
+namespace lux {
+Isolate* Isolate::GetPerThreadInstance() {
+  static thread_local Isolate isolate;
+  isolate.InitOnce();
+  return &isolate;
+}
+
 void Isolate::InitOnce() {
   if (!once_flag_.test_and_set()) {
     heap_ = new Heap();
   }
 }
-
-std::atomic_flag Isolate::once_flag_;
-}  // namespace i6
+}  // namespace lux

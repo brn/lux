@@ -17,38 +17,11 @@
 
 #include "./node.h"
 
-namespace i6 {
-ZoneAllocator::ZoneAllocator()
-    : remains_(kDefaultSize), current_size_(kDefaultSize) {
-  addr_ = reinterpret_cast<Address>(malloc(sizeof(kDefaultSize)));
-}
-
-Address ZoneAllocator::Allocate(size_t size) {
-  while (remains_ < size) {
-    Grow();
-  }
-  auto n = addr_;
-  addr_ += size;
-  remains_ -= size;
-  return n;
-}
-
-void ZoneAllocator::Grow() {
-  auto before_size = current_size_;
-  current_size_ += kDefaultSize;
-  remains_ += kDefaultSize;
-  auto n = reinterpret_cast<Address>(malloc(current_size_));
-  memcpy(n, addr_, before_size);
-  free(addr_);
-  addr_ = n;
-}
-
-const int32_t ZoneAllocator::kDefaultSize;
-
+namespace lux {
 template <typename Type>
 const uint8_t Node<Type>::kNodeSize;
 template <typename Type>
 const uint8_t Node<Type>::kSizeFieldOffset;
 template <typename Type>
 const uint8_t Node<Type>::kTypeFieldOffset;
-}  // namespace i6
+}  // namespace lux

@@ -15,18 +15,19 @@
  * @author Taketoshi Aono
  */
 
-#include <gtest/gtest.h>
-#include "../isolate.h"
-#include "../unicode.h"
-#include "../reporter.h"
-#include "../parser.h"
+#ifndef TEST_UTILS_ISOLATE_SETUP_H_
+#define TEST_UTILS_ISOLATE_SETUP_H_
 
-namespace {
-TEST(ParserTest, Basic) {
-  i6::Isolate isolate;
-  isolate.InitOnce();
-  auto x = i6::Unicode::ConvertUtf8StringToUtf16String(&isolate, "test value");
-  i6::Reporter r;
-  i6::Parser parser(&x, &r);
-}
-}
+#include "../../src/isolate.h"
+
+namespace lux {
+class IsolateSetup: public ::testing::Test {
+ protected:
+  virtual void SetUp() {
+    isolate_ = Isolate::GetPerThreadInstance();
+  }
+  Isolate* isolate_;
+};
+}  // namespace lux
+
+#endif  // TEST_UTILS_ISOLATE_SETUP_H_

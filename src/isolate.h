@@ -16,26 +16,29 @@
  */
 
 
-#ifndef _I6_SRC_ISOLATE_H_
-#define _I6_SRC_ISOLATE_H_
+#ifndef SRC_ISOLATE_H_
+#define SRC_ISOLATE_H_
 
 #include <atomic>
+#include "./utils.h"
 
-namespace i6 {
+namespace lux {
 class Heap;
 
 class Isolate {
  public:
+  static Isolate* GetPerThreadInstance();
+
   Heap* heap() const {
     return heap_;
   }
 
+ private:
   void InitOnce();
 
- private:
-  static std::atomic_flag once_flag_;
   Heap* heap_;
+  std::atomic_flag once_flag_;
 };
-}  // namespace i6
+}  // namespace lux
 
-#endif  // _I6_SRC_ISOLATE_H_
+#endif  // SRC_ISOLATE_H_

@@ -15,28 +15,19 @@
  * @author Taketoshi Aono
  */
 
-#ifndef SRC_HEAP_H_
-#define SRC_HEAP_H_
+#include <gtest/gtest.h>
+#include "../utils/isolate_setup.h"
+#include "../../src/unicode.h"
+#include "../../src/reporter.h"
+#include "../../src/parser.h"
 
-#include "./utils.h"
+class ParserTest: public lux::IsolateSetup {};
 
-namespace lux {
-class Heap {
- public:
-  explicit Heap(size_t default_size_ = kDefaultSize);
-  Address Allocate(size_t size);
-  static Heap* GetHeap();
-
-  static const size_t kDefaultSize = 1 MB;
-
- private:
-  void Grow();
-
-  size_t size_;
-  size_t used_;
-  Address arena_;
-  static Heap* heap_;
-};
-}  // namespace lux
-
-#endif  // SRC_HEAP_H_
+namespace {
+TEST_F(ParserTest, Basic) {
+  auto x = lux::Unicode::ConvertUtf8StringToUtf16String(
+      isolate_, "test value");
+  lux::ErrorReporter r;
+  lux::Parser parser(&x, &r);
+}
+}

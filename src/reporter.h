@@ -15,26 +15,72 @@
  * @author Taketoshi Aono
  */
 
-#ifndef _I6_SRC_REPORTER_H_
-#define _I6_SRC_REPORTER_H_
+#ifndef SRC_REPORTER_H_
+#define SRC_REPORTER_H_
 
+#include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
-namespace i6 {
-class Reporter {
+#include "./source_position.h"
+
+namespace lux {
+
+class ErrorDescriptor {
  public:
-  void Report(const char* message);
+  ErrorDescriptor()
+      : ignore_(true) {}
+
+  explicit ErrorDescriptor(const SourcePosition& source_position)
+      : ignore_(false),
+        source_position_(source_position) {}
+
+  ErrorDescriptor(ErrorDescriptor&& error_descriptor)
+      : ignore_(error_descriptor.ignore_),
+        source_position_(std::move(error_descriptor.source_position_)),
+        error_message_(std::move(error_descriptor.error_message_)) {}
+
+
+  template <typename T>
+  ErrorDescriptor& operator << (T&& message) {
+    if (!ignore_) {
+      error_message_ << message;
+    }
+    return *this;
+  }
+
+  std::string message() const {
+    return error_message_.str();
+  }
+
+  const SourcePosition& source_positon() const {
+    return source_position_;
+  }
+
+ private:
+  bool ignore_;
+  SourcePosition source_position_;
+  std::stringstream error_message_;
+};
+
+class ErrorReporter {
+ public:
+  ErrorDescriptor& ReportSyntaxError(Shared<ErrorDescriptor>);
 
   void PrintError();
 
   bool HasPendingError() const {
-    return pending_errors_.size() > 0;
+    return size() > 0;
+  }
+
+  size_t size() const {
+    return pending_errors_.size();
   }
 
  private:
-  std::vector<std::string> pending_errors_;
+  std::vector<Shared<ErrorDescriptor>> pending_errors_;
 };
-}  // namespace i6
+}  // namespace lux
 
-#endif  // _I6_SRC_REPORTER_H_
+#endif  // SRC_REPORTER_H_

@@ -15,14 +15,16 @@
  * @author Taketoshi Aono
  */
 
-#ifndef _I6_SRC_UTILS_H_
-#define _I6_SRC_UTILS_H_
+#ifndef SRC_UTILS_H_
+#define SRC_UTILS_H_
 
 #include <stdint.h>
 
 #include <memory>
 
-namespace i6 {
+#include "./debug/stacktrace.h"
+
+namespace lux {
 
 #define KB * 1024
 #define MB KB * 1024
@@ -31,23 +33,34 @@ typedef uint8_t u8;
 typedef uint16_t u16;
 typedef uint32_t u32;
 
+typedef uint8_t Byte;
+#ifdef PLATFORM_64BIT
+typedef uint64_t Pointer;
+#elif defined(PLATFORM_32BIT)
+typedef uint32_t Pointer;
+#endif
+
+static const size_t kAlignment = sizeof(void*);
+static const size_t kPointerSize = kAlignment;
+static const size_t kSizeTSize = sizeof(size_t);
+
+
+#define LUX_ALIGN_OFFSET(offset, alignment)           \
+  (offset + (alignment - 1)) & ~(alignment - 1)
+
 #ifdef DEBUG
-void Invalidate(bool cond, const char* message) {
+inline void Invalidate(bool cond, const char* message) {
   if (!cond) {
     printf("%s is not valid\n", message);
-    debug::StackTrace st;
+    lux::debug::StackTrace st;
     st.Print();
     exit(1);
   }
 }
-#define INVALIDATE(cond) Invalidate(cond, #cond)
-void Unreachable() {
-  puts("UNREACHABLE!!");
-  debug::StackTrace st;
-  st.Print();
-  exit(1);
-}
-#define UNREACHABLE() Unreachable()
+#define INVALIDATE(cond) lux::Invalidate(cond, #cond)
+#define FATAL(message) lux::Invalidate(false, message);
+#define UNREACHABLE() FATAL("Unreachable block executed.");
+
 #else
 #define INVALIDATE(cond)
 #define UNREACHABLE()
@@ -62,16 +75,128 @@ struct Use__ {
 };
 #define USE(...)                                         \
   do {                                                   \
-    i6::Use__ unused_tmp_array_for_use_macro[]{__VA_ARGS__};  \
+    lux::Use__ unused_tmp_array_for_use_macro[]{__VA_ARGS__};  \
     (void)unused_tmp_array_for_use_macro;                \
   } while (false)
+
+/**
+ * Inline macro.
+ */
+#if !defined(DEBUG) && defined(HAVE_FORCE_INLINE)
+#define LUX_INLINE inline __forceinline __declspec(nothrow)
+#elif !defined(DEBUG) && defined(HAVE_INLINE_ATTRIUTE)
+#define LUX_INLINE inline __attribute__((always_inline))
+#else
+#define LUX_INLINE inline
+#endif
+
+template <typename T>
+class LuxScoped__ {
+ public:
+  explicit LuxScoped__(T cb)
+      : cb_(cb) {}
+
+  ~LuxScoped__() {
+    cb_();
+  }
+
+ private:
+  T cb_;
+};
+
+#define LUX_SCOPED_INNER__L(exit_function, line)          \
+  auto exit_function_of_scope##line = exit_function;      \
+  LuxScoped__<decltype(exit_function_of_scope##line)>   \
+  lux_scoped_once##line(exit_function_of_scope##line);
+#define LUX_SCOPED_INNER__(exit_function, line) \
+  LUX_SCOPED_INNER__L(exit_function, line);
+#define LUX_SCOPED(exit_function)               \
+  LUX_SCOPED_INNER__(exit_function, __LINE__)
+
+#ifdef LUX_TEST
+#define VISIBLE_FOR_TESTING public
+#else
+#define VISIBLE_FOR_TESTING private
+#endif
+
+#define LUX_GETTER(type, name, field)                    \
+  LUX_INLINE type name() { return field; }
+
+#define LUX_CONST_GETTER(type, name, field)            \
+  LUX_INLINE type name() const { return field; }
+
+
+#define LUX_SETTER(type, name, field)                              \
+  LUX_INLINE void set_##name(type name) { field = name; }
+
+
+#define LUX_PROPERTY(type, name, field)        \
+  LUX_GETTER(type, name, field)                \
+  LUX_SETTER(type, name, field)
+
+
+#define LUX_CONST_PROPERTY(type, name, field)        \
+  LUX_CONST_GETTER(type, name, field)                \
+  LUX_SETTER(type, name, field)
+
+template <typename T>
+class Bitset {
+ public:
+  void set(uint32_t index) {
+    bit_field_ |= (~(0x1 << index));
+  }
+
+  void assign(uint32_t bit_value) {
+    bit_field_ = bit_value;
+  }
+
+  bool get(uint32_t index) const {
+    return bit_field_ & (~(0x1 << index));
+  }
+
+ private:
+  T bit_field_;
+};
+
+/**
+ * Class traits.
+ * Represent class which is not allowed to instantiation.
+ */
+class Static {
+  Static() = delete;
+  Static(const Static&) = delete;
+  Static(Static&&) = delete;
+  Static& operator = (const Static&) = delete;
+};
+
+
+/**
+ * Class traits.
+ * Represent class which is not allowed to copy.
+ */
+class Uncopyable {
+ public:
+  Uncopyable() = default;
+  virtual ~Uncopyable() = default;
+  Uncopyable(const Uncopyable&) = delete;
+  Uncopyable& operator = (const Uncopyable&) = delete;
+};
+
+
+class Unmovable {
+ public:
+  Unmovable() = default;
+  virtual ~Unmovable() = default;
+  Unmovable(Unmovable&&) = delete;
+  Unmovable& operator = (Unmovable&&) = delete;
+};
 
 template <typename T>
 using Shared = std::shared_ptr<T>;
 
-typedef char byte;
+typedef uint8_t byte;
 
-typedef char* Address;
+typedef byte* Address;
 
 template <int LowerBits, typename Type = uint32_t>
 class Bitmask {
@@ -158,6 +283,6 @@ class LazyInitializer {
   Address heap_[sizeof(T) + 1];
   T* ptr_;
 };
-}  // namespace i6
+}  // namespace lux
 
-#endif  // _I6_SRC_UTILS_H_
+#endif  // SRC_UTILS_H_

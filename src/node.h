@@ -15,13 +15,13 @@
  * @author Taketoshi Aono
  */
 
-#ifndef _I6_SRC_NODE_H_
-#define _I6_SRC_NODE_H_
+#ifndef SRC_NODE_H_
+#define SRC_NODE_H_
 
 #include <stdint.h>
 #include "./utils.h"
 
-namespace i6 {
+namespace lux {
 #define FIELD_ADDR(p, offset)                             \
   (reinterpret_cast<Address>(p) + offset)
 
@@ -76,6 +76,6 @@ class Node {
     *(FIELD_ADDR(this, 0)) = size;
   }
 };
-}  // namespace i6
+}  // namespace lux
 
-#endif  // _I6_SRC_NODE_H_
+#endif  // SRC_NODE_H_
