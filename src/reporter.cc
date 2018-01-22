@@ -22,7 +22,7 @@ namespace lux {
 ErrorDescriptor& ErrorReporter::ReportSyntaxError(
     Shared<ErrorDescriptor> errd) {
   pending_errors_.push_back(errd);
-  return (*errd) << "SyntaxError";
+  return (*errd) << "SyntaxError: ";
 }
 
 void ErrorReporter::PrintError() {

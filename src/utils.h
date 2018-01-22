@@ -143,7 +143,11 @@ template <typename T>
 class Bitset {
  public:
   void set(uint32_t index) {
-    bit_field_ |= (~(0x1 << index));
+    bit_field_ |= (0x1 << index);
+  }
+
+  void unset(uint32_t index) {
+    bit_field_ &= ~((0x1 << index));
   }
 
   void assign(uint32_t bit_value) {
@@ -152,6 +156,11 @@ class Bitset {
 
   bool get(uint32_t index) const {
     return bit_field_ & (~(0x1 << index));
+  }
+
+  template <typename R = T>
+  R mask(T mask) const {
+    return static_cast<R>(bit_field_ & mask);
   }
 
  private:
@@ -169,6 +178,22 @@ class Static {
   Static& operator = (const Static&) = delete;
 };
 
+template <typename T>
+LUX_INLINE T PowerOf2(T x, uint32_t n) {
+  T ret = 1;
+
+  while (0 < n) {
+    if ((n % 2) == 0) {
+      x *= x;
+      n >>= 1;
+    } else {
+      ret *= x;
+      --n;
+    }
+  }
+
+  return ret;
+}
 
 /**
  * Class traits.
@@ -189,6 +214,12 @@ class Unmovable {
   virtual ~Unmovable() = default;
   Unmovable(Unmovable&&) = delete;
   Unmovable& operator = (Unmovable&&) = delete;
+};
+
+class StackObject {
+ private:
+  void* operator new(size_t size);
+  void operator delete(void* ptr);
 };
 
 template <typename T>

@@ -54,7 +54,7 @@ class ErrorDescriptor {
     return error_message_.str();
   }
 
-  const SourcePosition& source_positon() const {
+  const SourcePosition& source_position() const {
     return source_position_;
   }
 
@@ -66,20 +66,30 @@ class ErrorDescriptor {
 
 class ErrorReporter {
  public:
+  using PendingErrors = std::vector<Shared<ErrorDescriptor>>;
+  using iterator = PendingErrors::iterator;
   ErrorDescriptor& ReportSyntaxError(Shared<ErrorDescriptor>);
 
   void PrintError();
 
-  bool HasPendingError() const {
+  LUX_INLINE bool HasPendingError() const {
     return size() > 0;
   }
 
-  size_t size() const {
+  LUX_INLINE size_t size() const {
     return pending_errors_.size();
   }
 
+  LUX_INLINE iterator begin() {
+    return pending_errors_.begin();
+  }
+
+  LUX_INLINE iterator end() {
+    return pending_errors_.end();
+  }
+
  private:
-  std::vector<Shared<ErrorDescriptor>> pending_errors_;
+  PendingErrors pending_errors_;
 };
 }  // namespace lux
 

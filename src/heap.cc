@@ -16,10 +16,15 @@
  */
 
 #include <sys/mman.h>
+#include <string>
 #include "./heap.h"
 #include "./platform/os.h"
 
 namespace lux {
+void HandleScope::register_handle(Handle<HeapObject> handle) {
+  handle_list_.push_back(handle);
+}
+
 Address MMap(size_t size) {
   auto ret = mmap(
       nullptr,
@@ -45,20 +50,22 @@ Heap::Heap(size_t default_size)
 }
 
 Address Heap::Allocate(size_t size) {
-  size = LUX_ALIGN_OFFSET(size, kAlignment);
-  while (1) {
-    if (size_ - used_ > size) {
-#ifdef DEBUG
-      mprotect(arena_, size, PROT_READ | PROT_WRITE | PROT_EXEC);
-#endif
-      INVALIDATE(*arena_ == 0xCE);
-      Address ret = arena_;
-      arena_ += size;
-      used_ += size;
-      return ret;
-    }
-    Grow();
-  }
+//   auto size = sizeof(T);
+//   size = LUX_ALIGN_OFFSET(size, kAlignment);
+//   while (1) {
+//     if (size_ - used_ > size) {
+// #ifdef DEBUG
+//       mprotect(arena_, size, PROT_READ | PROT_WRITE | PROT_EXEC);
+// #endif
+//       INVALIDATE(*arena_ == 0xCE);
+//       Address ret = arena_;
+//       arena_ += size;
+//       used_ += size;
+//       return Handle<T>(ret);
+//     }
+//     Grow();
+//   }
+  return reinterpret_cast<Address>(malloc(size));
 }
 
 Heap* Heap::GetHeap() {
@@ -71,7 +78,6 @@ Heap* Heap::GetHeap() {
 Heap* Heap::heap_ = nullptr;
 
 void Heap::Grow() {
-  puts("Grow");
   auto before_size = size_;
   size_ *= 2;
   auto n = reinterpret_cast<Address>(MMap(size_));

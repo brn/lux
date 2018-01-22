@@ -22,7 +22,6 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
 
   add_executable(parser_test
     src/platform/os.cc
-    src/node.cc
     src/isolate.cc
     src/heap.cc
     src/reporter.cc
@@ -41,13 +40,24 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
     src/debug/stacktrace.cc
     test/cases/unicode_test.cc)
   target_link_libraries(unicode_test libgtest.a libgtest_main.a)
+
+  add_executable(regexp_parse_test
+    src/platform/os.cc
+    src/isolate.cc
+    src/heap.cc
+    src/unicode.cc
+    src/debug/stacktrace.cc
+    src/regexp.cc
+    src/zone.cc
+    src/reporter.cc
+    test/cases/regexp_parse_test.cc)
+  target_link_libraries(regexp_parse_test libgtest.a libgtest_main.a)
 endif()
 
 include_directories(./tools/clang+llvm-5.0.1-final-x86_64-apple-darwin/include/c++/v1)
 add_executable(lux
   src/platform/os.cc
   src/main.cc
-  src/node.cc
   src/heap.cc
   src/reporter.cc
   src/unicode.cc

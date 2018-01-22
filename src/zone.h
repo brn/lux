@@ -32,11 +32,30 @@ class ZoneAllocator {
   static const int32_t kDefaultSize = 1 KB;
   ZoneAllocator();
   Address Allocate(size_t size);
+
  private:
-  void Grow();
-  size_t remains_;
-  size_t current_size_;
-  Address addr_;
+  class Chunk {
+   public:
+    Chunk() = delete;
+    explicit Chunk(size_t size);
+    ~Chunk();
+    Address Allocate(size_t size);
+    LUX_INLINE bool HasEnoughCapacity(size_t size) const {
+      return remains_ >= size;
+    }
+    LUX_INLINE void set_next(Shared<Chunk> next) {
+      next_ = next;
+    }
+   private:
+    void AllocateInternal();
+    Address addr_;
+    Address top_;
+    Shared<Chunk> next_;
+    size_t size_;
+    size_t remains_;
+  };
+  void Grow(size_t size);
+  Shared<Chunk> chunk_;
 };
 
 class Zone {

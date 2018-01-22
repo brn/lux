@@ -62,7 +62,7 @@ class SourcePosition: private Unmovable {
   }
 
 
-  inline bool operator > (const SourcePosition& source_position) {
+  inline bool operator > (const SourcePosition& source_position) const {
     if (start_line_number_ == source_position.start_line_number_) {
       return start_col_ > source_position.start_col_;
     }
@@ -70,7 +70,7 @@ class SourcePosition: private Unmovable {
   }
 
 
-  inline bool operator < (const SourcePosition& source_position) {
+  inline bool operator < (const SourcePosition& source_position) const {
     if (start_line_number_ == source_position.start_line_number_) {
       return start_col_ < source_position.start_col_;
     }
@@ -78,7 +78,7 @@ class SourcePosition: private Unmovable {
   }
 
 
-  inline bool operator >= (const SourcePosition& source_position) {
+  inline bool operator >= (const SourcePosition& source_position) const {
     if (start_line_number_ == source_position.start_line_number_) {
       return start_col_ >= source_position.start_col_;
     }
@@ -86,7 +86,7 @@ class SourcePosition: private Unmovable {
   }
 
 
-  inline bool operator <= (const SourcePosition& source_position) {
+  inline bool operator <= (const SourcePosition& source_position) const {
     if (start_line_number_ == source_position.start_line_number_) {
       return start_col_ <= source_position.start_col_;
     }
@@ -94,7 +94,7 @@ class SourcePosition: private Unmovable {
   }
 
 
-  inline bool operator == (const SourcePosition& source_position) {
+  inline bool operator == (const SourcePosition& source_position) const {
     return start_line_number_ == source_position.start_line_number_ &&
       start_col_ == source_position.start_col_ &&
       end_line_number_ == source_position.end_line_number_ &&
@@ -102,9 +102,21 @@ class SourcePosition: private Unmovable {
   }
 
   LUX_CONST_PROPERTY(size_t, start_col, start_col_)
+  LUX_INLINE void add_start_col(int index = 1) {
+    start_col_ += index;
+  }
   LUX_CONST_PROPERTY(size_t, end_col, end_col_)
+  LUX_INLINE void add_end_col(int index = 1) {
+    end_col_ += index;
+  }
   LUX_CONST_PROPERTY(size_t, start_line_number, start_line_number_)
+  LUX_INLINE void add_start_line_number(int index = 1) {
+    start_line_number_ += index;
+  }
   LUX_CONST_PROPERTY(size_t, end_line_number, end_line_number_)
+  LUX_INLINE void add_end_line_number(int index = 1) {
+    end_line_number_ += index;
+  }
 
  private:
   size_t start_col_;

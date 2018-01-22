@@ -25,6 +25,7 @@
 #include "./isolate.h"
 
 namespace lux {
+
 namespace unicode {
 static const u32 kSurrogateBits = 10;
 static const u32 kHighSurrogateMin = 0xD800;
@@ -45,6 +46,9 @@ static const u32 kUnicodeMin = 0x000000;
 static const u32 kUnicodeMax = 0x10FFFF;
 
 static const u8 kAsciiMax = 0x7F;
+
+static const uint8_t kAsciiNumericStart = 48;
+static const uint8_t kAsciiNumericEnd = 57;
 }  // namespace unicode
 
 /**
@@ -119,7 +123,6 @@ LUX_INLINE bool IsValidSequence(u8 uc) {
  */
 template <typename T>
 LUX_INLINE bool IsAscii(T uc) {return uc >= 0 && uc < unicode::kAsciiMax;}
-
 }  // namespace utf8
 
 /**
@@ -200,6 +203,10 @@ LUX_INLINE bool IsLowSurrogateu16(u16 uc) {
   if (!IsSurrogatePairUC16(uc)) return false;
   return (uc & ~unicode::kLowSurrogateMask)
     == unicode::kLowSurrogateMin;
+}
+
+LUX_INLINE bool IsNumericRange(u16 ch) {
+  return ch >= unicode::kAsciiNumericStart && ch <= unicode::kAsciiNumericEnd;
 }
 }  // namespace utf16
 
@@ -286,11 +293,14 @@ class Utf16StringIterator:
     if (index_ < size_) {
       index_++;
     }
+
     return *this;
   }
 
   LUX_INLINE Utf16StringIterator operator++(int value) {
-    return Utf16StringIterator(utf16_codepoint_, index_ + value, size_);
+    Utf16StringIterator tmp = *this;
+    ++*this;
+    return tmp;
   }
 
   LUX_INLINE Utf16StringIterator operator+(int value) {
@@ -318,7 +328,29 @@ class Utf16StringIterator:
 
 class Utf16String {
  public:
+  class ParseIntResult {
+   public:
+    explicit ParseIntResult(uint64_t ret)
+        : result_(ret) {}
+
+    bool IsNaN() const {
+      return (result_ & 0x1) == 1;
+    }
+    uint64_t value() const {
+      return result_ >> 1;
+    }
+    static ParseIntResult Failure() {
+      static ParseIntResult a(1);
+      return a;
+    }
+   private:
+    uint64_t result_;
+  };
+
   using iterator = Utf16StringIterator;
+  Utf16String()
+      : size_(0), utf16_codepoint_(nullptr) {}
+
   explicit Utf16String(const Utf16CodePoint* utf16_codepoint, size_t size)
       : size_(size), utf16_codepoint_(utf16_codepoint) {}
 
@@ -330,11 +362,52 @@ class Utf16String {
     return Utf16StringIterator(utf16_codepoint_, size_, size_);
   }
 
+  LUX_INLINE Utf16StringIterator begin() const {
+    return Utf16StringIterator(utf16_codepoint_, size_);
+  }
+
+  LUX_INLINE Utf16StringIterator end() const {
+    return Utf16StringIterator(utf16_codepoint_, size_, size_);
+  }
+
+  LUX_INLINE Utf16StringIterator cbegin() const {
+    return begin();
+  }
+
+  LUX_INLINE Utf16StringIterator cend() const {
+    return end();
+  }
+
   bool IsAsciiEqual(const char* ascii) const;
 
   LUX_INLINE int32_t size() const {return size_;}
 
   std::string ToUtf8String() const;
+
+  ParseIntResult ParseInt() const {
+    static const std::array<int, 10> kAsciiNumericArray = {{
+        0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+      }};
+
+    uint64_t acc = 0;
+    bool parsed = false;
+    int i = 0;
+    for (auto &ch : *this) {
+      if (utf16::IsNumericRange(ch.code())) {
+        acc += PowerOf2<uint64_t>(10, i++)
+          * kAsciiNumericArray[ch.code() - unicode::kAsciiNumericStart];
+        parsed = true;
+      } else {
+        if (!parsed) {
+          return ParseIntResult(1);
+        }
+        return ParseIntResult(acc << 1);
+        break;
+      }
+    }
+
+    return ParseIntResult(acc << 1);
+  }
 
  private:
   static Utf16StringIterator kEnd;

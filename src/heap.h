@@ -18,9 +18,65 @@
 #ifndef SRC_HEAP_H_
 #define SRC_HEAP_H_
 
+#include <vector>
 #include "./utils.h"
 
 namespace lux {
+class HandleScope;
+template <typename T>
+class Handle;
+
+class HeapObject {
+};
+class HandleScopeList {
+ public:
+  void Push(HandleScope* scope) {
+    scope_list_.push_back(scope);
+  }
+  void Pop() {
+    scope_list_.pop_back();
+  }
+  LUX_INLINE HandleScope* last() { return scope_list_.back(); }
+ private:
+  std::vector<HandleScope*> scope_list_;
+};
+
+class HandleScope: private StackObject {
+ public:
+  HandleScope() {
+    current_scope_list()->Push(this);
+  }
+  ~HandleScope() {
+    current_scope_list()->Pop();
+  }
+  LUX_INLINE static void register_handle(Handle<HeapObject> handle);
+ private:
+  LUX_INLINE static HandleScope* current_handle_scope() {
+    return current_scope_list()->last();
+  }
+  LUX_INLINE static HandleScopeList* current_scope_list() {
+    static thread_local HandleScopeList scope_list;
+    return &scope_list;
+  }
+
+  static std::vector<Handle<HeapObject>> handle_list_;
+};
+
+template <typename T>
+class Handle {
+ public:
+  explicit Handle(T** ptr)
+      : ptr_(ptr) {
+    HandleScope::register_handle(*this);
+  }
+
+  T& operator->() {
+    return **ptr_;
+  }
+ private:
+  T** ptr_;
+};
+
 class Heap {
  public:
   explicit Heap(size_t default_size_ = kDefaultSize);
