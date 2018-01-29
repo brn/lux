@@ -21,9 +21,7 @@
 #include "./platform/os.h"
 
 namespace lux {
-void HandleScope::register_handle(Handle<HeapObject> handle) {
-  handle_list_.push_back(handle);
-}
+HandleScope::HandleSet HandleScope::handle_set_;
 
 Address MMap(size_t size) {
   auto ret = mmap(

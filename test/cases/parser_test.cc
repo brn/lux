@@ -25,8 +25,7 @@ class ParserTest: public lux::IsolateSetup {};
 
 namespace {
 TEST_F(ParserTest, Basic) {
-  auto x = lux::Unicode::ConvertUtf8StringToUtf16String(
-      isolate_, "test value");
+  auto x = lux::Unicode::ConvertUtf8StringToUtf16String("test value");
   lux::ErrorReporter r;
   lux::Parser parser(&x, &r);
 }

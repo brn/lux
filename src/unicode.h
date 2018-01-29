@@ -20,9 +20,10 @@
 
 #include <array>
 #include <iterator>
+#include <iostream>
 #include <string>
+#include <memory>
 #include "./utils.h"
-#include "./isolate.h"
 
 namespace lux {
 
@@ -349,25 +350,31 @@ class Utf16String {
 
   using iterator = Utf16StringIterator;
   Utf16String()
-      : size_(0), utf16_codepoint_(nullptr) {}
+      : size_(0) {}
 
   explicit Utf16String(const Utf16CodePoint* utf16_codepoint, size_t size)
-      : size_(size), utf16_codepoint_(utf16_codepoint) {}
+      : size_(size),
+        utf16_codepoint_(
+            std::shared_ptr<const Utf16CodePoint>(utf16_codepoint)) {}
+
+  LUX_INLINE const Utf16CodePoint* data() const {
+    return utf16_codepoint_.get();
+  }
 
   LUX_INLINE Utf16StringIterator begin() {
-    return Utf16StringIterator(utf16_codepoint_, size_);
+    return Utf16StringIterator(utf16_codepoint_.get(), size_);
   }
 
   LUX_INLINE Utf16StringIterator end() {
-    return Utf16StringIterator(utf16_codepoint_, size_, size_);
+    return Utf16StringIterator(utf16_codepoint_.get(), size_, size_);
   }
 
   LUX_INLINE Utf16StringIterator begin() const {
-    return Utf16StringIterator(utf16_codepoint_, size_);
+    return Utf16StringIterator(utf16_codepoint_.get(), size_);
   }
 
   LUX_INLINE Utf16StringIterator end() const {
-    return Utf16StringIterator(utf16_codepoint_, size_, size_);
+    return Utf16StringIterator(utf16_codepoint_.get(), size_, size_);
   }
 
   LUX_INLINE Utf16StringIterator cbegin() const {
@@ -413,7 +420,7 @@ class Utf16String {
   static Utf16StringIterator kEnd;
 
   int32_t size_;
-  const Utf16CodePoint* utf16_codepoint_;
+  Shared<const Utf16CodePoint> utf16_codepoint_;
 };
 
 class Unicode: private Static {
@@ -423,12 +430,17 @@ class Unicode: private Static {
     return invalid;
   }
 
-  static const Utf16String ConvertUtf8StringToUtf16String(
-      Isolate* isolate, const char*);
+  static const Utf16String ConvertUtf8StringToUtf16String(const char*);
 
   static unicode::Utf8Bytes ConvertUC32ToUC8(u32 uc);
 };
 
 }  // namespace lux
+
+inline std::ostream& operator<<(std::ostream& stream,
+                                const lux::Utf16String& value) {
+  stream << value.ToUtf8String();
+  return stream;
+}
 
 #endif  // SRC_UNICODE_H_

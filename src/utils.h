@@ -35,9 +35,13 @@ typedef uint32_t u32;
 
 typedef uint8_t Byte;
 #ifdef PLATFORM_64BIT
-typedef uint64_t Pointer;
+using Pointer = uint64_t;
+using smi_t = uint64_t;
 #elif defined(PLATFORM_32BIT)
-typedef uint32_t Pointer;
+using Pointer = uint32_t;
+using smi_t = uint32_t;
+#else
+#error Unsupported platform
 #endif
 
 static const size_t kAlignment = sizeof(void*);
@@ -48,17 +52,28 @@ static const size_t kSizeTSize = sizeof(size_t);
 #define LUX_ALIGN_OFFSET(offset, alignment)           \
   (offset + (alignment - 1)) & ~(alignment - 1)
 
-#ifdef DEBUG
-inline void Invalidate(bool cond, const char* message) {
+inline void Invalidate__(bool cond, const char* message, bool not_own_message) {
   if (!cond) {
-    printf("%s is not valid\n", message);
+      printf("========== ASSERTION FAILED ==========\n"
+             "\n"
+             "%s %s"
+             "\n"
+             "======================================\n"
+             "\n"
+             "            <Stack Trace>\n\n", message,
+             (not_own_message? "is not valid\n": "\n"));
     lux::debug::StackTrace st;
     st.Print();
     exit(1);
   }
 }
-#define INVALIDATE(cond) lux::Invalidate(cond, #cond)
-#define FATAL(message) lux::Invalidate(false, message);
+
+#define PRECONDITION(cond, message) Invalidate__(cond, message, false)
+#define PRECONDITION_ASSERT(cond) Invalidate__(cond, #cond, true)
+
+#ifdef DEBUG
+#define INVALIDATE(cond) lux::Invalidate__(cond, #cond, true)
+#define FATAL(message) lux::Invalidate__(false, message, true);
 #define UNREACHABLE() FATAL("Unreachable block executed.");
 
 #else
@@ -140,7 +155,7 @@ class LuxScoped__ {
   LUX_SETTER(type, name, field)
 
 template <typename T>
-class Bitset {
+class BitsetBase {
  public:
   void set(uint32_t index) {
     bit_field_ |= (0x1 << index);
@@ -158,13 +173,74 @@ class Bitset {
     return bit_field_ & (~(0x1 << index));
   }
 
+  bool is_full() const {
+    return bit_field_ == ~static_cast<T>(0);
+  }
+
   template <typename R = T>
   R mask(T mask) const {
     return static_cast<R>(bit_field_ & mask);
   }
 
- private:
+ protected:
   T bit_field_;
+};
+
+template <typename T>
+class Bitset: public BitsetBase<T> {
+ public:
+  LUX_INLINE uint32_t RightMostEmptySlot() {
+    return Log2(BitsetBase<T>::bit_field_ & -BitsetBase<T>::bit_field_) - 1;
+  }
+
+ private:
+  LUX_INLINE uint32_t Log2(T x) {
+    if (x == 0) {
+      return 0;
+    }
+
+    x |= (x >> 1);
+    x |= (x >> 2);
+    x |= (x >> 4);
+    x |= (x >> 8);
+
+    x -= ((x >> 1) & 0x5555);
+    x = (((x >> 2) & 0x3333) + (x & 0x3333));
+    x = (((x >> 4) +x) & (0x0f0f));
+    x += (x >> 8);
+    return (x & 0x3f) - 1;
+  }
+};
+
+template <>
+class Bitset<uint64_t>: public BitsetBase<uint64_t> {
+ public:
+  LUX_INLINE uint32_t RightMostEmptySlot() {
+    return Log2(BitsetBase<uint64_t>::bit_field_
+                & -BitsetBase<uint64_t>::bit_field_) - 1;
+  }
+
+ private:
+  LUX_INLINE uint32_t Log2(uint64_t x) {
+    static const int kTab64[64] = {
+      63,  0, 58,  1, 59, 47, 53,  2,
+      60, 39, 48, 27, 54, 33, 42,  3,
+      61, 51, 37, 40, 49, 18, 28, 20,
+      55, 30, 34, 11, 43, 14, 22,  4,
+      62, 57, 46, 52, 38, 26, 32, 41,
+      50, 36, 17, 19, 29, 10, 13, 21,
+      56, 45, 25, 31, 35, 16,  9, 12,
+      44, 24, 15,  8, 23,  7,  6,  5};
+
+    x |= x >> 1;
+    x |= x >> 2;
+    x |= x >> 4;
+    x |= x >> 8;
+    x |= x >> 16;
+    x |= x >> 32;
+    return kTab64[static_cast<uint64_t>(
+        (((x - (x >> 1)) * 0x07EDD5E59A4E28C2)) >> 58)];
+  }
 };
 
 /**
@@ -228,6 +304,8 @@ using Shared = std::shared_ptr<T>;
 typedef uint8_t byte;
 
 typedef byte* Address;
+
+static const size_t kOneByteSize = sizeof(byte);
 
 template <int LowerBits, typename Type = uint32_t>
 class Bitmask {

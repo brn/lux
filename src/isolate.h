@@ -24,6 +24,8 @@
 
 namespace lux {
 class Heap;
+class RootMaps;
+class Shape;
 
 class Isolate {
  public:
@@ -33,10 +35,15 @@ class Isolate {
     return heap_;
   }
 
+  Shape* string_map() const;
+  Shape* object_map() const;
+  Shape* map_object() const;
+
  private:
   void InitOnce();
 
   Heap* heap_;
+  RootMaps* root_maps_;
   std::atomic_flag once_flag_;
 };
 }  // namespace lux

@@ -184,8 +184,9 @@ bool Utf16String::IsAsciiEqual(const char* ascii) const {
     return false;
   }
 
+  auto ptr = utf16_codepoint_.get();
   for (int i = 0; i < size_; i++) {
-    if (utf16_codepoint_[i] != ascii[i]) {
+    if (ptr[i] != ascii[i]) {
       return false;
     }
   }
@@ -195,19 +196,19 @@ bool Utf16String::IsAsciiEqual(const char* ascii) const {
 
 std::string Utf16String::ToUtf8String() const {
   std::stringstream st;
+  auto ptr = utf16_codepoint_.get();
   for (int i = 0; i < size_; i++) {
-    st << utf16_codepoint_[i].ToUtf8String();
+    st << ptr[i].ToUtf8String();
   }
   return st.str();
 }
 
 static const size_t kUtf16CodePointSize = sizeof(Utf16CodePoint);
 
-const Utf16String Unicode::ConvertUtf8StringToUtf16String(
-    Isolate* isolate, const char* str) {
+const Utf16String Unicode::ConvertUtf8StringToUtf16String(const char* str) {
   auto buf = reinterpret_cast<Utf16CodePoint*>(
-      isolate->heap()->Allocate((strlen(str) * kUtf16CodePointSize)
-                                + (kUtf16CodePointSize * 2)));
+      malloc((strlen(str) * kUtf16CodePointSize)
+             + (kUtf16CodePointSize * 2)));
   Utf8Iterator it(str);
   int index = 0;
   while (it.HasMore()) {

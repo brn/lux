@@ -25,7 +25,10 @@
 
 #include <string>
 #include <sstream>
+#include <unordered_set>
+#include <utility>
 #include <vector>
+#include "./bytecode.h"
 #include "./source_position.h"
 #include "./unicode.h"
 #include "./utils.h"
@@ -33,6 +36,7 @@
 #include "./reporter.h"
 
 namespace lux {
+
 namespace regexp {
 #define REGEXP_AST_TYPES(A)                     \
   A(GROUP, Group)                               \
@@ -44,6 +48,170 @@ namespace regexp {
   A(CHAR, Char)                                 \
   A(CONJUNCTION, Conjunction)                   \
   A(ROOT, Root)
+
+#define RE_AST_FORWARD_DECL(_, Name) class Name;
+REGEXP_AST_TYPES(RE_AST_FORWARD_DECL)
+#undef RE_AST_FORWARD_DECL
+
+class NFA {
+ public:
+  class Context {
+   public:
+    Context()
+        : state_count_(0) {}
+
+    uint32_t GenerateStateId() {
+      return state_count_++;
+    }
+
+   private:
+    uint32_t state_count_;
+  };
+
+  class Node: public Zone {
+   public:
+    Node(Node* out1,
+         uintptr_t out2)
+        : out1_(out1), out2_(out2) {}
+
+    LUX_CONST_PROPERTY(Node*, out1, out1_)
+    Node* out2() const {
+      return reinterpret_cast<Node*>(out2_ & ~(0x1));
+    }
+
+    void set_out2(Node* out) {
+      uintptr_t o = reinterpret_cast<intptr_t>(out);
+      if (IsU16InputNode()) {
+         o |= 0x1;
+      }
+      out2_ = o;
+    }
+
+    bool IsU16InputNode() const {
+      return (out2_ & 0x1) == 1;
+    }
+
+#ifdef DEBUG
+    std::string ToString() const {
+      std::string indent = "  ";
+      std::unordered_set<uintptr_t> a;
+      return ToStringTree(&a, indent);
+    }
+
+    std::string ToStringTree(std::unordered_set<uintptr_t>* a,
+                             std::string indent) const {
+      if (out1_) {
+        a->insert(reinterpret_cast<uintptr_t>(out1_));
+      }
+      if (out2()) {
+        a->insert(reinterpret_cast<uintptr_t>(out2()));
+      }
+      std::stringstream st;
+      st << "{\n" << indent << "\"State\": {\n";
+      indent += "  ";
+      st << indent << "\"input\":";
+      if (IsU16InputNode()) {
+        st << CastTo<const State<u16>>(this)->input();
+      } else {
+        st << CastTo<const State<Utf16String>>(this)->input();
+      }
+      st << '\n';
+      st << indent << "\"out1\":";
+      st << (out1()? out1()->ToStringTree(a, indent + "  ").c_str(): "null,\n");
+      st << indent << "\"out2\":";
+      st << (out2()? out2()->ToStringTree(a, indent + "  ").c_str(): "null");
+      indent = indent.substr(0, indent.size() - 2);
+      st << '\n' << indent <<  "},\n";
+      indent = indent.substr(0, indent.size() - 2);
+      st << indent <<  "},";
+      return st.str();
+    }
+#endif
+
+    template <typename T>
+    LUX_INLINE static T* CastTo(const Node* n) {
+      return reinterpret_cast<T*>(n);
+    }
+
+    template <typename T>
+    LUX_INLINE static T* CastTo(Node* n) {
+      return reinterpret_cast<T*>(n);
+    }
+
+   private:
+    Node* out1_;
+    uintptr_t out2_;
+  };
+
+  template <typename T>
+  struct NodeType { enum { value = 0 };};
+
+  template <typename T>
+  class State: public Node {
+   public:
+    State(T input,
+          Node* out1,
+          Node* out2)
+        : Node(out1, reinterpret_cast<uintptr_t>(out2) | NodeType<T>::value),
+          input_(input) {}
+
+    LUX_CONST_PROPERTY(T, input, input_)
+
+   private:
+    T input_;
+  };
+
+  class Fragment: public Zone {
+   public:
+    Fragment(Node* start, Node* out)
+        : start_(start),
+          out_(out) {}
+
+    Fragment()
+        : start_(nullptr),
+          out_(nullptr) {}
+
+    LUX_CONST_PROPERTY(Node*, start, start_)
+    LUX_CONST_PROPERTY(Node*, out, out_)
+
+   private:
+    Node* start_;
+    Node* out_;
+  };
+};
+
+#define REGEXP_VISIT_INTERNAL_IFACE                   \
+  void VisitInternal(Visitor* v, BytecodeLabel* label)
+#define REGEXP_VISIT_INTERNAL_METHOD_DECL(Name)           \
+  void VisitInternal(Visitor* v, BytecodeLabel* label) {  \
+    v->Visit##Name(this, label);                          \
+  }
+
+class Visitor {
+ public:
+  explicit Visitor(BytecodeBuilder* bytecode_builder,
+                   ZoneAllocator* zone_allocator);
+
+  LUX_GETTER(BytecodeBuilder*, builder, bytecode_builder_)
+  LUX_GETTER(ZoneAllocator*, zone, zone_allocator_)
+  LUX_GETTER(RegisterRef*, input_register, &input_register_)
+  LUX_GETTER(RegisterRef*, input_size_register, &input_size_register_)
+  LUX_GETTER(RegisterRef*, position_register, &position_register_)
+
+#define REGEXP_VISIT_DECL(G, Name)                    \
+  void Visit##Name(Name* ast, BytecodeLabel* label);
+  REGEXP_AST_TYPES(REGEXP_VISIT_DECL)
+#undef REGEXP_VISIT_DECL
+
+ private:
+  void EmitCompare(u16 code, BytecodeLabel* label);
+
+  RegisterRef input_size_register_;
+  RegisterRef input_register_;
+  RegisterRef position_register_;
+  BytecodeBuilder* bytecode_builder_;
+  ZoneAllocator* zone_allocator_;
+};
 
 class Ast: public Zone {
  public:
@@ -70,7 +238,13 @@ class Ast: public Zone {
   virtual std::string ToString(std::string* indent = nullptr) const = 0;
 #endif
 
+  LUX_INLINE void Visit(Visitor* visitor, BytecodeLabel* label) {
+    VisitInternal(visitor, label);
+  }
+
  private:
+  virtual REGEXP_VISIT_INTERNAL_IFACE {}
+
   Type type_;
 };
 
@@ -83,12 +257,26 @@ struct Config {
 
 class AstListTrait {
  public:
+  using AstList = std::vector<Ast*>;
+  using iterator = AstList::iterator;
   Ast* at(int index) const {
     return list_[index];
   }
 
   void Push(Ast* a) {
     list_.push_back(a);
+  }
+
+  size_t size() const {
+    return list_.size();
+  }
+
+  iterator begin() {
+    return list_.begin();
+  }
+
+  iterator end() {
+    return list_.end();
   }
 
  protected:
@@ -142,6 +330,8 @@ class Root: public Ast {
 
   LUX_CONST_PROPERTY(Ast*, regexp, regexp_)
 
+  REGEXP_VISIT_INTERNAL_METHOD_DECL(Root);
+
  private:
   Bitset<uint8_t> flag_;
   Ast* regexp_;
@@ -156,6 +346,8 @@ class Conjunction: public Ast, public AstListTrait {
   std::string ToString(std::string* indent = nullptr) const {
     return ToStringList("Conjunction", indent);
   }
+
+  REGEXP_VISIT_INTERNAL_METHOD_DECL(Conjunction);
 };
 
 class Group: public Ast {
@@ -180,6 +372,8 @@ class Group: public Ast {
 
   LUX_CONST_PROPERTY(Ast*, node, node_)
   LUX_CONST_PROPERTY(Type, type, type_)
+
+  REGEXP_VISIT_INTERNAL_METHOD_DECL(Group);
 
 #ifdef DEBUG
   std::string ToString(std::string* indent = nullptr) const {
@@ -216,15 +410,28 @@ class BackReference: public Ast {
     : Ast(Ast::BACK_REFERENCE) {}
 };
 
-class CharClass: public Ast, public AstListTrait {
+class CharClass: public Ast {
  public:
-  CharClass()
+  explicit CharClass(bool exclude, Utf16String value)
       : Ast(Ast::CHAR_CLASS),
-        AstListTrait() {}
+        exclude_(exclude),
+        value_(value) {}
 
+  REGEXP_VISIT_INTERNAL_METHOD_DECL(CharClass);
+
+  LUX_CONST_GETTER(Utf16String, value, value_)
+
+#ifdef DEBUG
   std::string ToString(std::string* indent = nullptr) const {
-    return ToStringList("CharClass", indent);
+    std::stringstream st;
+    st << "CharClass exclude = " << (exclude_? "true": "false");
+    st << ' ' << '<' << value_.ToUtf8String() << '>';
+    return st.str();
   }
+#endif
+ private:
+  bool exclude_;
+  Utf16String value_;
 };
 
 class Alternate final: public Ast {
@@ -235,6 +442,7 @@ class Alternate final: public Ast {
 
   LUX_CONST_PROPERTY(Ast*, left, left_)
   LUX_CONST_PROPERTY(Ast*, right, right_)
+  REGEXP_VISIT_INTERNAL_METHOD_DECL(Alternate);
 
 #ifdef DEBUG
   std::string ToString(std::string* indent = nullptr) const {
@@ -272,6 +480,8 @@ class Repeat: public Ast {
   LUX_CONST_PROPERTY(Ast*, target, target_)
   LUX_CONST_PROPERTY(int32_t, more_than, more_than_)
 
+  REGEXP_VISIT_INTERNAL_METHOD_DECL(Repeat);
+
 #ifdef DEBUG
   std::string ToString(std::string* indent = nullptr) const {
     std::stringstream st;
@@ -306,6 +516,8 @@ class RepeatRange: public Ast {
   LUX_CONST_PROPERTY(int32_t, more_than, more_than_)
   LUX_CONST_PROPERTY(int32_t, less_than, less_than_)
   LUX_CONST_PROPERTY(Ast*, target, target_)
+
+  REGEXP_VISIT_INTERNAL_METHOD_DECL(RepeatRange);
 
 #ifdef DEBUG
   std::string ToString(std::string* indent = nullptr) const {
@@ -347,12 +559,14 @@ class Char: public Ast {
   std::string ToString(std::string* indent = nullptr) const {
     std::stringstream st;
     st << (indent == nullptr? "": *indent)
-       << "[Char '" << static_cast<char>(value_.code()) << "']\n";
+       << "[Char '" << value_.ToUtf8String() << "']\n";
     return st.str();
   }
 #endif
 
  private:
+  REGEXP_VISIT_INTERNAL_METHOD_DECL(Char);
+
   Utf16CodePoint value_;
 };
 
@@ -360,15 +574,15 @@ class Parser {
  public:
   Parser(ErrorReporter* error_reporter,
          SourcePosition* source_position,
-         Utf16String::iterator it,
-         Utf16String::iterator end)
+         Utf16String source)
       : reporter_(error_reporter),
         source_position_(source_position),
-        it_(it), end_(end) {}
+        it_(source.begin()), end_(source.end()),
+        source_(source) {}
 
   void Parse();
 
-  const Root* node() const {
+  Root* node() {
     return &root_;
   }
 
@@ -419,9 +633,12 @@ class Parser {
   SourcePosition* source_position_;
   Utf16String::iterator it_;
   Utf16String::iterator end_;
+  Utf16String source_;
   ZoneAllocator zone_allocator_;
 };
 }  // namespace regexp
 }  // namespace lux
 
+#undef REGEXP_VISIT_INTERNAL_IFACE
+#undef REGEXP_VISIT_INTERNAL_METHOD_DECL
 #endif  // SRC_REGEXP_H_

@@ -19,6 +19,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
   add_definitions(-DDEBUG)
   add_definitions(-DLUX_TEST)
   add_definitions(-DPLATFORM_POSIX)
+  add_definitions(-DPLATFORM_64BIT)
 
   add_executable(parser_test
     src/platform/os.cc
@@ -29,6 +30,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
     src/parser.cc
     src/debug/stacktrace.cc
     src/zone.cc
+    src/objects/object.cc
+    src/objects/heap_object.cc
+    src/objects/shape.cc
+    src/objects/jsobject.cc
     test/cases/parser_test.cc)
   target_link_libraries(parser_test libgtest.a libgtest_main.a)
 
@@ -38,6 +43,10 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
     src/heap.cc
     src/unicode.cc
     src/debug/stacktrace.cc
+    src/objects/object.cc
+    src/objects/heap_object.cc
+    src/objects/shape.cc
+    src/objects/jsobject.cc
     test/cases/unicode_test.cc)
   target_link_libraries(unicode_test libgtest.a libgtest_main.a)
 
@@ -50,8 +59,57 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
     src/regexp.cc
     src/zone.cc
     src/reporter.cc
+    src/bytecode.cc
+    src/objects/object.cc
+    src/objects/heap_object.cc
+    src/objects/shape.cc
+    src/objects/jsobject.cc
     test/cases/regexp_parse_test.cc)
   target_link_libraries(regexp_parse_test libgtest.a libgtest_main.a)
+
+  add_executable(regexp_bytecode_test
+    src/platform/os.cc
+    src/isolate.cc
+    src/heap.cc
+    src/unicode.cc
+    src/debug/stacktrace.cc
+    src/regexp.cc
+    src/zone.cc
+    src/reporter.cc
+    src/bytecode.cc
+    src/objects/object.cc
+    src/objects/heap_object.cc
+    src/objects/shape.cc
+    src/objects/jsobject.cc
+    test/cases/regexp_bytecode_test.cc)
+  target_link_libraries(regexp_bytecode_test libgtest.a libgtest_main.a)
+
+  add_executable(smi_test
+    src/platform/os.cc
+    src/isolate.cc
+    src/heap.cc
+    src/unicode.cc
+    src/debug/stacktrace.cc
+    src/objects/object.cc
+    src/objects/heap_object.cc
+    src/objects/shape.cc
+    src/objects/jsobject.cc
+    src/zone.cc
+    test/cases/objects/smi_test.cc)
+  target_link_libraries(smi_test libgtest.a libgtest_main.a)
+  add_executable(jsstring_test
+    src/platform/os.cc
+    src/isolate.cc
+    src/heap.cc
+    src/unicode.cc
+    src/debug/stacktrace.cc
+    src/objects/object.cc
+    src/objects/heap_object.cc
+    src/objects/shape.cc
+    src/objects/jsobject.cc
+    src/zone.cc
+    test/cases/objects/jsstring_test.cc)
+  target_link_libraries(jsstring_test libgtest.a libgtest_main.a)
 endif()
 
 include_directories(./tools/clang+llvm-5.0.1-final-x86_64-apple-darwin/include/c++/v1)
@@ -62,5 +120,9 @@ add_executable(lux
   src/reporter.cc
   src/unicode.cc
   src/isolate.cc
+  src/objects/object.cc
+  src/objects/heap_object.cc
+  src/objects/shape.cc
+  src/objects/jsobject.cc
   src/debug/stacktrace.cc)
 target_link_libraries(lux)

@@ -17,6 +17,8 @@
 
 #include "./heap.h"
 #include "./isolate.h"
+#include "./objects/shape.h"
+#include "./objects/heap_object.h"
 
 namespace lux {
 Isolate* Isolate::GetPerThreadInstance() {
@@ -28,6 +30,17 @@ Isolate* Isolate::GetPerThreadInstance() {
 void Isolate::InitOnce() {
   if (!once_flag_.test_and_set()) {
     heap_ = new Heap();
+    root_maps_ = new RootMaps(this);
   }
+}
+
+Shape* Isolate::string_map() const {
+  return root_maps_->string_map();
+}
+Shape* Isolate::object_map() const {
+  return root_maps_->object_map();
+}
+Shape* Isolate::map_object() const {
+  return root_maps_->map_object();
 }
 }  // namespace lux

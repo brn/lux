@@ -59,8 +59,7 @@ namespace {
   return Failed(cp, it);
 }
 
-inline void RunConvertTest(lux::Isolate* isolate,
-                           const char* input,
+inline void RunConvertTest(const char* input,
                            const char* expected,
                            size_t expected_size) {
   auto source = lux::testing::ReadFile(input);
@@ -69,7 +68,7 @@ inline void RunConvertTest(lux::Isolate* isolate,
   std::string utf8_buffer;
   static const char* kFormat = "%#019x";
   auto utf16_string =
-    lux::Unicode::ConvertUtf8StringToUtf16String(isolate, source.c_str());
+    lux::Unicode::ConvertUtf8StringToUtf16String(source.c_str());
   int index = 0;
   size_t size = 0;
   auto end = utf16_string.end();
@@ -100,7 +99,7 @@ TEST_F(UnicodeTest, ConvertUtf8AsciiToUtf16) {
     "ABCDEFGHIJKLMNOPQRSTUVWXY"
     "Z0123456789"
     "\"'`!@#$%^&*_+|~()[]{}";
-  auto str = lux::Unicode::ConvertUtf8StringToUtf16String(isolate_, asciis);
+  auto str = lux::Unicode::ConvertUtf8StringToUtf16String(asciis);
   int i = 0;
   for (auto &it : str) {
     EXPECT_EQ(it.code(), asciis[i++]);
@@ -108,15 +107,13 @@ TEST_F(UnicodeTest, ConvertUtf8AsciiToUtf16) {
 }
 
 TEST_F(UnicodeTest, ConvertMultiByte) {
-  RunConvertTest(isolate_,
-                 valid_utf8_txt_target_path_.c_str(),
+  RunConvertTest(valid_utf8_txt_target_path_.c_str(),
                  valid_utf8_txt_expectation_path_.c_str(),
                  148);
 }
 
 TEST_F(UnicodeTest, ConvertSurrogatePair) {
-  RunConvertTest(isolate_,
-                 valid_surrogate_txt_target_path_.c_str(),
+  RunConvertTest(valid_surrogate_txt_target_path_.c_str(),
                  valid_surrogate_txt_expectation_path_.c_str(),
                  676);
 }

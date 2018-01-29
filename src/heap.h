@@ -18,30 +18,117 @@
 #ifndef SRC_HEAP_H_
 #define SRC_HEAP_H_
 
+#include <type_traits>
 #include <vector>
+#include <unordered_set>
 #include "./utils.h"
+#include "./objects/shape.h"
+#include "./objects/heap_object.h"
 
 namespace lux {
-class HandleScope;
 template <typename T>
-class Handle;
+class Handle {
+  template <typename U>
+  friend class Handle;
+ public:
+  static_assert(std::is_convertible<T, HeapObject>::value,
+                "Handle accept only HeapObject.");
 
-class HeapObject {
+  template <typename U>
+  static Handle<T> New(U* ptr);
+
+  template <typename U>
+  Handle(const Handle<U>& h)
+      : ptr_(h.ptr_) {}
+
+
+  template <typename U>
+  Handle(Handle<U>&& h)
+      : ptr_(h.ptr_) {}
+
+
+  template <typename U>
+  Handle<U>& operator=(const Handle<U>& h) const {
+    ptr_ = h.ptr;
+    return *this;
+  }
+
+  template <typename U>
+  bool operator==(const Handle<U>& h) const {
+    return this->operator*() == h.operator*();
+  }
+
+  T* operator*() const {
+    if (ptr_->shape()->IsForwardingPointer()) {
+      return reinterpret_cast<T*>(
+          ptr_->shape()->ForwardingPointer());
+    }
+    return ptr_;
+  }
+
+  T* operator->() const {
+    return this->operator*();
+  }
+
+  template <typename U>
+  operator Handle<U>() {
+    return Handle<U>(ptr_);
+  }
+
+  template <typename U>
+  static Handle<T> Cast(const Handle<U>& obj) {
+    return *reinterpret_cast<Handle<T>*>(
+        reinterpret_cast<uintptr_t>(&obj));
+  }
+
+ private:
+  template <typename U>
+  explicit Handle(U* ptr)
+      : ptr_(ptr) {}
+
+  T* ptr_;
 };
+
+class HandleScope;
 class HandleScopeList {
  public:
+  using ScopeList = std::vector<HandleScope*>;
+  using iterator = ScopeList::iterator;
+  using reverse_iterator = ScopeList::reverse_iterator;
   void Push(HandleScope* scope) {
     scope_list_.push_back(scope);
   }
+
   void Pop() {
     scope_list_.pop_back();
   }
+
+  reverse_iterator Prev() {
+    auto rb = scope_list_.rbegin();
+    auto prev = rb + 1;
+    return prev;
+  }
+
+  iterator end() {
+    return scope_list_.end();
+  }
+
+  reverse_iterator rend() {
+    return scope_list_.rend();
+  }
+
+  size_t size() const {
+    return scope_list_.size();
+  }
   LUX_INLINE HandleScope* last() { return scope_list_.back(); }
+
  private:
-  std::vector<HandleScope*> scope_list_;
+  ScopeList scope_list_;
 };
 
 class HandleScope: private StackObject {
+  template <typename T>
+  friend class Handle;
  public:
   HandleScope() {
     current_scope_list()->Push(this);
@@ -49,8 +136,20 @@ class HandleScope: private StackObject {
   ~HandleScope() {
     current_scope_list()->Pop();
   }
-  LUX_INLINE static void register_handle(Handle<HeapObject> handle);
+
+  template <typename T>
+  Handle<T> Return(Handle<T> h);
+
  private:
+  typedef std::unordered_set<Handle<HeapObject>> HandleSet;
+  LUX_INLINE static void register_handle(
+      const Handle<HeapObject>& handle);
+
+  LUX_INLINE void append_handle(
+      const Handle<HeapObject>& handle) {
+    HandleScope::register_handle(handle);
+  }
+
   LUX_INLINE static HandleScope* current_handle_scope() {
     return current_scope_list()->last();
   }
@@ -59,22 +158,7 @@ class HandleScope: private StackObject {
     return &scope_list;
   }
 
-  static std::vector<Handle<HeapObject>> handle_list_;
-};
-
-template <typename T>
-class Handle {
- public:
-  explicit Handle(T** ptr)
-      : ptr_(ptr) {
-    HandleScope::register_handle(*this);
-  }
-
-  T& operator->() {
-    return **ptr_;
-  }
- private:
-  T** ptr_;
+  static HandleSet handle_set_;
 };
 
 class Heap {
@@ -94,5 +178,17 @@ class Heap {
   static Heap* heap_;
 };
 }  // namespace lux
+
+namespace std {
+template<typename T>
+class hash<lux::Handle<T>> {
+ public:
+  uintptr_t operator ()(const lux::Handle<lux::HeapObject>& h) const {
+    return reinterpret_cast<uintptr_t>(*h);
+  }
+};
+}  // namespace std
+
+#include "./heap-inl.h"
 
 #endif  // SRC_HEAP_H_

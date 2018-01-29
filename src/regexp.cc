@@ -34,6 +34,9 @@ namespace regexp {
 #ifdef DEBUG
 #define REPORT_SYNTAX_ERROR(parser, message)                            \
   BASE_REPORT_SYNTAX_ERROR_(parser)                                     \
+  << "Invalid regular expression: /"                                    \
+  << parser->source_.ToUtf8String()                                     \
+  << "/: "                                                              \
   << message                                                            \
   << " ("                                                               \
   << std::to_string(parser->position().start_line_number() + 1).c_str() \
@@ -64,6 +67,132 @@ const char* Ast::kNodeTypeStringList[] = {
   REGEXP_AST_TYPES(AST_STRING_DEF)
 #undef AST_STRING_DEF
 };
+
+#define AST_VISIT(Name)                           \
+  void Visitor::Visit##Name(Name* node, BytecodeLabel* label)
+
+template <>
+struct NFA::NodeType<u16> {
+  enum { value = 1 };
+};
+
+template <>
+struct NFA::NodeType<Utf16String> {
+  enum { value = 0 };
+};
+
+#define __ builder()->
+using Label = BytecodeLabel;
+
+Visitor::Visitor(BytecodeBuilder* bytecode_builder,
+                 ZoneAllocator* zone_allocator)
+    : bytecode_builder_(bytecode_builder),
+      zone_allocator_(zone_allocator) {
+  input_register_ = RegisterRef(AddressingMode::kPointer);
+}
+
+AST_VISIT(Root) {
+  __ ImmI32(0, position_register());
+  return node->regexp()->Visit(this, label);
+}
+
+AST_VISIT(Conjunction) {
+  for (auto &a : *node) {
+    a->Visit(this, label);
+  }
+}
+
+AST_VISIT(Group) {
+  return node->node()->Visit(this, label);
+}
+
+AST_VISIT(CharClass) {
+  auto index = __ StringConstant(node->value());
+  RegisterRef value_reg, index_reg, char_reg,
+    target_char_reg, length_reg;
+  Label loop, if_failed;
+  __ ConstantA(index);
+  __ StoreAR(&value_reg);
+  __ ImmI32(0, &index_reg);
+  __ ImmI32(node->value().size(), &length_reg);
+
+  __ Bind(&loop);
+  {
+    Label if_continue;
+    __ ICmpGTRRA(&length_reg, &index_reg);
+    __ BranchA(&if_continue, &if_failed);
+    __ Bind(&if_continue);
+    {
+      __ LoadRIxR(&value_reg, &index_reg, &char_reg);
+      __ LoadRIxR(input_register(), &index_reg, &target_char_reg);
+      __ ICmpRR(&char_reg, &target_char_reg);
+      __ Inc(&index_reg);
+      __ JmpIfFalse(&loop);
+    }
+  }
+
+  __ Bind(&if_failed);
+  {
+    if (label) {
+      __ Jmp(label);
+    } else {
+      __ Return();
+    }
+  }
+}
+
+AST_VISIT(Alternate) {
+  Label if_exit, if_next;
+  RegisterRef save_reg;
+  __ LoadRA(position_register());
+  __ StoreAR(&save_reg);
+  __ Jmp(&if_next);
+
+  __ Bind(&if_exit);
+  {
+    __ Return();
+  }
+
+  __ Bind(&if_next);
+  {
+    node->left()->Visit(this, &if_next);
+    node->right()->Visit(this, &if_exit);
+  }
+}
+
+AST_VISIT(Repeat) {
+  return node->target()->Visit(this, label);
+}
+
+AST_VISIT(RepeatRange) {
+  return node->target()->Visit(this, label);
+}
+
+AST_VISIT(Char) {
+  auto value = node->value();
+  if (value.IsSurrogatePair()) {
+    EmitCompare(value.ToLowSurrogate(), label);
+    EmitCompare(value.ToHighSurrogate(), label);
+  } else {
+    EmitCompare(value.code(), label);
+  }
+}
+
+void Visitor::EmitCompare(u16 code, BytecodeLabel* label) {
+  RegisterRef reg1, reg2;
+  __ LoadRA(input_register());
+  __ LoadAIxR(position_register(), &reg1);
+  __ ImmI32(code, &reg2);
+  __ LoadRA(&reg1);
+  __ ICmpAR(&reg2);
+
+  if (label) {
+    __ JmpIfFalse(label);
+  }
+
+  __ Inc(position_register());
+  __ StoreAR(position_register());
+}
 
 void Parser::Parse() {
   ENTER();
@@ -140,30 +269,43 @@ Ast* Parser::ParseCharClass() {
   update_start_pos();
   INVALIDATE(cur() == '[');
   advance();
-  auto cc = new(zone()) CharClass();
+  bool exclude = false;
+  if (cur() == '^') {
+    exclude = true;
+    advance();
+  }
   bool escaped = false;
   bool success = false;
+  std::vector<Utf16CodePoint> v;
   while (has_more()) {
-    auto n = cur();
     if ((cur() == ']' && !escaped)) {
       advance();
       success = true;
       break;
     } else if (!escaped && cur() == '\\') {
+      if (escaped) {
+        v.push_back(cur());
+      }
       escaped = !escaped;
     } else {
-      escaped = false;
-      auto c = new(zone()) Char(n);
-      cc->Push(c);
+      v.push_back(cur());
     }
     advance();
   }
+  Utf16String str(v.data(), v.size());
+  auto cc = new(zone()) CharClass(exclude, str);
   update_start_pos();
   if (!success) {
     REPORT_SYNTAX_ERROR(this, "] expected.");
   }
 
   return ParseSelection(cc);
+}
+
+bool IsRepeatChar(u16 ch) {
+  return ch == '*'
+    || ch == '+'
+    || ch == '{';
 }
 
 Ast* Parser::ParseChar(bool allow_selection) {
@@ -180,6 +322,10 @@ Ast* Parser::ParseChar(bool allow_selection) {
     auto n = advance();
     auto c = new(zone()) Char(n);
     cj->Push(c);
+  }
+  if (cj->size() == 0 && IsRepeatChar(cur().code())) {
+    advance();
+    REPORT_SYNTAX_ERROR(this, "Nothing to repeat.");
   }
   return allow_selection? ParseSelection(cj): cj;
 }

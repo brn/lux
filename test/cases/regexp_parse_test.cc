@@ -33,8 +33,8 @@ class RegExpTest: public lux::IsolateSetup {
                lux::SourcePosition source_position = lux::SourcePosition()) {
     lux::ErrorReporter er;
     lux::SourcePosition sp;
-    auto s = lux::Unicode::ConvertUtf8StringToUtf16String(isolate_, regexp);
-    lux::regexp::Parser p(&er, &sp, s.begin(), s.end());
+    auto s = lux::Unicode::ConvertUtf8StringToUtf16String(regexp);
+    lux::regexp::Parser p(&er, &sp, s);
     p.Parse();
     if (error) {
       ASSERT_TRUE(er.HasPendingError());
@@ -118,7 +118,27 @@ TEST_F(RegExpTest, CharClass) {
   RunTest("[abcdefg,{}()?]", 16,
           "[Root]\n"
           "  [Conjunction]\n"
-          "    [CharClass]\n"
+          "    [CharClass exclude = false]\n"
+          "      [Char 'a']\n"
+          "      [Char 'b']\n"
+          "      [Char 'c']\n"
+          "      [Char 'd']\n"
+          "      [Char 'e']\n"
+          "      [Char 'f']\n"
+          "      [Char 'g']\n"
+          "      [Char ',']\n"
+          "      [Char '{']\n"
+          "      [Char '}']\n"
+          "      [Char '(']\n"
+          "      [Char ')']\n"
+          "      [Char '?']\n");
+}
+
+TEST_F(RegExpTest, CharClassExclude) {
+  RunTest("[^abcdefg,{}()?]", 16,
+          "[Root]\n"
+          "  [Conjunction]\n"
+          "    [CharClass exclude = true]\n"
           "      [Char 'a']\n"
           "      [Char 'b']\n"
           "      [Char 'c']\n"
@@ -236,5 +256,17 @@ TEST_F(RegExpTest, RangeRepeatRequiredError) {
 
 TEST_F(RegExpTest, RangeRepeatSecondNaNError) {
   RunTest<true>("aaa{1,x}", 0, nullptr, lux::SourcePosition(5, 6, 0, 0));
+}
+
+TEST_F(RegExpTest, NothingToRepeat) {
+  RunTest<true>("+", 0, nullptr, lux::SourcePosition(0, 1, 0, 0));
+}
+
+TEST_F(RegExpTest, NothingToRepeat2) {
+  RunTest<true>("*", 0, nullptr, lux::SourcePosition(0, 1, 0, 0));
+}
+
+TEST_F(RegExpTest, NothingToRepeat3) {
+  RunTest<true>("{", 0, nullptr, lux::SourcePosition(0, 1, 0, 0));
 }
 }  // namespace
