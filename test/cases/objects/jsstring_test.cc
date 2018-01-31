@@ -42,7 +42,7 @@ TEST_F(JSStringTest, Utf8Value) {
   lux::HandleScope scope;
   auto jsstr = lux::JSString::New(isolate_, value);
   lux::JSString::Utf8String utf8(*jsstr);
-  ASSERT_EQ(strcmp(utf8.buffer(), value), 0);
+  ASSERT_EQ(strcmp(utf8.value(), value), 0);
 }
 
 }  // namespace

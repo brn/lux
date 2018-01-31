@@ -96,24 +96,23 @@ void BytecodeArrayWriter::Bind(BytecodeLabel* label) {
   label->set_jmps(&jmps_);
 }
 
-BytecodeArray BytecodeArrayWriter::Flush() {
-  auto array = reinterpret_cast<Bytecode*>(
-      isolate_->heap()->Allocate(current_offset_ * sizeof(Bytecode)));
+Handle<BytecodeArray> BytecodeArrayWriter::Flush() {
+  auto array = BytecodeArray::New(isolate_, current_offset_);
   size_t index = 0;
   auto node = bytecode_top_;
   while (node) {
     auto bytecode = node->bytecode();
     node->set_offset(index);
-    array[index++] = bytecode;
+    array->write(index++, bytecode);
     node = node->next();
   }
   for (auto &from : jmps_) {
     auto to = from->jmp();
     BytecodeUpdater updater(from->bytecode());
     updater.UpdateSJ(to->offset() - from->offset());
-    array[from->offset()] = updater.bytecode();
+    array->write(from->offset(), updater.bytecode());
   }
-  return BytecodeArray(array, index);
+  return array;
 }
 
 BytecodeNode* BytecodeBuilder::Return() {

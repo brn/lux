@@ -37,6 +37,9 @@ void Isolate::InitOnce() {
 Shape* Isolate::string_map() const {
   return root_maps_->string_map();
 }
+Shape* Isolate::fixed_array_shape() const {
+  return root_maps_->fixed_array_shape();
+}
 Shape* Isolate::object_map() const {
   return root_maps_->object_map();
 }

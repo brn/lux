@@ -30,6 +30,10 @@ template <typename T>
 class Handle {
   template <typename U>
   friend class Handle;
+
+  template <typename U>
+  friend Handle<U> make_handle(U* obj);
+
  public:
   static_assert(std::is_convertible<T, HeapObject>::value,
                 "Handle accept only HeapObject.");
@@ -88,6 +92,11 @@ class Handle {
 
   T* ptr_;
 };
+
+template <typename T>
+LUX_INLINE Handle<T> make_handle(T* obj) {
+  return Handle<T>(obj);
+}
 
 class HandleScope;
 class HandleScopeList {

@@ -37,34 +37,33 @@ class RootMaps {
   LUX_CONST_GETTER(Shape*, map_object, map_object_)
   LUX_CONST_GETTER(Shape*, string_map, string_map_)
   LUX_CONST_GETTER(Shape*, object_map, object_map_)
+  LUX_CONST_GETTER(Shape*, fixed_array_shape, fixed_array_shape_)
 
  private:
   Shape* map_object_;
   Shape* string_map_;
   Shape* object_map_;
+  Shape* fixed_array_shape_;
 };
 
 //                       00000000 00000000
 // SmiTag(smi = 0)                       |
 // Shape.instance_type          |||
-#pragma pack(push)
 class HeapObject: public Object {
  public:
-  static const size_t kSize;
-  static const size_t kHeapObjectOffset;
+  enum {
+    kSize = kPointerSize + kHeapObjectTag,
+    kHeapObjectOffset = kPointerSize + kHeapObjectTag,
+  };
 
   LUX_INLINE Shape* shape() const {
-    return map_;
+    return *(reinterpret_cast<Shape**>(FIELD_ADDR(this, kHeapObjectTag)));
   }
 
  protected:
   static HeapObject* New(Isolate* isolate, Shape* shape, size_t size = 0);
   static HeapObject* NewWithoutShape(Isolate* isolate, size_t size);
-
- private:
-  Shape* map_;
 };
-#pragma pack(pop)
 
 }  // namespace lux
 

@@ -40,7 +40,7 @@ class RegExpNFATest: public lux::IsolateSetup {
     lux::regexp::Visitor v(&b, &z);
     p.node()->Visit(&v, nullptr);
     auto arr = b.flush();
-    printf("%s\n", arr.ToString().c_str());
+    printf("%s\n", arr->ToString().c_str());
   }
 };
 

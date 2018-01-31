@@ -110,6 +110,19 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
     src/zone.cc
     test/cases/objects/jsstring_test.cc)
   target_link_libraries(jsstring_test libgtest.a libgtest_main.a)
+  add_executable(fixed_array_test
+    src/platform/os.cc
+    src/isolate.cc
+    src/heap.cc
+    src/unicode.cc
+    src/debug/stacktrace.cc
+    src/objects/object.cc
+    src/objects/heap_object.cc
+    src/objects/shape.cc
+    src/objects/jsobject.cc
+    src/zone.cc
+    test/cases/objects/fixed_array_test.cc)
+  target_link_libraries(fixed_array_test libgtest.a libgtest_main.a)
 endif()
 
 include_directories(./tools/clang+llvm-5.0.1-final-x86_64-apple-darwin/include/c++/v1)

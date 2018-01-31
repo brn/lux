@@ -30,7 +30,8 @@ namespace lux {
   A(SHAPE, Shape)                               \
   A(JS_STRING, JSString)                        \
   A(JS_OBJECT, JSObject)                        \
-  A(JS_ARRAY, JSArray)
+  A(JS_ARRAY, JSArray)                          \
+  A(FIXED_ARRAY, FixedArray)
 
 enum class InstanceType: uint8_t {
   INVALID,

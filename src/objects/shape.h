@@ -57,7 +57,7 @@ class Shape: public HeapObject {
 
   InstanceType instance_type() const {
     return static_cast<InstanceType>(
-        reinterpret_cast<Pointer>(this) & 0x7);
+        (*reinterpret_cast<uint8_t*>(FIELD_ADDR(this, 0))) & 0x7);
   }
 
   uint8_t size() const {

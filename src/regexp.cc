@@ -71,16 +71,6 @@ const char* Ast::kNodeTypeStringList[] = {
 #define AST_VISIT(Name)                           \
   void Visitor::Visit##Name(Name* node, BytecodeLabel* label)
 
-template <>
-struct NFA::NodeType<u16> {
-  enum { value = 1 };
-};
-
-template <>
-struct NFA::NodeType<Utf16String> {
-  enum { value = 0 };
-};
-
 #define __ builder()->
 using Label = BytecodeLabel;
 

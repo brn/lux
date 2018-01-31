@@ -165,6 +165,7 @@ bool ConvertUtf8ToUtf16(Utf8Iterator* it, Utf16CodePoint* buf, int32_t* index) {
   u32 u = ConverUtf8ToUC32(it);
   if (u > 0) {
     buf[(*index)++] = Utf16CodePoint(u);
+    INVALIDATE(buf[(*index) - 1] < unicode::kUnicodeMax);
     return true;
   }
   return false;
@@ -203,12 +204,8 @@ std::string Utf16String::ToUtf8String() const {
   return st.str();
 }
 
-static const size_t kUtf16CodePointSize = sizeof(Utf16CodePoint);
-
 const Utf16String Unicode::ConvertUtf8StringToUtf16String(const char* str) {
-  auto buf = reinterpret_cast<Utf16CodePoint*>(
-      malloc((strlen(str) * kUtf16CodePointSize)
-             + (kUtf16CodePointSize * 2)));
+  auto buf = new Utf16CodePoint[strlen(str) + 4];
   Utf8Iterator it(str);
   int index = 0;
   while (it.HasMore()) {

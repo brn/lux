@@ -28,6 +28,7 @@
 #include "./unicode.h"
 #include "./utils.h"
 #include "./zone.h"
+#include "./objects/jsobject.h"
 
 namespace lux {
 class Isolate;
@@ -508,32 +509,19 @@ class BytecodeLabel {
 
 class BytecodeArrayWriter;
 
-class BytecodeArray {
+class BytecodeArray:
+      public GenericFixedArray<
+  Bytecode, BytecodeArray, sizeof(Bytecode)> {
  public:
-  explicit BytecodeArray(Bytecode* array, size_t size)
-      : length_(size),
-        bytecode_array_(array) {}
-
-  LUX_INLINE Bytecode pc(int offset) const {
-    INVALIDATE(length_ > offset && offset >= 0);
-    return bytecode_array_[offset];
-  }
-
-  LUX_CONST_GETTER(size_t, length, length_)
-
 #ifdef DEBUG
   std::string ToString() {
     std::stringstream st;
-    for (auto i = 0; i < length_; i++) {
-      st << (i > 0? "\n": "") << bytecode_array_[i].ToString();
+    for (auto i = 0; i < length(); i++) {
+      st << (i > 0? "\n": "") << at(i).ToString();
     }
     return st.str();
   }
 #endif
-
- private:
-  size_t length_;
-  Bytecode* bytecode_array_;
 };
 
 class BytecodeConstantPool {
@@ -566,7 +554,7 @@ class BytecodeArrayWriter {
   void Emit(BytecodeNode* bytecode);
   void EmitJump(BytecodeLabel* label, BytecodeNode* bytecode);
   LUX_GETTER(BytecodeNode*, last_bytecode, bytecode_list_)
-  BytecodeArray Flush();
+  Handle<BytecodeArray> Flush();
   void Bind(BytecodeLabel* label);
 
  private:
@@ -620,7 +608,7 @@ class BytecodeBuilder {
 
   uint32_t StringConstant(Utf16String str, int32_t index = -1);
 
-  LUX_INLINE BytecodeArray flush() {
+  LUX_INLINE Handle<BytecodeArray> flush() {
     return bytecode_array_writer_->Flush();
   }
 

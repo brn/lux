@@ -20,31 +20,27 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "../heap.h"
-#include "./heap_object.h"
-#include "../isolate.h"
-#include "./shape.h"
+#include <gtest/gtest.h>
+#include <string.h>
+#include "../../utils/isolate_setup.h"
+#include "../../../src/utils.h"
+#include "../../../src/objects/jsobject.h"
 
-namespace lux {
-RootMaps::RootMaps(Isolate* isolate) {
-  map_object_ = Shape::New(isolate, InstanceType::SHAPE);
-  string_map_ = Shape::New(isolate, InstanceType::JS_STRING);
-  object_map_ = Shape::New(isolate, InstanceType::JS_OBJECT);
-  fixed_array_shape_ = Shape::New(isolate, InstanceType::FIXED_ARRAY);
-}
+namespace {
+class FixedArrayTest: public lux::IsolateSetup {};
 
-HeapObject* HeapObject::New(Isolate* isolate, Shape* shape, size_t size) {
-  auto addr = isolate->heap()->Allocate(
-      HeapObject::kSize + (size > 0? size: shape->size()));
-  auto heap_object = reinterpret_cast<HeapObject*>(addr + kHeapObjectTag);
-  auto shape_p = reinterpret_cast<Shape**>(heap_object);
-  *shape_p = shape;
-  return reinterpret_cast<HeapObject*>(addr);
+TEST_F(FixedArrayTest, Base) {
+  lux::HandleScope scope;
+  auto arr = lux::FixedArray::New(isolate_, 10);
+  ASSERT_EQ(arr->size(), 80);
+  ASSERT_EQ(arr->length(), 10);
+  auto expected = lux::JSString::New(isolate_, "t");
+  for (int i = 0; i < 10; i++) {
+    auto a = lux::JSString::New(isolate_, "t");
+    arr->write(i, *a);
+  }
+  for (auto &v : **arr) {
+    ASSERT_TRUE(lux::JSString::Cast(v)->Equals(*expected));
+  }
 }
-
-HeapObject* HeapObject::NewWithoutShape(Isolate* isolate, size_t size) {
-  auto addr = isolate->heap()->Allocate(
-      kPointerSize + size + kHeapObjectTag);
-  return reinterpret_cast<HeapObject*>(addr + kHeapObjectTag);
-}
-}  // namespace lux
+}  // namespace

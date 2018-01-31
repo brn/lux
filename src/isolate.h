@@ -38,6 +38,7 @@ class Isolate {
   Shape* string_map() const;
   Shape* object_map() const;
   Shape* map_object() const;
+  Shape* fixed_array_shape() const;
 
  private:
   void InitOnce();
