@@ -28,18 +28,20 @@
 
 namespace lux {
 
-static std::array<size_t, kInstanceTypeCount> kInstanceSizeMap = {{
-#define SIZE_DECL(A, Name) Name::kSize,
+static std::array<size_t, kInstanceTypeCount + 1> kInstanceSizeMap = {{
+    0,
+#define SIZE_DECL(A, Name, p) Name::kSize,
     OBJECT_TYPES(SIZE_DECL)
 #undef SIZE_DECL
   }};
 
 Shape* Shape::New(Isolate* isolate, InstanceType type) {
-  auto addr = reinterpret_cast<Address>(
-      HeapObject::NewWithoutShape(isolate, 0));
-  *addr = static_cast<uint8_t>(type);
-  auto next = addr + 1;
-  *next = kInstanceSizeMap[static_cast<uint8_t>(type)];
-  return reinterpret_cast<Shape*>(addr);
+  auto heap_obj = reinterpret_cast<Address>(
+      HeapObject::NewWithoutShape(isolate, kSize));
+  auto instance_type = FIELD_ADDR(heap_obj, kInstanceTypeOffset);
+  *instance_type = static_cast<uint8_t>(type);
+  auto instance_size = FIELD_ADDR(heap_obj, kInstanceSizeOffset);
+  *instance_size = kInstanceSizeMap[static_cast<uint8_t>(type)];
+  return reinterpret_cast<Shape*>(heap_obj);
 }
 }  // namespace lux

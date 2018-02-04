@@ -26,47 +26,6 @@
 
 namespace lux {
 
-const size_t BytecodeConstantPool::kDefaultPoolSize;
-
-BytecodeConstantPool::BytecodeConstantPool(Isolate* isolate)
-    : size_(kDefaultPoolSize), used_(0),
-      isolate_(isolate) {
-  constant_pool_ = Allocate(kDefaultPoolSize);
-}
-
-uint32_t BytecodeConstantPool::Register(Address value, int32_t index) {
-  if (used_ >= kPointerSize) {
-    Grow();
-  }
-
-  if (index >= 0) {
-    constant_pool_[index] = value;
-    auto use = kPointerSize * index;
-    if (used_ < use) {
-      used_ += use;
-    }
-  } else {
-    *constant_pool_ = value;
-    constant_pool_ += kPointerSize;
-    used_ += kPointerSize;
-  }
-
-  return (used_ / kPointerSize) - 1;
-}
-
-void BytecodeConstantPool::Grow() {
-  auto next_size = size_ * 2;
-  auto new_pool = Allocate(next_size);
-  memcpy(new_pool, constant_pool_, size_);
-  size_ = next_size;
-  constant_pool_ = new_pool;
-}
-
-Address* BytecodeConstantPool::Allocate(size_t size) {
-  return reinterpret_cast<Address*>(
-      isolate_->heap()->Allocate(size));
-}
-
 void BytecodeArrayWriter::Emit(BytecodeNode* bytecode) {
   Append(bytecode);
 }
@@ -86,6 +45,16 @@ void BytecodeArrayWriter::Append(BytecodeNode* node) {
   current_offset_++;
 }
 
+int32_t BytecodeArrayWriter::EmitConstant(BytecodeConstantNode* node) {
+  if (!constant_top_) {
+    constant_top_ = constant_list_ = node;
+  } else {
+    constant_list_->set_next(node);
+    constant_list_ = node;
+  }
+  return constant_length_++;
+}
+
 void BytecodeArrayWriter::Bind(BytecodeLabel* label) {
   label->set_to(last_bytecode());
   label->set_bound_node(last_bytecode());
@@ -96,7 +65,8 @@ void BytecodeArrayWriter::Bind(BytecodeLabel* label) {
   label->set_jmps(&jmps_);
 }
 
-Handle<BytecodeArray> BytecodeArrayWriter::Flush() {
+Handle<BytecodeExecutable> BytecodeArrayWriter::Flush() {
+  HandleScope scope;
   auto array = BytecodeArray::New(isolate_, current_offset_);
   size_t index = 0;
   auto node = bytecode_top_;
@@ -109,10 +79,20 @@ Handle<BytecodeArray> BytecodeArrayWriter::Flush() {
   for (auto &from : jmps_) {
     auto to = from->jmp();
     BytecodeUpdater updater(from->bytecode());
-    updater.UpdateSJ(to->offset() - from->offset());
+    updater.UpdateSJ((to->offset() + 1) - from->offset());
     array->write(from->offset(), updater.bytecode());
   }
-  return array;
+  auto pool = BytecodeConstantArray::New(isolate_, constant_length_);
+  auto bcn = constant_top_;
+  index = 0;
+  while (bcn) {
+    auto obj = bcn->ptr();
+    pool->write(index++, obj);
+    bcn = bcn->next();
+  }
+  return BytecodeExecutable::New(isolate_,
+                                 *scope.Return(array),
+                                 *scope.Return(pool));
 }
 
 BytecodeNode* BytecodeBuilder::Return() {
@@ -132,7 +112,7 @@ BytecodeNode* BytecodeBuilder::ConstantA(uint16_t index) {
 }
 
 BytecodeNode* BytecodeBuilder::ConstantR(uint16_t index, RegisterRef* reg1) {
-  if (!reg1->id()) {
+  if (!reg1->has_id()) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
@@ -142,8 +122,22 @@ BytecodeNode* BytecodeBuilder::ConstantR(uint16_t index, RegisterRef* reg1) {
   return n;
 }
 
+BytecodeNode* BytecodeBuilder::Comment(const char* comment) {
+#ifdef DEBUG
+  auto j = JSString::New(isolate_, comment);
+  auto bcn = new(zone()) BytecodeConstantNode(*j);
+  auto index = bytecode_array_writer_->EmitConstant(bcn);
+  auto b = BytecodeFactory<BytecodeFormat::kOpAx>::New(
+      Bytecode::kComment, index);
+  auto n = new(zone()) BytecodeNode(b);
+  bytecode_array_writer_->Emit(n);
+  return n;
+#endif
+  return nullptr;
+}
+
 BytecodeNode* BytecodeBuilder::ImmI8(int8_t v, RegisterRef* reg1) {
-  if (!reg1->id()) {
+  if (!reg1->has_id()) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
@@ -154,18 +148,26 @@ BytecodeNode* BytecodeBuilder::ImmI8(int8_t v, RegisterRef* reg1) {
 }
 
 BytecodeNode* BytecodeBuilder::ImmI32(int32_t t, RegisterRef* reg1) {
-  if (!reg1->id()) {
+  if (!reg1->has_id()) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
-      Bytecode::kImmI32, t, reg1->id());
+      Bytecode::kImmI32, reg1->id(), t);
+  auto n = new(zone()) BytecodeNode(b);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::CallFastPropertyA(FastProperty t) {
+  auto b = BytecodeFactory<BytecodeFormat::kOpAx>::New(
+      Bytecode::kCallFastPropertyA, static_cast<uint8_t>(t));
   auto n = new(zone()) BytecodeNode(b);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::StoreAR(RegisterRef* reg1) {
-  if (!reg1->id()) {
+  if (!reg1->has_id()) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
@@ -176,7 +178,7 @@ BytecodeNode* BytecodeBuilder::StoreAR(RegisterRef* reg1) {
 }
 
 BytecodeNode* BytecodeBuilder::LoadRA(RegisterRef* reg1) {
-  if (!reg1->id()) {
+  if (!reg1->has_id()) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
@@ -187,10 +189,10 @@ BytecodeNode* BytecodeBuilder::LoadRA(RegisterRef* reg1) {
 }
 
 BytecodeNode* BytecodeBuilder::LoadAIxR(RegisterRef* reg1, RegisterRef* reg2) {
-  if (!reg1->id()) {
+  if (!reg1->has_id()) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
-  if (!reg2->id()) {
+  if (!reg2->has_id()) {
     reg2->set_id(allocate_regiseter(reg2->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
@@ -203,13 +205,13 @@ BytecodeNode* BytecodeBuilder::LoadAIxR(RegisterRef* reg1, RegisterRef* reg2) {
 BytecodeNode* BytecodeBuilder::LoadRIxR(RegisterRef* acc_reg,
                                         RegisterRef* index_reg,
                                         RegisterRef* reg) {
-  if (!acc_reg->id()) {
+  if (!acc_reg->has_id()) {
     acc_reg->set_id(allocate_regiseter(acc_reg->mode()));
   }
-  if (!index_reg->id()) {
+  if (!index_reg->has_id()) {
     index_reg->set_id(allocate_regiseter(index_reg->mode()));
   }
-  if (!reg->id()) {
+  if (!reg->has_id()) {
     reg->set_id(allocate_regiseter(reg->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABCk>::New(
@@ -220,7 +222,7 @@ BytecodeNode* BytecodeBuilder::LoadRIxR(RegisterRef* acc_reg,
 }
 
 BytecodeNode* BytecodeBuilder::ICmpAR(RegisterRef* reg) {
-  if (!reg->id()) {
+  if (!reg->has_id()) {
     reg->set_id(allocate_regiseter(reg->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
@@ -231,10 +233,10 @@ BytecodeNode* BytecodeBuilder::ICmpAR(RegisterRef* reg) {
 }
 
 BytecodeNode* BytecodeBuilder::ICmpRR(RegisterRef* reg1, RegisterRef* reg2) {
-  if (!reg1->id()) {
+  if (!reg1->has_id()) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
-  if (!reg2->id()) {
+  if (!reg2->has_id()) {
     reg2->set_id(allocate_regiseter(reg2->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
@@ -245,10 +247,10 @@ BytecodeNode* BytecodeBuilder::ICmpRR(RegisterRef* reg1, RegisterRef* reg2) {
 }
 
 BytecodeNode* BytecodeBuilder::ICmpGTRRA(RegisterRef* reg1, RegisterRef* reg2) {
-  if (!reg1->id()) {
+  if (!reg1->has_id()) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
-  if (!reg2->id()) {
+  if (!reg2->has_id()) {
     reg2->set_id(allocate_regiseter(reg2->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
@@ -259,10 +261,10 @@ BytecodeNode* BytecodeBuilder::ICmpGTRRA(RegisterRef* reg1, RegisterRef* reg2) {
 }
 
 BytecodeNode* BytecodeBuilder::ICmpLTRRA(RegisterRef* reg1, RegisterRef* reg2) {
-  if (!reg1->id()) {
+  if (!reg1->has_id()) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
-  if (!reg2->id()) {
+  if (!reg2->has_id()) {
     reg2->set_id(allocate_regiseter(reg2->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
@@ -300,7 +302,7 @@ BytecodeNode* BytecodeBuilder::JmpIfFalse(BytecodeLabel* label) {
 }
 
 BytecodeNode* BytecodeBuilder::Inc(RegisterRef* reg1) {
-  if (!reg1->id()) {
+  if (!reg1->has_id()) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
@@ -311,7 +313,7 @@ BytecodeNode* BytecodeBuilder::Inc(RegisterRef* reg1) {
 }
 
 BytecodeNode* BytecodeBuilder::Dec(RegisterRef* reg1) {
-  if (!reg1->id()) {
+  if (!reg1->has_id()) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
@@ -322,10 +324,10 @@ BytecodeNode* BytecodeBuilder::Dec(RegisterRef* reg1) {
 }
 
 BytecodeNode* BytecodeBuilder::Add(RegisterRef* reg1, RegisterRef* reg2) {
-  if (!reg1->id()) {
+  if (!reg1->has_id()) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
-  if (!reg2->id()) {
+  if (!reg2->has_id()) {
     reg2->set_id(allocate_regiseter(reg2->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
@@ -336,10 +338,10 @@ BytecodeNode* BytecodeBuilder::Add(RegisterRef* reg1, RegisterRef* reg2) {
 }
 
 BytecodeNode* BytecodeBuilder::Sub(RegisterRef* reg1, RegisterRef* reg2) {
-  if (!reg1->id()) {
+  if (!reg1->has_id()) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
-  if (!reg2->id()) {
+  if (!reg2->has_id()) {
     reg2->set_id(allocate_regiseter(reg2->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
@@ -350,10 +352,10 @@ BytecodeNode* BytecodeBuilder::Sub(RegisterRef* reg1, RegisterRef* reg2) {
 }
 
 BytecodeNode* BytecodeBuilder::Mul(RegisterRef* reg1, RegisterRef* reg2) {
-  if (!reg1->id()) {
+  if (!reg1->has_id()) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
-  if (!reg2->id()) {
+  if (!reg2->has_id()) {
     reg2->set_id(allocate_regiseter(reg2->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
@@ -364,10 +366,10 @@ BytecodeNode* BytecodeBuilder::Mul(RegisterRef* reg1, RegisterRef* reg2) {
 }
 
 BytecodeNode* BytecodeBuilder::Div(RegisterRef* reg1, RegisterRef* reg2) {
-  if (!reg1->id()) {
+  if (!reg1->has_id()) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
-  if (!reg2->id()) {
+  if (!reg2->has_id()) {
     reg2->set_id(allocate_regiseter(reg2->mode()));
   }
   auto b = BytecodeFactory<BytecodeFormat::kOpABx>::New(
@@ -398,11 +400,9 @@ void BytecodeBuilder::BranchA(BytecodeLabel* then_jmp,
   JmpIfFalse(else_jmp);
 }
 
-uint32_t BytecodeBuilder::StringConstant(Utf16String str, int32_t index) {
-  auto data = str.data();
-  return constant_pool_->Register(
-      reinterpret_cast<Address>(reinterpret_cast<intptr_t>(
-          data)), index);
+uint32_t BytecodeBuilder::StringConstant(JSString* str, int32_t index) {
+  auto bcn = new(zone()) BytecodeConstantNode(str);
+  return bytecode_array_writer_->EmitConstant(bcn);
 }
 
 BytecodeScope::BytecodeScope(BytecodeBuilder* builder)

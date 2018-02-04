@@ -36,32 +36,37 @@ class Isolate;
 // --------------------------+
 // |  1byte | instance size  |
 // +-------------------------+
-// |  padding                |
+// |  padding(7/3)           |
 // +-------------------------+
 // |  Forwarding Pointer     |
+// +-------------------------+
+// |  padding(7/3)           |
 // +-------------------------+
 #pragma pack(push)
 class Shape: public HeapObject {
  public:
   enum {
+    kOffset = HeapObject::kHeapObjectOffset,
     kPaddingSize = kPointerSize - kOneByteSize,
     kHeaderSize = (kOneByteSize << 1),
-    kSize = kHeaderSize + kPaddingSize + kPointerSize,
-    kInstanceTypePos = 0,
-    kInstanceSizePos = 1,
-    kForwardingPointerPos = kInstanceSizePos + kPaddingSize,
-    kShapeOffset = kForwardingPointerPos,
+    kSize = kHeaderSize + (kPaddingSize * 2) + kPointerSize,
+    kInstanceTypeOffset = kOffset,
+    kInstanceSizeOffset = kInstanceTypeOffset + kOneByteSize,
+    kForwardingPointerOffset =
+    kInstanceSizeOffset + kOneByteSize + kPaddingSize,
+    kShapeOffset = kForwardingPointerOffset + kPointerSize + kPaddingSize,
   };
 
   static Shape* New(Isolate* isolate, InstanceType type);
 
   InstanceType instance_type() const {
     return static_cast<InstanceType>(
-        (*reinterpret_cast<uint8_t*>(FIELD_ADDR(this, 0))) & 0x7);
+        (*reinterpret_cast<uint8_t*>(
+            FIELD_ADDR(this, kInstanceTypeOffset))));
   }
 
   uint8_t size() const {
-    return *FIELD_ADDR(this, kInstanceSizePos);
+    return *(FIELD_ADDR(this, kInstanceSizeOffset));
   }
 
   LUX_INLINE bool IsForwardingPointer() const {
@@ -70,7 +75,7 @@ class Shape: public HeapObject {
 
   LUX_INLINE HeapObject* ForwardingPointer() const {
     return reinterpret_cast<HeapObject*>(
-        FIELD_ADDR(this, kForwardingPointerPos));
+        FIELD_ADDR(this, kForwardingPointerOffset));
   }
 };
 #pragma pack(pop)

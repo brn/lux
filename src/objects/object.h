@@ -27,8 +27,16 @@
 #include "../utils.h"
 
 namespace lux {
-#define FIELD_ADDR(ptr, offset)                 \
-  reinterpret_cast<Address>(reinterpret_cast<uintptr_t>(ptr)) + offset
+#define FIELD_ROOT_ADDR(ptr, offset)              \
+  reinterpret_cast<Address>(                      \
+      reinterpret_cast<uintptr_t>(ptr)) + offset
+
+#define FIELD_ADDR(ptr, offset)                                         \
+  (reinterpret_cast<Address>(                                           \
+      reinterpret_cast<uintptr_t>(ptr)) - Object::kHeapObjectTag) + offset
+
+#define FIELD_PROPERTY(Type, ptr, offset)       \
+  reinterpret_cast<Type>(FIELD_ADDR(ptr, offset))
 
 class Object {
  public:
@@ -52,8 +60,12 @@ class Object {
   }
 
   inline bool IsHeapObject() const {
-    return IsHeapObject(reinterpret_cast<Address>(
-        reinterpret_cast<uintptr_t>(this)));
+    return IsHeapObject(FIELD_ROOT_ADDR(this, 0));
+  }
+
+  template <typename T>
+  inline static Object* Cast(T v) {
+    return reinterpret_cast<Object*>(v);
   }
 };
 
@@ -76,6 +88,14 @@ class Smi: public Object {
 
   smi_t value() const {
     return reinterpret_cast<smi_t>(this) >> 1;
+  }
+
+  bool Equals(Smi* smi) {
+    return smi->raw_value() == raw_value();
+  }
+
+  static Smi* Cast(Object* o) {
+    return reinterpret_cast<Smi*>(o);
   }
 };
 }  // namespace lux

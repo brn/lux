@@ -25,6 +25,7 @@
 
 #include "./instances.h"
 #include "./object.h"
+#include "../utils.h"
 
 namespace lux {
 class Isolate;
@@ -34,16 +35,15 @@ class RootMaps {
  public:
   explicit RootMaps(Isolate* isolate);
 
-  LUX_CONST_GETTER(Shape*, map_object, map_object_)
-  LUX_CONST_GETTER(Shape*, string_map, string_map_)
-  LUX_CONST_GETTER(Shape*, object_map, object_map_)
-  LUX_CONST_GETTER(Shape*, fixed_array_shape, fixed_array_shape_)
+#define ROOT_MAP_PROPS_DEF(A, N, p)                   \
+  LUX_CONST_GETTER(Shape*, p, p##_)
+  OBJECT_TYPES(ROOT_MAP_PROPS_DEF)
+#undef ROOT_MAP_PROPS_DEF
 
  private:
-  Shape* map_object_;
-  Shape* string_map_;
-  Shape* object_map_;
-  Shape* fixed_array_shape_;
+#define ROOT_MAP_PROPS_DEF(A, N, p) Shape* p##_;
+  OBJECT_TYPES(ROOT_MAP_PROPS_DEF)
+#undef ROOT_MAP_PROPS_DEF
 };
 
 //                       00000000 00000000
@@ -52,12 +52,17 @@ class RootMaps {
 class HeapObject: public Object {
  public:
   enum {
-    kSize = kPointerSize + kHeapObjectTag,
-    kHeapObjectOffset = kPointerSize + kHeapObjectTag,
+    kSize = LUX_ALIGN_OFFSET(kPointerSize + kHeapObjectTag, kPointerSize),
+    kHeapObjectOffset = kPointerSize,
   };
 
   LUX_INLINE Shape* shape() const {
-    return *(reinterpret_cast<Shape**>(FIELD_ADDR(this, kHeapObjectTag)));
+    return *(reinterpret_cast<Shape**>(FIELD_ADDR(this, 0)));
+  }
+
+  LUX_INLINE static HeapObject* Cast(Object* o) {
+    INVALIDATE(o->IsHeapObject());
+    return reinterpret_cast<HeapObject*>(o);
   }
 
  protected:

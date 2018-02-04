@@ -24,22 +24,27 @@
 #include "./heap_object.h"
 #include "../isolate.h"
 #include "./shape.h"
+#include "./jsobject.h"
 
 namespace lux {
 RootMaps::RootMaps(Isolate* isolate) {
-  map_object_ = Shape::New(isolate, InstanceType::SHAPE);
-  string_map_ = Shape::New(isolate, InstanceType::JS_STRING);
-  object_map_ = Shape::New(isolate, InstanceType::JS_OBJECT);
-  fixed_array_shape_ = Shape::New(isolate, InstanceType::FIXED_ARRAY);
+#define ROOT_MAPS_INIT(NAME, Name, p)             \
+  p##_ = Shape::New(isolate, InstanceType::NAME); \
+  INVALIDATE(p##_->instance_type()                \
+             == InstanceType::NAME);              \
+  INVALIDATE(p##_->size()                         \
+             == Name::kSize);
+  OBJECT_TYPES(ROOT_MAPS_INIT)
+#undef ROOT_MAPS_INIT
 }
 
 HeapObject* HeapObject::New(Isolate* isolate, Shape* shape, size_t size) {
   auto addr = isolate->heap()->Allocate(
       HeapObject::kSize + (size > 0? size: shape->size()));
-  auto heap_object = reinterpret_cast<HeapObject*>(addr + kHeapObjectTag);
+  auto heap_object = reinterpret_cast<HeapObject*>(addr);
   auto shape_p = reinterpret_cast<Shape**>(heap_object);
   *shape_p = shape;
-  return reinterpret_cast<HeapObject*>(addr);
+  return reinterpret_cast<HeapObject*>(addr + kHeapObjectTag);
 }
 
 HeapObject* HeapObject::NewWithoutShape(Isolate* isolate, size_t size) {

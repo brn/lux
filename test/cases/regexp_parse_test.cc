@@ -24,7 +24,7 @@
 #include "../utils/compare_node.h"
 #include "../utils/isolate_setup.h"
 #include "../../src/regexp.h"
-#include "../../src/unicode.h"
+#include "../../src/objects/jsobject.h"
 
 class RegExpTest: public lux::IsolateSetup {
  protected:
@@ -33,8 +33,8 @@ class RegExpTest: public lux::IsolateSetup {
                lux::SourcePosition source_position = lux::SourcePosition()) {
     lux::ErrorReporter er;
     lux::SourcePosition sp;
-    auto s = lux::Unicode::ConvertUtf8StringToUtf16String(regexp);
-    lux::regexp::Parser p(&er, &sp, s);
+    auto s = lux::JSString::New(isolate_, regexp);
+    lux::regexp::Parser p(isolate_, &er, &sp, s);
     p.Parse();
     if (error) {
       ASSERT_TRUE(er.HasPendingError());

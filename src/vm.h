@@ -23,10 +23,93 @@
 #ifndef SRC_VM_H_
 #define SRC_VM_H_
 
+#include <array>
+#include "./bytecode.h"
+#include "./utils.h"
+
 namespace lux {
+class Isolate;
+class BytecodeExecutable;
+
 class VirtualMachine {
  public:
-  void Run();
+  class Registers {
+   public:
+    void store(int index, Object* value) {
+      reg_[index] = value;
+    }
+
+    Object* load(int index) {
+      INVALIDATE(index < 256);
+      return reg_[index];
+    }
+
+    void Clear() {
+      for (int i = 0; i< 256; i++) {
+        reg_[i] = nullptr;
+      }
+    }
+   private:
+    Object* reg_[256];
+  };
+
+  class Executor {
+   public:
+    Executor(Isolate* isolate,
+             size_t argc,
+             std::initializer_list<Object*> argv,
+             BytecodeExecutable* executable)
+        : pc_(0), isolate_(isolate),
+          bytecode_array_(executable->bytecode_array()),
+          constant_pool_(executable->constant_pool()) {
+      int i = 0;
+      for (auto &r : argv) {
+        store_register_value_at(i++, r);
+      }
+    }
+
+    LUX_INLINE Object* load_accumulator() {
+      return acc_;
+    }
+
+    LUX_INLINE void store_accumulator(Object* value) {
+      acc_ = value;
+    }
+
+    LUX_INLINE Object* load_register_value_at(int index) {
+      return registers_.load(index);
+    }
+
+    LUX_INLINE void store_register_value_at(int index, Object* value) {
+      registers_.store(index, value);
+    }
+
+    void Dispatch(int step = 1);
+
+    Object* return_value() const {
+      return acc_;
+    }
+
+   private:
+    uint32_t pc_;
+    size_t argc_;
+    Object* argv_;
+    Object* acc_;
+    Registers registers_;
+    Isolate* isolate_;
+    BytecodeArray* bytecode_array_;
+    BytecodeConstantArray* constant_pool_;
+  };
+
+  explicit VirtualMachine(Isolate* isolate)
+          : isolate_(isolate) {}
+
+  Object* Execute(BytecodeExecutable* executable,
+                  std::initializer_list<Object*> argv);
+
+
+ private:
+  Isolate* isolate_;
 };
 }  // namespace lux
 

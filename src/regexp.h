@@ -29,6 +29,7 @@
 #include <utility>
 #include <vector>
 #include "./bytecode.h"
+#include "./heap.h"
 #include "./source_position.h"
 #include "./unicode.h"
 #include "./utils.h"
@@ -36,7 +37,8 @@
 #include "./reporter.h"
 
 namespace lux {
-
+class Isolate;
+class JSString;
 namespace regexp {
 #define REGEXP_AST_TYPES(A)                     \
   A(GROUP, Group)                               \
@@ -285,26 +287,27 @@ class BackReference: public Ast {
 
 class CharClass: public Ast {
  public:
-  explicit CharClass(bool exclude, Utf16String value)
+  explicit CharClass(bool exclude, JSString* value)
       : Ast(Ast::CHAR_CLASS),
         exclude_(exclude),
         value_(value) {}
 
   REGEXP_VISIT_INTERNAL_METHOD_DECL(CharClass);
 
-  LUX_CONST_GETTER(Utf16String, value, value_)
+  LUX_CONST_GETTER(JSString*, value, value_)
 
 #ifdef DEBUG
   std::string ToString(std::string* indent = nullptr) const {
     std::stringstream st;
+    JSString::Utf8String u8str(value_);
     st << "CharClass exclude = " << (exclude_? "true": "false");
-    st << ' ' << '<' << value_.ToUtf8String() << '>';
+    st << ' ' << '<' << u8str.value() << '>';
     return st.str();
   }
 #endif
  private:
   bool exclude_;
-  Utf16String value_;
+  JSString* value_;
 };
 
 class Alternate final: public Ast {
@@ -445,12 +448,13 @@ class Char: public Ast {
 
 class Parser {
  public:
-  Parser(ErrorReporter* error_reporter,
+  Parser(Isolate* isolate,
+         ErrorReporter* error_reporter,
          SourcePosition* source_position,
-         Utf16String source)
+         Handle<JSString> source)
       : reporter_(error_reporter),
         source_position_(source_position),
-        it_(source.begin()), end_(source.end()),
+        it_(source->begin()), end_(source->end()),
         source_(source) {}
 
   void Parse();
@@ -502,12 +506,30 @@ class Parser {
   }
 
   Root root_;
+  Isolate* isolate_;
   ErrorReporter* reporter_;
   SourcePosition* source_position_;
-  Utf16String::iterator it_;
-  Utf16String::iterator end_;
-  Utf16String source_;
+  JSString::Iterator it_;
+  JSString::Iterator end_;
+  Handle<JSString> source_;
   ZoneAllocator zone_allocator_;
+};
+
+class Compiler {
+ public:
+  Compiler(Isolate* isolate,
+           ErrorReporter* error_reporter,
+           SourcePosition* sp)
+      : isolate_(isolate),
+        error_reporter_(error_reporter),
+        sp_(sp) {}
+
+  Handle<JSFunction> Compile(const char* source);
+
+ private:
+  Isolate* isolate_;
+  ErrorReporter* error_reporter_;
+  SourcePosition* sp_;
 };
 }  // namespace regexp
 }  // namespace lux

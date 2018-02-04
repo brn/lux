@@ -32,7 +32,7 @@
 
 namespace lux {
 class Isolate;
-
+class BytecodeExecutable;
 // Based on Lua bytecode.
 /*===========================================================================
   We assume that instructions are unsigned 32-bit integers.
@@ -74,14 +74,17 @@ struct BytecodeFormat {
   A(3 << 3, JmpIfFalse, 1, BytecodeLabel*)                              \
   /*=== OpAx ===*/                                                      \
   A(BYTECODE_NUM(1, kOpAx), Return, 0)                                  \
+  A(BYTECODE_NUM(2, kOpAx), Comment, 1, const char*)                    \
+  /* Store Constant to Acc */                                           \
+  A(BYTECODE_NUM(3, kOpAx), ConstantA, 1, uint16_t)                     \
+  /* Call Fast builtin property */                                      \
+  A(BYTECODE_NUM(4, kOpAx), CallFastPropertyA, 1, FastProperty)         \
   /*=== kOpAsBx ===*/                                                   \
   /*=== kOpABx ===*/                                                    \
   /* Store Imm to Reg */                                                \
   A(BYTECODE_NUM(1, kOpABx), ImmI8, 1, int8_t, RegisterRef*)            \
   /* Store Imm to Reg */                                                \
   A(BYTECODE_NUM(2, kOpABx), ImmI32, 1, int32_t, RegisterRef*)          \
-  /* Store Constant to Acc */                                           \
-  A(BYTECODE_NUM(3, kOpABx), ConstantA, 1, uint16_t)                    \
   /* Store Constant to Reg */                                           \
   A(BYTECODE_NUM(4, kOpABx), ConstantR, 2, uint16_t, RegisterRef*)      \
   /* Store Acc to Reg */                                                \
@@ -118,93 +121,70 @@ enum class AddressingMode: uint8_t {
   kImmediate,
 };
 
+enum class FastProperty: uint8_t {
+  kLength
+};
+
 class RegisterRef {
  public:
   explicit RegisterRef(AddressingMode mode
                        = AddressingMode::kImmediate)
-      : mode_(mode), register_id_(0) {}
+      : mode_(mode), register_id_(-1) {}
 
   LUX_GETTER(AddressingMode, mode, mode_)
   LUX_CONST_PROPERTY(uint8_t, id, register_id_)
+  bool has_id() const {
+    return register_id_ != -1;
+  }
 
  private:
   AddressingMode mode_;
-  uint8_t register_id_;
-};
-
-class Register {
- public:
-  enum {
-    kMask8BitL = ~0xFF,
-    kMask8BitH = ~0XF0,
-    kMask16Bit = ~0xFFFF,
-    kMask32Bit = ~0xFFFFFF
-  };
-  void set_al(uint8_t v) {
-    value_ = (value_ & kMask8BitL) | v;
-  }
-
-  uint8_t al() const {
-    return value_ & ~kMask8BitL;
-  }
-
-  void set_ah(uint8_t v) {
-    value_ = (value_ & kMask8BitH) | (v << 8);
-  }
-
-  uint8_t ah() const {
-    return value_ & ~kMask8BitH;
-  }
-
-  void set_ax(uint16_t v) {
-    value_ = (value_ & kMask16Bit) | v;
-  }
-
-  uint16_t ax() const {
-    return value_ & ~kMask16Bit;
-  }
-
-  void set_eax(uint32_t v) {
-    value_ = (value_ & kMask32Bit) | v;
-  }
-
-  uint32_t eax() const {
-    return value_ & ~kMask32Bit;
-  }
-
-  void set_rax(uint64_t v) {
-    value_ = v;
-  }
-
-  uint64_t rax() const {
-    return value_;
-  }
-
- private:
-  uint64_t value_;
+  int32_t register_id_;
 };
 
 class RegisterAllocator {
  public:
+  enum Type {
+    kParameter1,
+    kParameter2,
+    kParameter3,
+    kParameter4,
+    kParameter5,
+    kParameter6,
+    kParameter7,
+    kParameter8,
+    kParameter9,
+    kParameter10,
+    kImmRange = 128
+  };
+
+  RegisterAllocator() {
+    use_1.assign(1023);
+  }
+
+  static RegisterRef Parameter(int id) {
+    auto r = RegisterRef();
+    r.set_id(id);
+    return r;
+  }
+
   int32_t use(AddressingMode mode) {
     bool imm = mode == AddressingMode::kImmediate;
-    auto ret = DoUse(imm? use_1: addr_1);
+    auto ret = DoUse(imm? &use_1: &addr_1);
     if (ret == -1) {
-      ret = DoUse(imm? use_2: addr_2);
+      ret = DoUse(imm? &use_2: &addr_2);
       if (ret > -1) {
         if (imm) {
-          ret += 128;
-        } else {
           ret += 64;
+        } else {
+          ret += 192;
         }
         return ret;
       }
     }
 
-    if (imm) {
+    if (!imm) {
       ret += 128;
-    } else {
-      ret += 64;
     }
     return ret;
   }
@@ -222,12 +202,12 @@ class RegisterAllocator {
   }
 
  private:
-  int32_t DoUse(Bitset<uint64_t> use) {
-    if (use.is_full()) {
+  int32_t DoUse(Bitset<uint64_t>* use) {
+    if (use->is_full()) {
       return -1;
     }
-    auto index = use.RightMostEmptySlot();
-    use.set(index);
+    auto index = use->RightMostEmptySlot();
+    use->set(index);
     return index;
   }
 
@@ -235,6 +215,11 @@ class RegisterAllocator {
   Bitset<uint64_t> use_2;
   Bitset<uint64_t> addr_1;
   Bitset<uint64_t> addr_2;
+};
+
+class BytecodeConstantArray:
+      public GenericFixedArray<
+  Object*, BytecodeConstantArray, kPointerSize> {
 };
 
 struct BytecodeSize {
@@ -316,8 +301,16 @@ class Bytecode {
   }
 
 #ifdef DEBUG
-  std::string ToString() const {
+  std::string ToString(BytecodeConstantArray* pool) const {
     std::stringstream st;
+    if (instruction() == Bytecode::kComment) {
+      auto v = pool->at(Ax());
+      INVALIDATE(v->IsHeapObject());
+      JSString::Utf8String u8str(JSString::Cast(v));
+      st << ";;" << u8str.value();
+      return st.str();
+    }
+
     switch (instruction()) {
 #define BYTECODE_CASE(index, A, n, ...)               \
       case k##A: {                                    \
@@ -336,7 +329,7 @@ class Bytecode {
 
   std::string ToStringField(size_t len) const {
     std::stringstream st;
-    std::string indent(15 - len, ' ');
+    std::string indent(19 - len, ' ');
     switch (format()) {
       case BytecodeFormat::kOpsJk:
         st << indent << "sJ = " << sJ();
@@ -514,47 +507,49 @@ class BytecodeArray:
   Bytecode, BytecodeArray, sizeof(Bytecode)> {
  public:
 #ifdef DEBUG
-  std::string ToString() {
+  std::string ToString(BytecodeConstantArray* constant_pool) {
     std::stringstream st;
+    auto max = std::to_string(length()).size();
     for (auto i = 0; i < length(); i++) {
-      st << (i > 0? "\n": "") << at(i).ToString();
+      auto size = std::to_string(i).size();
+      std::string indent((max - size) + 1, ' ');
+      st << (i > 0? "\n": "") << indent <<  i << ": "
+         << at(i).ToString(constant_pool);
     }
     return st.str();
   }
 #endif
 };
 
-class BytecodeConstantPool {
+class BytecodeConstantNode: public Zone {
  public:
-  static const size_t kDefaultPoolSize = 1 KB;
-  explicit BytecodeConstantPool(Isolate* isolate);
-
-  uint32_t Register(Address constant, int32_t index = -1);
-  Address Value(uint32_t index) const {
-    INVALIDATE(used_ / kPointerSize > index);
-    return constant_pool_[index];
-  }
-
+  explicit BytecodeConstantNode(Object* obj)
+      : ptr_(obj), next_(nullptr) {}
+  LUX_CONST_PROPERTY(BytecodeConstantNode*, next, next_);
+  LUX_CONST_PROPERTY(Object*, ptr, ptr_);
  private:
-  void Grow();
-  Address* Allocate(size_t size);
-
-  size_t size_;
-  size_t used_;
-  Isolate* isolate_;
-  Address* constant_pool_;
+  Object* ptr_;
+  BytecodeConstantNode* next_;
 };
 
 class BytecodeArrayWriter {
  public:
   explicit BytecodeArrayWriter(Isolate* isolate,
                                ZoneAllocator* zone_alloc)
-      : isolate_(isolate), zone_allocator_(zone_alloc) {}
+      : current_offset_(0),
+        constant_length_(0),
+        isolate_(isolate),
+        constant_list_(nullptr),
+        constant_top_(nullptr),
+        bytecode_top_(nullptr),
+        bytecode_list_(nullptr),
+        zone_allocator_(zone_alloc){}
 
+  int32_t EmitConstant(BytecodeConstantNode* node);
   void Emit(BytecodeNode* bytecode);
   void EmitJump(BytecodeLabel* label, BytecodeNode* bytecode);
   LUX_GETTER(BytecodeNode*, last_bytecode, bytecode_list_)
-  Handle<BytecodeArray> Flush();
+  Handle<BytecodeExecutable> Flush();
   void Bind(BytecodeLabel* label);
 
  private:
@@ -563,8 +558,11 @@ class BytecodeArrayWriter {
     return zone_allocator_;
   }
   int32_t current_offset_;
+  int32_t constant_length_;
   std::vector<BytecodeNode*> jmps_;
   Isolate* isolate_;
+  BytecodeConstantNode* constant_list_;
+  BytecodeConstantNode* constant_top_;
   BytecodeNode* bytecode_top_;
   BytecodeNode* bytecode_list_;
   ZoneAllocator* zone_allocator_;
@@ -590,8 +588,7 @@ class BytecodeBuilder {
  public:
   explicit BytecodeBuilder(Isolate* isolate,
                            ZoneAllocator* zone_allocator)
-      : zone_allocator_(zone_allocator) {
-    constant_pool_(isolate);
+      : isolate_(isolate), zone_allocator_(zone_allocator) {
     bytecode_array_writer_(isolate, zone_allocator);
   }
 
@@ -606,9 +603,9 @@ class BytecodeBuilder {
 
   void BranchA(BytecodeLabel* then_jmp, BytecodeLabel* else_jmp);
 
-  uint32_t StringConstant(Utf16String str, int32_t index = -1);
+  uint32_t StringConstant(JSString* str, int32_t index = -1);
 
-  LUX_INLINE Handle<BytecodeArray> flush() {
+  LUX_INLINE Handle<BytecodeExecutable> flush() {
     return bytecode_array_writer_->Flush();
   }
 
@@ -633,8 +630,8 @@ class BytecodeBuilder {
     return zone_allocator_;
   }
 
+  Isolate* isolate_;
   ZoneAllocator* zone_allocator_;
-  LazyInitializer<BytecodeConstantPool> constant_pool_;
   LazyInitializer<BytecodeArrayWriter> bytecode_array_writer_;
   RegisterAllocator register_allocator_;
 };

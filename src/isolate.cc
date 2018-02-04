@@ -19,6 +19,7 @@
 #include "./isolate.h"
 #include "./objects/shape.h"
 #include "./objects/heap_object.h"
+#include "./objects/jsobject.h"
 
 namespace lux {
 Isolate* Isolate::GetPerThreadInstance() {
@@ -31,19 +32,18 @@ void Isolate::InitOnce() {
   if (!once_flag_.test_and_set()) {
     heap_ = new Heap();
     root_maps_ = new RootMaps(this);
+    jsval_true_ = JSSpecials::NewWithoutHandle(this, JSSpecials::kTrue);
+    jsval_false_ = JSSpecials::NewWithoutHandle(this, JSSpecials::kFalse);
+    jsval_undefined_
+      = JSSpecials::NewWithoutHandle(this, JSSpecials::kUndefined);
+    jsval_null_ = JSSpecials::NewWithoutHandle(this, JSSpecials::kNull);
   }
 }
 
-Shape* Isolate::string_map() const {
-  return root_maps_->string_map();
-}
-Shape* Isolate::fixed_array_shape() const {
-  return root_maps_->fixed_array_shape();
-}
-Shape* Isolate::object_map() const {
-  return root_maps_->object_map();
-}
-Shape* Isolate::map_object() const {
-  return root_maps_->map_object();
-}
+#define ISOLATE_SHAPE_GETTER(NAME, Name, p) \
+  Shape* Isolate::p() const {               \
+    return root_maps_->p();                 \
+  }
+  OBJECT_TYPES(ISOLATE_SHAPE_GETTER)
+#undef ISOLATE_SHAPE_GETTER
 }  // namespace lux

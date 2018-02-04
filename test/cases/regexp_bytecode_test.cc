@@ -22,31 +22,31 @@
 
 #include <gtest/gtest.h>
 #include "../utils/compare_node.h"
+#include "../../src/heap.h"
 #include "../utils/isolate_setup.h"
 #include "../../src/regexp.h"
 #include "../../src/unicode.h"
+#include "../../src/vm.h"
 
-class RegExpNFATest: public lux::IsolateSetup {
+class RegExpBytecodeTest: public lux::IsolateSetup {
  protected:
   template <bool error = false, bool show_error = false>
   void RunTest(const char* regexp) {
+    lux::HandleScope scope;
     lux::ErrorReporter er;
     lux::SourcePosition sp;
-    auto s = lux::Unicode::ConvertUtf8StringToUtf16String(regexp);
-    lux::regexp::Parser p(&er, &sp, s);
-    p.Parse();
-    lux::ZoneAllocator z;
-    lux::BytecodeBuilder b(isolate_, &z);
-    lux::regexp::Visitor v(&b, &z);
-    p.node()->Visit(&v, nullptr);
-    auto arr = b.flush();
-    printf("%s\n", arr->ToString().c_str());
+    lux::regexp::Compiler compiler(isolate_, &er, &sp);
+    auto function = compiler.Compile(regexp);
+    printf("%s\n", function->code()->ToString().c_str());
+    auto ret = function->Call(isolate_, {
+        *lux::JSString::New(isolate_, "bbx")});
+    printf("%llu\n", lux::Smi::Cast(ret)->value());
   }
 };
 
 
 namespace {
-TEST_F(RegExpNFATest, Simple) {
-  RunTest("(aa*|bb*)+");
+TEST_F(RegExpBytecodeTest, Simple) {
+  RunTest("bb(a|b|x)");
 }
 }

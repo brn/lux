@@ -95,7 +95,7 @@ class Handle {
 
 template <typename T>
 LUX_INLINE Handle<T> make_handle(T* obj) {
-  return Handle<T>(obj);
+  return Handle<T>::New(obj);
 }
 
 class HandleScope;

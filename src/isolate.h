@@ -21,11 +21,13 @@
 
 #include <atomic>
 #include "./utils.h"
+#include "./objects/instances.h"
 
 namespace lux {
 class Heap;
 class RootMaps;
 class Shape;
+class JSSpecials;
 
 class Isolate {
  public:
@@ -35,10 +37,14 @@ class Isolate {
     return heap_;
   }
 
-  Shape* string_map() const;
-  Shape* object_map() const;
-  Shape* map_object() const;
-  Shape* fixed_array_shape() const;
+#define ISOLATE_SHAPE_GETTER(NAME, Name, p) Shape* p() const;
+  OBJECT_TYPES(ISOLATE_SHAPE_GETTER)
+#undef ISOLATE_SHAPE_GETTER
+
+  LUX_CONST_GETTER(JSSpecials*, jsval_null, jsval_null_)
+  LUX_CONST_GETTER(JSSpecials*, jsval_undefined, jsval_undefined_)
+  LUX_CONST_GETTER(JSSpecials*, jsval_true, jsval_true_)
+  LUX_CONST_GETTER(JSSpecials*, jsval_false, jsval_false_)
 
  private:
   void InitOnce();
@@ -46,6 +52,10 @@ class Isolate {
   Heap* heap_;
   RootMaps* root_maps_;
   std::atomic_flag once_flag_;
+  JSSpecials* jsval_null_;
+  JSSpecials* jsval_undefined_;
+  JSSpecials* jsval_true_;
+  JSSpecials* jsval_false_;
 };
 }  // namespace lux
 

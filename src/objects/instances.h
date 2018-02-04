@@ -26,23 +26,26 @@
 #include <stdint.h>
 
 namespace lux {
-#define OBJECT_TYPES(A)                         \
-  A(SHAPE, Shape)                               \
-  A(JS_STRING, JSString)                        \
-  A(JS_OBJECT, JSObject)                        \
-  A(JS_ARRAY, JSArray)                          \
-  A(FIXED_ARRAY, FixedArray)
+#define OBJECT_TYPES(A)                                                 \
+  A(SHAPE, Shape, meta_shape)                                           \
+  A(JS_FUNCTION, JSFunction, function_shape)                            \
+  A(JS_STRING, JSString, string_shape)                                  \
+  A(JS_OBJECT, JSObject, object_shape)                                  \
+  A(JS_ARRAY, JSArray, array_shape)                                     \
+  A(JS_SPECIALS, JSSpecials, specials_shape)                            \
+  A(BYTECODE_EXECUTABLE, BytecodeExecutable, bytecode_executable_shape) \
+  A(FIXED_ARRAY, FixedArray, fixed_array_shape)
 
 enum class InstanceType: uint8_t {
   INVALID,
-#define INSTANCE_TYPE_DEF(TYPE, Name) TYPE,
+#define INSTANCE_TYPE_DEF(TYPE, Name, s) TYPE,
   OBJECT_TYPES(INSTANCE_TYPE_DEF)
 #undef INSTANCE_TYPE_DEF
 };
 
 enum InstanceTypeCount__ {
   PADDING_ = -1,
-#define INSTANCE_TYPE_DEF(TYPE, Name) TYPE,
+#define INSTANCE_TYPE_DEF(TYPE, Name, s) TYPE,
   OBJECT_TYPES(INSTANCE_TYPE_DEF)
 #undef INSTANCE_TYPE_DEF
   LAST

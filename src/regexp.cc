@@ -21,6 +21,7 @@
 // THE SOFTWARE.
 
 #include "./regexp.h"
+#include "./objects/jsobject.h"
 #include "./unicode.h"
 
 namespace lux {
@@ -33,9 +34,10 @@ namespace regexp {
 
 #ifdef DEBUG
 #define REPORT_SYNTAX_ERROR(parser, message)                            \
+  JSString::Utf8String str(*source_);                                   \
   BASE_REPORT_SYNTAX_ERROR_(parser)                                     \
   << "Invalid regular expression: /"                                    \
-  << parser->source_.ToUtf8String()                                     \
+  << str.value()                                                        \
   << "/: "                                                              \
   << message                                                            \
   << " ("                                                               \
@@ -78,15 +80,32 @@ Visitor::Visitor(BytecodeBuilder* bytecode_builder,
                  ZoneAllocator* zone_allocator)
     : bytecode_builder_(bytecode_builder),
       zone_allocator_(zone_allocator) {
-  input_register_ = RegisterRef(AddressingMode::kPointer);
+  input_register_ = RegisterAllocator::Parameter(0);
 }
 
 AST_VISIT(Root) {
+  RegisterRef offset;
+  __ Comment("RegExp");
   __ ImmI32(0, position_register());
+  __ LoadRA(input_register());
+  __ CallFastPropertyA(FastProperty::kLength);
+  __ StoreAR(&input_size_register_);
   return node->regexp()->Visit(this, label);
 }
 
 AST_VISIT(Conjunction) {
+  __ Comment("Conjunction");
+
+  if (!label) {
+    Label exit, next;
+    __ Jmp(&next);
+    __ Bind(&exit);
+    {
+      __ Return();
+    }
+    __ Bind(&next);
+    label = &exit;
+  }
   for (auto &a : *node) {
     a->Visit(this, label);
   }
@@ -97,6 +116,8 @@ AST_VISIT(Group) {
 }
 
 AST_VISIT(CharClass) {
+  __ Comment("CharClass");
+
   auto index = __ StringConstant(node->value());
   RegisterRef value_reg, index_reg, char_reg,
     target_char_reg, length_reg;
@@ -104,7 +125,7 @@ AST_VISIT(CharClass) {
   __ ConstantA(index);
   __ StoreAR(&value_reg);
   __ ImmI32(0, &index_reg);
-  __ ImmI32(node->value().size(), &length_reg);
+  __ ImmI32(node->value()->length(), &length_reg);
 
   __ Bind(&loop);
   {
@@ -132,22 +153,26 @@ AST_VISIT(CharClass) {
 }
 
 AST_VISIT(Alternate) {
-  Label if_exit, if_next;
+  __ Comment("Alternate");
+
+  Label if_exit, if_first, if_next;
   RegisterRef save_reg;
   __ LoadRA(position_register());
   __ StoreAR(&save_reg);
-  __ Jmp(&if_next);
+  __ Jmp(&if_first);
 
-  __ Bind(&if_exit);
+  __ Bind(&if_first);
   {
-    __ Return();
+    node->left()->Visit(this, &if_next);
+    __ Jmp(&if_exit);
   }
 
   __ Bind(&if_next);
   {
-    node->left()->Visit(this, &if_next);
-    node->right()->Visit(this, &if_exit);
+    node->right()->Visit(this, label);
   }
+
+  __ Bind(&if_exit);
 }
 
 AST_VISIT(Repeat) {
@@ -169,6 +194,8 @@ AST_VISIT(Char) {
 }
 
 void Visitor::EmitCompare(u16 code, BytecodeLabel* label) {
+  __ Comment("CompareChar");
+
   RegisterRef reg1, reg2;
   __ LoadRA(input_register());
   __ LoadAIxR(position_register(), &reg1);
@@ -181,7 +208,6 @@ void Visitor::EmitCompare(u16 code, BytecodeLabel* label) {
   }
 
   __ Inc(position_register());
-  __ StoreAR(position_register());
 }
 
 void Parser::Parse() {
@@ -282,8 +308,8 @@ Ast* Parser::ParseCharClass() {
     }
     advance();
   }
-  Utf16String str(v.data(), v.size());
-  auto cc = new(zone()) CharClass(exclude, str);
+  Handle<JSString> js_str = JSString::New(isolate_, v.data(), v.size());
+  auto cc = new(zone()) CharClass(exclude, *js_str);
   update_start_pos();
   if (!success) {
     REPORT_SYNTAX_ERROR(this, "] expected.");
@@ -435,6 +461,23 @@ bool Parser::IsSpecialChar(Utf16CodePoint cp) const {
     || cp == '|'
     || cp == '('
     || cp == ')';
+}
+
+Handle<JSFunction> Compiler::Compile(const char* source) {
+  HandleScope scope;
+  auto regexp = JSString::New(isolate_, source);
+  Parser parser(isolate_, error_reporter_, sp_, regexp);
+  parser.Parse();
+  ZoneAllocator zone_allocator;
+  BytecodeBuilder bytecode_builder(isolate_, &zone_allocator);
+  Visitor visitor(&bytecode_builder, &zone_allocator);
+  parser.node()->Visit(&visitor, nullptr);
+  auto executable = bytecode_builder.flush();
+  return JSFunction::New(isolate_,
+                         *scope.Return(
+                             JSString::New(isolate_, "regexp-scratch-space")),
+                         1,
+                         *scope.Return(executable));
 }
 }  // namespace regexp
 }  // namespace lux
