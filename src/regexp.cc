@@ -176,7 +176,42 @@ AST_VISIT(Alternate) {
 }
 
 AST_VISIT(Repeat) {
-  return node->target()->Visit(this, label);
+  __ Comment("Repeat");
+
+  auto repeat_count = node->more_than();
+  if (repeat_count == 0) {
+    Label loop, next;
+    __ Bind(&loop);
+    {
+      node->target()->Visit(this, &next);
+      __ Jmp(&loop);
+    }
+
+    __ Bind(&next);
+  } else {
+    if (!label) {
+      Label exit;
+      __ Bind(&exit);
+      {
+        __ Return();
+      }
+      label = &exit;
+    }
+
+    RegisterRef repeat_count_reg, zero_reg;
+    Label loop;
+
+    __ ImmI8(0, &zero_reg);
+    __ ImmI32(repeat_count, &repeat_count_reg);
+
+    __ Bind(&loop);
+    {
+      node->target()->Visit(this, label);
+      __ Dec(&repeat_count_reg);
+      __ ICmpRR(&repeat_count_reg, &zero_reg);
+      __ JmpIfFalse(&loop);
+    }
+  }
 }
 
 AST_VISIT(RepeatRange) {

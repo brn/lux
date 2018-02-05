@@ -30,7 +30,8 @@ namespace lux {
 
 using VM = VirtualMachine;
 #define VM_OP(Name, ...) exec->Name(__VA_ARGS__)
-#define DISPATCH(...) exec->Dispatch(__VA_ARGS__)
+#define DISPATCH() exec->Dispatch()
+#define JMP(jmp) exec->Jmp(jmp)
 
 
 #define HANDLER(Name)                                   \
@@ -53,7 +54,7 @@ HANDLER(Comment) {
 
 HANDLER(Jmp) {
   auto next = bytecode.sJ();
-  DISPATCH(next);
+  JMP(next);
 }
 
 HANDLER(JmpIfTrue) {
@@ -61,7 +62,7 @@ HANDLER(JmpIfTrue) {
   auto boolean_value = JSSpecials::ToBoolean(v);
   if (boolean_value) {
     auto next = bytecode.sJ();
-    return DISPATCH(next);
+    return JMP(next);
   }
   DISPATCH();
 }
@@ -71,7 +72,7 @@ HANDLER(JmpIfFalse) {
   auto boolean_value = JSSpecials::ToBoolean(v);
   if (!boolean_value) {
     auto next = bytecode.sJ();
-    return DISPATCH(next);
+    return JMP(next);
   }
   DISPATCH();
 }
@@ -281,23 +282,22 @@ HANDLER(Div) {
 Object* VirtualMachine::Execute(BytecodeExecutable* bytecode_executable,
                                 std::initializer_list<Object*> argv) {
   Executor exec(isolate_, argv.size(), argv, bytecode_executable);
-  exec.Dispatch(0);
+  exec.Dispatch();
   return exec.return_value();
 }
 
-void VirtualMachine::Executor::Dispatch(int pc) {
+void VirtualMachine::Executor::Dispatch() {
 #define VM_STATIC_HANDLER(n, Name, i, ...)                \
   static Name##BytecodeHandler Name##_bytecode_handler;
   BYTECODE_LIST(VM_STATIC_HANDLER)
 #undef VM_STATIC_HANDLER
 
-  pc_ += pc;
-
-  if (bytecode_array_->length() <= pc_) {
+  auto pc = pc_++;
+  if (bytecode_array_->length() <= pc) {
     return;
   }
 
-  auto bc = bytecode_array_->at(pc_);
+  auto bc = bytecode_array_->at(pc);
   auto next = bc.instruction();
   switch (next) {
 #define DEF_BJ(i, Name, n, ...)                                   \

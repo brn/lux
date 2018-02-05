@@ -84,7 +84,11 @@ class VirtualMachine {
       registers_.store(index, value);
     }
 
-    void Dispatch(int step = 1);
+    void Jmp(int jmp) {
+      pc_ = jmp;
+      Dispatch();
+    }
+    void Dispatch();
 
     Object* return_value() const {
       return acc_;

@@ -47,6 +47,6 @@ class RegExpBytecodeTest: public lux::IsolateSetup {
 
 namespace {
 TEST_F(RegExpBytecodeTest, Simple) {
-  RunTest("bb(a|b|x)");
+  RunTest("b*(a|b|x)");
 }
 }
