@@ -79,7 +79,7 @@ Handle<BytecodeExecutable> BytecodeArrayWriter::Flush() {
   for (auto &from : jmps_) {
     auto to = from->jmp();
     BytecodeUpdater updater(from->bytecode());
-    updater.UpdateSJ((to->offset() + 1) - from->offset());
+    updater.UpdateSJ(to->offset() + 1);
     array->write(from->offset(), updater.bytecode());
   }
   auto pool = BytecodeConstantArray::New(isolate_, constant_length_);
