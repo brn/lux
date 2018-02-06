@@ -73,7 +73,7 @@ inline void Invalidate__(bool cond, const char* message, bool not_own_message) {
 
 #ifdef DEBUG
 #define INVALIDATE(cond) lux::Invalidate__(cond, #cond, true)
-#define FATAL(message) lux::Invalidate__(false, message, true);
+#define FATAL(message) lux::Invalidate__(false, message, false);
 #define UNREACHABLE() FATAL("Unreachable block executed.");
 
 #else

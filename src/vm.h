@@ -59,13 +59,13 @@ class VirtualMachine {
              size_t argc,
              std::initializer_list<Object*> argv,
              BytecodeExecutable* executable)
-        : pc_(0), isolate_(isolate),
-          bytecode_array_(executable->bytecode_array()),
+        : isolate_(isolate),
           constant_pool_(executable->constant_pool()) {
       int i = 0;
       for (auto &r : argv) {
         store_register_value_at(i++, r);
       }
+      fetcher_(executable->bytecode_array());
     }
 
     LUX_INLINE Object* load_accumulator() {
@@ -84,25 +84,20 @@ class VirtualMachine {
       registers_.store(index, value);
     }
 
-    void Jmp(int jmp) {
-      pc_ = jmp;
-      Dispatch();
-    }
-    void Dispatch();
-
     Object* return_value() const {
       return acc_;
     }
 
+    void Execute();
+
    private:
-    uint32_t pc_;
     size_t argc_;
     Object* argv_;
     Object* acc_;
     Registers registers_;
     Isolate* isolate_;
-    BytecodeArray* bytecode_array_;
     BytecodeConstantArray* constant_pool_;
+    LazyInitializer<BytecodeFetcher> fetcher_;
   };
 
   explicit VirtualMachine(Isolate* isolate)

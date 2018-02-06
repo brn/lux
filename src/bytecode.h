@@ -33,88 +33,151 @@
 namespace lux {
 class Isolate;
 class BytecodeExecutable;
-// Based on Lua bytecode.
-/*===========================================================================
-  We assume that instructions are unsigned 32-bit integers.
-  All instructions have an opcode in the first 7 bits.
-  Instructions can have the following formats:
+//
+// Bytecode
+//
+// ==============================================================
+//
+//                    +-------------------------------------------+
+// Opecode            |                   1byte                   |
+//                    +-------------------------------------------+
+//                    +-------------------------------------------+
+// Register           |                   1byte                   |
+//                    +-------------------------------------------+
+//                    +-------------------------------------------+
+// Next Register      ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// Min 0b Max 8b
+//
+// ============================ Format ==========================
+//          +---------------------------------------------+
+//          | instruction | H | G | F | E | D | C | B | A |
+//          +---------------------------------------------+
+//          |             |  Dx   |   Cx  |   Bx  |   Ax  |
+//          +---------------------------------------------+
+//          |             |      Ebx      |      Eax      |
+//          +---------------------------------------------+
+//          |             |              Rax              |
+//          +----------------------------------------------
+//
+// ============================ Layout ==========================
+//          +-------------+
+// None     | instruction |
+//          +-------------+
+//
+//          +-----------------+
+// Short1   | instruction | A |
+//          +-----------------+
+//
+//          +---------------------+
+// Short2   | instruction | B | A |
+//          +---------------------+
+//
+//          +-------------------------+
+// Short3   | instruction | C | B | A |
+//          +-------------------------+
+//
+//          +---------------------+
+// Double1  | instruction |   Ax  |
+//          +---------------------+
+//
+//          +-------------------------+
+// Double2  | instruction | C |   Ax  |
+//          +-------------------------+
+//
+//          +---------------------------------------------+
+// Word1    | instruction |            Rax                |
+//          +---------------------------------------------+
+//
+//          +-----------------------------+
+// Wide1    | instruction |      Eax      |
+//          +-----------------------------+
+//
+//          +---------------------------------+
+// Wide2    | instruction | E |      Eax      |
+//          +---------------------------------+
+//
 
-        3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1 0 0 0 0 0 0 0 0 0 0
-        1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
-iABC    |k|     C(8)    | |     B(8)    | |     A(8)    | |   Op(7)   |
-iABx    |            Bx(17)             | |     A(8)    | |   Op(7)   |
-iAsBx   |           sBx (signed)(17)    | |     A(8)    | |   Op(7)   |
-iAx     |                       Ax(25)                  | |   Op(7)   |
-iksJ    |k|                     sJ(24)                  | |   Op(7)   |
-
-  A signed argument is represented in excess K: the represented value is
-  the written unsigned value minus K, where K is half the maximum for the
-  corresponding unsigned argument.
-===========================================================================*/
-
-struct BytecodeFormat {
-  enum Type {
-    kOpsJk,
-    kOpAx,
-    kOpAsBx,
-    kOpABx,
-    kOpABCk
-  };
+enum class BytecodeLayout: uint8_t {
+  kNone,
+  kShort1,
+  kShort2,
+  kShort3,
+  kDouble1,
+  kDouble2,
+  kWord1,
+  kWide1,
+  kWide2,
 };
 
-#define BYTECODE_NUM(index, Format)             \
-  (index << 3) | BytecodeFormat::Format
+struct BytecodeOperand {
+  uint8_t shift;
+  uint64_t mask;
+};
 
-#define BYTECODE_LIST(A)                                                \
-  /*=== OpsJk ===*/                                                     \
-  A(1 << 3, Jmp, 1, BytecodeLabel*) /* Jump if Acc == true to offset */ \
-  /* Jump if Acc == true to offset */                                   \
-  A(2 << 3, JmpIfTrue, 1, BytecodeLabel*)                               \
-  /* Jump if Acc == false to offset */                                  \
-  A(3 << 3, JmpIfFalse, 1, BytecodeLabel*)                              \
-  /*=== OpAx ===*/                                                      \
-  A(BYTECODE_NUM(1, kOpAx), Return, 0)                                  \
-  A(BYTECODE_NUM(2, kOpAx), Comment, 1, const char*)                    \
-  /* Store Constant to Acc */                                           \
-  A(BYTECODE_NUM(3, kOpAx), ConstantA, 1, uint16_t)                     \
-  /* Call Fast builtin property */                                      \
-  A(BYTECODE_NUM(4, kOpAx), CallFastPropertyA, 1, FastProperty)         \
-  /*=== kOpAsBx ===*/                                                   \
-  /*=== kOpABx ===*/                                                    \
-  /* Store Imm to Reg */                                                \
-  A(BYTECODE_NUM(1, kOpABx), ImmI8, 1, int8_t, RegisterRef*)            \
-  /* Store Imm to Reg */                                                \
-  A(BYTECODE_NUM(2, kOpABx), ImmI32, 1, int32_t, RegisterRef*)          \
-  /* Store Constant to Reg */                                           \
-  A(BYTECODE_NUM(4, kOpABx), ConstantR, 2, uint16_t, RegisterRef*)      \
+#define BYTECODE_LIST_WITHOUT_RETURN(A)                                 \
+  /*=========================== Short1 2 ===========================*/  \
   /* Store Acc to Reg */                                                \
-  A(BYTECODE_NUM(5, kOpABx), StoreAR, 1, RegisterRef*)                  \
+  A(StoreAR, Short1, 2, 1, RegisterRef*)                                \
   /* Load Reg to Acc */                                                 \
-  A(BYTECODE_NUM(6, kOpABx), LoadRA, 1, RegisterRef*)                   \
-  /* Load Acc index to Reg */                                           \
-  A(BYTECODE_NUM(7, kOpABx), LoadAIxR, 2, RegisterRef*, RegisterRef*)   \
-  /* Compare Reg Integer with Reg */                                    \
-  A(BYTECODE_NUM(8, kOpABx), ICmpRR, 2, RegisterRef*, RegisterRef*)     \
+  A(LoadRA, Short1, 2, 1, RegisterRef*)                                 \
   /* Compare Acc Integer with Reg */                                    \
-  A(BYTECODE_NUM(9, kOpABx), ICmpAR, 1, RegisterRef*)                   \
-  /* Compare Reg1 > Reg2 to Acc. */                                     \
-  A(BYTECODE_NUM(10, kOpABx), ICmpGTRRA, 2, RegisterRef*, RegisterRef*) \
+  A(ICmpAR, Short1, 2, 1, RegisterRef*)                                 \
+  /* Call Fast builtin property */                                      \
+  A(CallFastPropertyA, Short1, 2, 1, FastProperty)                      \
   /* Compare Reg1 < Reg2 to Acc. */                                     \
-  A(BYTECODE_NUM(11, kOpABx), ICmpLTRRA, 2, RegisterRef*, RegisterRef*) \
-  A(BYTECODE_NUM(12, kOpABx), Inc, 1, RegisterRef*)  /* Increment Reg. */ \
-  A(BYTECODE_NUM(13, kOpABx), Dec, 1, RegisterRef*)  /* Increment Reg. */ \
+  A(Inc, Short1, 2, 1, RegisterRef*)  /* Increment Reg. */              \
+  A(Dec, Short1, 2, 1, RegisterRef*)  /* Increment Reg. */              \
+  /*=========================== Short2 3 ===========================*/  \
+  /* Store Imm to Reg */                                                \
+  A(ImmI8, Short2, 3, 2, int8_t, RegisterRef*)                          \
+  /* Load Acc index to Reg */                                           \
+  A(LoadAIxR, Short2, 3, 2, RegisterRef*, RegisterRef*)                 \
+  /* Compare Reg Integer with Reg */                                    \
+  A(ICmpRR, Short2, 3, 2, RegisterRef*, RegisterRef*)                   \
+  /* Compare Reg1 > Reg2 to Acc. */                                     \
+  A(ICmpGTRRA, Short2, 3, 2, RegisterRef*, RegisterRef*)                \
   /* Add Reg and out Acc. */                                            \
-  A(BYTECODE_NUM(14, kOpABx), Add, 2, RegisterRef*, RegisterRef*)       \
+  A(Add, Short2, 3, 2, RegisterRef*, RegisterRef*)                      \
   /* Sub Reg and out Acc. */                                            \
-  A(BYTECODE_NUM(15, kOpABx), Sub, 2, RegisterRef*, RegisterRef*)       \
+  A(Sub, Short2, 3, 2, RegisterRef*, RegisterRef*)                      \
   /* Mul Reg and out Acc. */                                            \
-  A(BYTECODE_NUM(16, kOpABx), Mul, 2, RegisterRef*, RegisterRef*)       \
+  A(Mul, Short2, 3, 2, RegisterRef*, RegisterRef*)                      \
   /* Div Reg and out Acc. */                                            \
-  A(BYTECODE_NUM(17, kOpABx), Div, 2, RegisterRef*, RegisterRef*)       \
-  /*=== kOpABCk ===*/                                                   \
+  A(Div, Short2, 3, 2, RegisterRef*, RegisterRef*)                      \
+  /*=========================== Short3 ===========================*/    \
   /* Load Reg index to Reg */                                           \
-  A(BYTECODE_NUM(1, kOpABCk), LoadRIxR, 3,                              \
-    RegisterRef*, RegisterRef*, RegisterRef*)
+  A(LoadRIxR, Short3, 4, 3,                                             \
+    RegisterRef*, RegisterRef*, RegisterRef*)                           \
+  /*=========================== Word ===========================*/      \
+  A(Comment, Word1, (kPointerSize + 1), 1, const char*)                 \
+  /*=========================== Double1 ===========================*/   \
+  /* Store Constant to Acc */                                           \
+  A(ConstantA, Double1, 3, 1, uint16_t)                                 \
+  /*=========================== Double2 ===========================*/   \
+  /* Store Constant to Reg */                                           \
+  A(ConstantR, Short2, 4, 2, uint16_t, RegisterRef*)                    \
+  /*=========================== Wide1 ===========================*/     \
+  A(Jmp, Wide1, 5, 1, BytecodeLabel*) /* Jump if Acc == true to offset */ \
+  /* Jump if Acc == true to offset */                                   \
+  A(JmpIfTrue, Wide1, 5, 1, BytecodeLabel*)                             \
+  /* Jump if Acc == false to offset */                                  \
+  A(JmpIfFalse, Wide1, 5, 1, BytecodeLabel*)                            \
+  /*=========================== Wide2 ===========================*/     \
+  /* Store Imm to Reg */                                                \
+  A(ImmI32, Wide2, 6, 2, int32_t, RegisterRef*)
+
+#define BYTECODE_LIST(A)                                            \
+  /*=========================== None ===========================*/  \
+  A(Return, None, 0, 0)                                             \
+  BYTECODE_LIST_WITHOUT_RETURN(A)
+
+enum class Bytecode: uint8_t {
+#define BYTECODE_DEF(Name, Layout, size, num, ...) k##Name,
+  BYTECODE_LIST(BYTECODE_DEF)
+#undef BYTECODE_DEF
+  kLastSentinel__,
+  kExit,
+};
 
 enum class AddressingMode: uint8_t {
   kPointer,
@@ -222,240 +285,190 @@ class BytecodeConstantArray:
   Object*, BytecodeConstantArray, kPointerSize> {
 };
 
-struct BytecodeSize {
-  enum Type {
-    SIZE_C = 8,
-    SIZE_Cx = (SIZE_C + 1),
-    SIZE_B = 8,
-    SIZE_Bx = (SIZE_Cx + SIZE_B),
-    SIZE_A = 8,
-    SIZE_Ax = (SIZE_Cx + SIZE_B + SIZE_A),
-    SIZE_sJ = (SIZE_C + SIZE_B + SIZE_A),
-    MASK_sJ = 0x7fffff80,
-    MASK_k = 1 << 31,
-    SIZE_OP = 7,
-    MASK_OP = 0x7F,
-    POS_OP = 0,
-    POS_A = (POS_OP + SIZE_OP),
-    POS_B = (POS_A + SIZE_A),
-    POS_C = (POS_B + SIZE_B),
-    POS_k = (POS_C + SIZE_C),
-    POS_Bx = POS_B,
-    POS_Ax = POS_A,
-    POS_sJ = POS_A,
-  };
+class BytecodeFetcher;
+class BytecodeArray:
+      public GenericFixedArray<
+  uint8_t, BytecodeArray, sizeof(uint8_t)> {
+ public:
+#ifdef DEBUG
+  std::string ToString(BytecodeConstantArray* constant_pool);
+#endif
 };
 
-class Bytecode {
-  friend class BytecodeUpdater;
+class BytecodeFetcher {
  public:
-  enum Instruction {
-#define BYTECODE_DECL(index, Bytecode, num, ...) k##Bytecode = index,
-    BYTECODE_LIST(BYTECODE_DECL)
-#undef BYTECODE_DECL
-  };
+  explicit BytecodeFetcher(BytecodeArray* array)
+      : pc_(0), array_(array) {}
 
-  explicit Bytecode(uint32_t b)
-      : bytecode_(b) {}
-
-  Instruction instruction() const {
-    return static_cast<Instruction>(
-        bytecode_ & BytecodeSize::MASK_OP);
+  inline Bytecode FetchBytecode() {
+    return static_cast<Bytecode>(FetchBytecodeAsInt());
   }
 
-  BytecodeFormat::Type format() const {
-    return static_cast<BytecodeFormat::Type>(
-        bytecode_ & 0x3);
+  inline uint8_t FetchBytecodeAsInt() {
+    return array_->at(pc_++);
   }
 
-  int32_t sJ() const {
-    auto ret = (bytecode_ >> BytecodeSize::POS_sJ) & 0xFFFFFF;
-    if (k()) {
-      return ret | 0xFF000000;
-    }
-    return ret;
+  inline int8_t FetchNextShortOperand() {
+    return array_->at(pc_++);
   }
 
-  uint32_t Ax() const {
-    return (bytecode_ >> BytecodeSize::POS_Ax);
+  inline int16_t FetchNextDoubleOperand() {
+    auto a = array_->at(pc_++);
+    auto b = array_->at(pc_++);
+    return ((b << 8) | a);
   }
 
-  uint8_t A() const {
-    return (bytecode_ >> BytecodeSize::POS_A) & 0xFF;
+  inline int32_t FetchNextWideOperand() {
+    auto a = array_->at(pc_++);
+    auto b = array_->at(pc_++);
+    auto c = array_->at(pc_++);
+    auto d = array_->at(pc_++);
+    return ((d << 24) | (c << 16) | (b << 8) | a);
   }
 
-  uint8_t B() const {
-    return (bytecode_ >> BytecodeSize::POS_B) & 0xFF;
+  inline int64_t FetchNextWordOperand() {
+    auto a = static_cast<uint64_t>(array_->at(pc_++));
+    auto b = static_cast<uint64_t>(array_->at(pc_++));
+    auto c = static_cast<uint64_t>(array_->at(pc_++));
+    auto d = static_cast<uint64_t>(array_->at(pc_++));
+    auto e = static_cast<uint64_t>(array_->at(pc_++));
+    auto f = static_cast<uint64_t>(array_->at(pc_++));
+    auto g = static_cast<uint64_t>(array_->at(pc_++));
+    auto h = static_cast<uint64_t>(array_->at(pc_++));
+    return (a | (b << 8) | (c << 16) | (d << 24)
+            | (e << 32) | (f << 40) | (g << 48)
+            | (h << 56));
   }
 
-  uint8_t C() const {
-    return (bytecode_ >> BytecodeSize::POS_C) & 0xFF;
+#ifdef PLATFORM_64BIT
+  template <typename T>
+  inline T FetchNextPtrOperand() {
+    return reinterpret_cast<T>(FetchNextWordOperand());
   }
-
-  uint8_t k() const {
-    return (bytecode_ >> BytecodeSize::POS_k);
-  }
-
-  uint32_t Bx() const {
-    return (bytecode_ >> BytecodeSize::POS_Bx);
-  }
-
-#ifdef DEBUG
-  std::string ToString(BytecodeConstantArray* pool) const {
-    std::stringstream st;
-    if (instruction() == Bytecode::kComment) {
-      auto v = pool->at(Ax());
-      INVALIDATE(v->IsHeapObject());
-      JSString::Utf8String u8str(JSString::Cast(v));
-      st << ";;" << u8str.value();
-      return st.str();
-    }
-
-    switch (instruction()) {
-#define BYTECODE_CASE(index, A, n, ...)               \
-      case k##A: {                                    \
-        size_t len = sizeof(#A) - 1;                  \
-        st << #A << ToStringField(len);               \
-        auto ret = st.str();                          \
-        return ret;                                   \
-      }
-      BYTECODE_LIST(BYTECODE_CASE)
-#undef BYTECODE_CASE
-      default:
-        UNREACHABLE();
-      return "";
-    }
-  }
-
-  std::string ToStringField(size_t len) const {
-    std::stringstream st;
-    std::string indent(19 - len, ' ');
-    switch (format()) {
-      case BytecodeFormat::kOpsJk:
-        st << indent << "sJ = " << sJ();
-        return st.str();
-      case BytecodeFormat::kOpAx:
-        st << indent << "Ax = " << +Ax();
-        return st.str();
-      case BytecodeFormat::kOpAsBx:
-      case BytecodeFormat::kOpABx:
-        st << indent << "A  = " << +A()
-           << "  " << "Bx = " << +Bx();
-        return st.str();
-      case BytecodeFormat::kOpABCk:
-        st << indent << "A = " << +A()
-           << "  " << "B = " << +B()
-           << "  " << "C = " << +C()
-           << "  " << "k = " << +k();
-        return st.str();
-      default:
-        UNREACHABLE();
-    }
+#else
+  template <typename T>
+  inline T FetchNextPtrOperand() {
+    return reinterpret_cast<T>(FetchNextWideOperand());
   }
 #endif
 
+  inline void UpdatePC(uint32_t jmp) {
+    pc_ = jmp;
+  }
+
+  inline bool HasMore() const {
+    return pc_ <= array_->length() - 3;
+  }
+
+  inline uint32_t pc() const {
+    return pc_;
+  }
+
  private:
-  uint32_t bytecode_;
+  uint32_t pc_;
+  BytecodeArray* array_;
 };
 
-class BytecodeUpdater {
+class BytecodeUtil {
  public:
-  explicit BytecodeUpdater(Bytecode bytecode)
-      : bytecode_(bytecode) {}
-  void UpdateSJ(int32_t sj) {
-    bytecode_.bytecode_ =
-      (bytecode_.bytecode_ & (~BytecodeSize::MASK_sJ))
-      | (sj << BytecodeSize::POS_sJ);
-    bytecode_.bytecode_ |= (sj < 0? (1 << BytecodeSize::POS_k): 0);
+  static const BytecodeOperand kOperandA;
+  static const BytecodeOperand kOperandB;
+  static const BytecodeOperand kOperandC;
+  static const BytecodeOperand kOperandD;
+  static const BytecodeOperand kOperandE;
+  static const BytecodeOperand kOperandF;
+  static const BytecodeOperand kOperandG;
+  static const BytecodeOperand kOperandH;
+  static const BytecodeOperand kOperandAx;
+  static const BytecodeOperand kOperandBx;
+  static const BytecodeOperand kOperandCx;
+  static const BytecodeOperand kOperandDx;
+  static const BytecodeOperand kOperandEax;
+  static const BytecodeOperand kOperandEbx;
+  static const BytecodeOperand kOperandRax;
+
+  inline static BytecodeLayout layout(Bytecode b) {
+    return kLayout[static_cast<uint8_t>(b)];
   }
-  Bytecode bytecode() const {
-    return bytecode_;
+
+  inline static uint8_t size(Bytecode b) {
+    return kSize[static_cast<uint8_t>(b)];
   }
+
+  inline static uint64_t EncodeOperand(const BytecodeOperand& operand,
+                                       uint64_t value) {
+    return value << operand.shift;
+  }
+
+#ifdef DEBUG
+  static const char* ToStringOpecode(Bytecode bc) {
+    static std::array<
+      const char*,
+      (static_cast<uint8_t>(Bytecode::kExit) + 1)> kOpecodeStr = {{
+#define BYTECODE_CASE(Name, Layout, size, n, ...) #Name,
+        BYTECODE_LIST(BYTECODE_CASE)
+#undef BYTECODE_CASE
+        "Sentinel",
+        "Exit"
+      }};
+    return kOpecodeStr[static_cast<uint8_t>(bc)];
+  }
+
+  static std::string ToString(BytecodeFetcher* fetcher);
+
+  static std::string ToStringField(Bytecode bc,
+                                   BytecodeFetcher* fetcher,
+                                   size_t len);
+#endif
+
  private:
-  Bytecode bytecode_;
-};
+  static const std::array<
+   BytecodeLayout,
+   static_cast<uint8_t>(Bytecode::kLastSentinel__)> kLayout;
 
-template <uint8_t format>
-class BytecodeFactory {};
-
-template <>
-class BytecodeFactory<BytecodeFormat::kOpABCk> {
- public:
-  static Bytecode New(
-      Bytecode::Instruction op, uint8_t a, uint8_t b, uint8_t c, uint8_t k) {
-    //           3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1 0 0 0 0 0 0 0 0 0 0
-    //           1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
-    // OpABCk    |k|     C(8)    | |     B(8)    | |     A(8)    | |   Op(7)   |
-    uint32_t f = (k << BytecodeSize::POS_k)
-      | (c << BytecodeSize::POS_C)
-      | (b << BytecodeSize::POS_B)
-      | (a << BytecodeSize::POS_A) | op;
-    return Bytecode(f);
-  }
-};
-
-template <>
-class BytecodeFactory<BytecodeFormat::kOpABx> {
- public:
-  static Bytecode New(Bytecode::Instruction op, uint8_t a, uint32_t bx) {
-    //          3 3 2 2 2 2 2 2 2 2 2 2 1 1 1 1 1 1 1 1 1 1 0 0 0 0 0 0 0 0 0 0
-    //          1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0 9 8 7 6 5 4 3 2 1 0
-    // OpABx    |            Bx(17)             | |     A(8)    | |   Op(7)   |
-    uint32_t f = (bx << BytecodeSize::POS_Bx)
-      | (a << BytecodeSize::POS_A) | op;
-    return Bytecode(f);
-  }
-};
-
-template <>
-class BytecodeFactory<BytecodeFormat::kOpAsBx> {
- public:
-  static Bytecode New(Bytecode::Instruction op, uint8_t a, int32_t sbx) {
-    uint32_t f = (sbx << BytecodeSize::POS_Bx)
-      | (a << BytecodeSize::POS_A) | op;
-    return Bytecode(f);
-  }
-};
-
-template <>
-class BytecodeFactory<BytecodeFormat::kOpAx> {
- public:
-  static Bytecode New(Bytecode::Instruction op, uint32_t ax) {
-    uint32_t f = (ax << BytecodeSize::POS_Ax) | op;
-    return Bytecode(f);
-  }
-};
-
-template <>
-class BytecodeFactory<BytecodeFormat::kOpsJk> {
- public:
-  static Bytecode New(Bytecode::Instruction op, int32_t sj, uint8_t k) {
-    uint32_t f = (k << BytecodeSize::POS_k)
-      | (sj << BytecodeSize::POS_sJ) | op;
-    return Bytecode(f);
-  }
+  static const std::array<
+   uint8_t,
+    static_cast<uint8_t>(Bytecode::kLastSentinel__)> kSize;
 };
 
 class BytecodeNode: public Zone {
  public:
-  explicit BytecodeNode(Bytecode bytecode)
-      : bytecode_(bytecode),
+  explicit BytecodeNode(Bytecode bytecode, int64_t operands)
+      : operands_(operands),
+        bytecode_(bytecode),
         jmp_(nullptr),
         next_(nullptr) {}
 
   explicit BytecodeNode(Bytecode bytecode,
                         BytecodeNode* jmp)
-      : bytecode_(bytecode),
+      : operands_(0),
+        bytecode_(bytecode),
         jmp_(jmp),
+        next_(nullptr) {}
+
+  explicit BytecodeNode(Bytecode bytecode)
+      : operands_(0),
+        bytecode_(bytecode),
+        jmp_(nullptr),
         next_(nullptr) {}
 
   LUX_CONST_PROPERTY(uint32_t, offset, offset_)
   LUX_CONST_PROPERTY(BytecodeNode*, jmp, jmp_)
   LUX_CONST_PROPERTY(Bytecode, bytecode, bytecode_)
   LUX_CONST_PROPERTY(BytecodeNode*, next, next_)
+  LUX_CONST_PROPERTY(int64_t, operands, operands_)
+
+  inline BytecodeLayout layout() const {
+    return BytecodeUtil::layout(bytecode_);
+  }
+
+  inline uint8_t DecodeOperand(const BytecodeOperand& operand) {
+    return (operands_ >> operand.shift) & operand.mask;
+  }
 
  private:
-  uint32_t offset_;
+  size_t offset_;
+  int64_t operands_;
   Bytecode bytecode_;
   BytecodeNode* jmp_;
   BytecodeNode* next_;
@@ -502,25 +515,6 @@ class BytecodeLabel {
 
 class BytecodeArrayWriter;
 
-class BytecodeArray:
-      public GenericFixedArray<
-  Bytecode, BytecodeArray, sizeof(Bytecode)> {
- public:
-#ifdef DEBUG
-  std::string ToString(BytecodeConstantArray* constant_pool) {
-    std::stringstream st;
-    auto max = std::to_string(length()).size();
-    for (auto i = 0; i < length(); i++) {
-      auto size = std::to_string(i).size();
-      std::string indent((max - size) + 1, ' ');
-      st << (i > 0? "\n": "") << indent <<  i << ": "
-         << at(i).ToString(constant_pool);
-    }
-    return st.str();
-  }
-#endif
-};
-
 class BytecodeConstantNode: public Zone {
  public:
   explicit BytecodeConstantNode(Object* obj)
@@ -543,7 +537,7 @@ class BytecodeArrayWriter {
         constant_top_(nullptr),
         bytecode_top_(nullptr),
         bytecode_list_(nullptr),
-        zone_allocator_(zone_alloc){}
+        zone_allocator_(zone_alloc) {}
 
   int32_t EmitConstant(BytecodeConstantNode* node);
   void Emit(BytecodeNode* bytecode);
@@ -592,7 +586,7 @@ class BytecodeBuilder {
     bytecode_array_writer_(isolate, zone_allocator);
   }
 
-#define BYTECODE_BUILDER_DEF(index, Bytecode, _, ...)  \
+#define BYTECODE_BUILDER_DEF(Bytecode, Layout, size, num, ...) \
   BytecodeNode* Bytecode(__VA_ARGS__);
   BYTECODE_LIST(BYTECODE_BUILDER_DEF)
 #undef BYTECODE_BUILDER_DEF

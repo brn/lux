@@ -31,6 +31,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
     src/debug/stacktrace.cc
     src/zone.cc
     src/vm.cc
+    src/bytecode.cc
     src/objects/object.cc
     src/objects/heap_object.cc
     src/objects/shape.cc
@@ -45,6 +46,8 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
     src/unicode.cc
     src/debug/stacktrace.cc
     src/vm.cc
+    src/zone.cc
+    src/bytecode.cc
     src/objects/object.cc
     src/objects/heap_object.cc
     src/objects/shape.cc
@@ -95,6 +98,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
     src/unicode.cc
     src/debug/stacktrace.cc
     src/vm.cc
+    src/bytecode.cc
     src/objects/object.cc
     src/objects/heap_object.cc
     src/objects/shape.cc
@@ -109,6 +113,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
     src/unicode.cc
     src/debug/stacktrace.cc
     src/vm.cc
+    src/bytecode.cc
     src/objects/object.cc
     src/objects/heap_object.cc
     src/objects/shape.cc
@@ -122,6 +127,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
     src/heap.cc
     src/unicode.cc
     src/vm.cc
+    src/bytecode.cc
     src/debug/stacktrace.cc
     src/objects/object.cc
     src/objects/heap_object.cc
@@ -141,6 +147,8 @@ add_executable(lux
   src/unicode.cc
   src/isolate.cc
   src/vm.cc
+  src/zone.cc
+  src/bytecode.cc
   src/objects/object.cc
   src/objects/heap_object.cc
   src/objects/shape.cc
