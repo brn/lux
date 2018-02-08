@@ -122,9 +122,9 @@ JSRegExp* JSRegExp::NewWithoutHandle(Isolate* isolate,
   return reinterpret_cast<JSRegExp*>(heap_obj);
 }
 
-bool JSRegExp::Test(Isolate* isolate, JSString* input) {
+JSSpecials* JSRegExp::Test(Isolate* isolate, JSString* input) {
   lux::VirtualMachine vm(isolate);
-  return vm.ExecuteRegex(code(), input, false);
+  return reinterpret_cast<JSSpecials*>(vm.ExecuteRegex(code(), input, false));
 }
 
 JSArray* JSRegExp::Match(Isolate* isolate, JSString* input) {

@@ -260,7 +260,7 @@ class Bitset {
   }
 
   bool get(uint32_t index) const {
-    return bit_field_ & (~(0x1 << index));
+    return bit_field_ & (0x1 << index);
   }
 
   bool is_full() const {

@@ -86,9 +86,13 @@ AST_VISIT(Root) {
 
   __ RegexComment("RegExp");
   node->regexp()->Visit(this);
+  __ RegexJumpIfFailed(&failed_);
 
   __ Bind(&matched_);
   __ RegexMatched();
+
+  __ Bind(&failed_);
+  __ RegexFailed();
 }
 
 AST_VISIT(Conjunction) {
@@ -133,11 +137,16 @@ AST_VISIT(Repeat) {
   __ RegexComment("Repeat");
   auto is_more_than_once = node->more_than() == 1;
 
-  __ RegexRepeatStart(is_more_than_once);
-  Label loop;
+  Label loop, next;
+  if (is_more_than_once) {
+    node->target()->Visit(this);
+  }
+
   __ Bind(&loop);
+  __ RegexRepeat(&next, &failed_);
   node->target()->Visit(this);
-  __ RegexRepeatEnd(&loop);
+  __ RegexJumpIfMatched(&loop);
+  __ Bind(&next);
 }
 
 AST_VISIT(RepeatRange) {
@@ -146,11 +155,10 @@ AST_VISIT(RepeatRange) {
   auto least_count = node->more_than();
   auto max_count = node->less_than();
 
-  __ RegexRepeatRangeStart(least_count, max_count);
+  __ RegexRepeatRange(least_count, max_count);
   Label loop;
   __ Bind(&loop);
   node->target()->Visit(this);
-  __ RegexRepeatEnd(&loop);
 }
 
 AST_VISIT(Char) {

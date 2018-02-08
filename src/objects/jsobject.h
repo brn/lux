@@ -88,13 +88,13 @@ class FixedArrayBase: public HeapObject {
         FIELD_ADDR(this, kFixedArrayLengthOffset));
   }
 
- protected:
-  static FixedArrayBase* NewArray(Isolate* isolate, uint32_t size);
-
   Address* data() const {
     return reinterpret_cast<Address*>(
         FIELD_ADDR(this, kFixedArrayPtrOffset));
   }
+
+ protected:
+  static FixedArrayBase* NewArray(Isolate* isolate, uint32_t size);
 };
 
 template <typename T, typename U, size_t object_size>
@@ -319,7 +319,7 @@ class JSRegExp: public HeapObject {
   static JSRegExp* NewWithoutHandle(
       Isolate* isolate, BytecodeExecutable* executable);
 
-  bool Test(Isolate* isolate, JSString*);
+  JSSpecials* Test(Isolate* isolate, JSString*);
   JSArray* Match(Isolate* isolate, JSString*);
 
   BytecodeExecutable* code() const {
@@ -499,6 +499,13 @@ class JSString: public HeapObject {
   static const size_t kSize;
 
   using iterator = U32FixedArray::iterator;
+
+  Handle<JSString> Clone(Isolate* isolate) const {
+    return New(
+        isolate,
+        reinterpret_cast<Utf16CodePoint*>(data()->data()),
+        length());
+  }
 
   static JSString* Cast(Object* o) {
     auto h = HeapObject::Cast(o);

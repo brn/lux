@@ -124,8 +124,15 @@ class VirtualMachine {
         vm_flag_.set(0);
         matched_array_ = *JSArray::NewEmptyArray(isolate, 0);
       }
+      unset_matched();
       fetcher_(executable->bytecode_array());
     }
+
+    struct Thread {
+      uint32_t pc;
+      uint32_t position;
+      bool is_first_thread;
+    };
 
     class RepeatAccumulator {
      public:
@@ -141,6 +148,15 @@ class VirtualMachine {
         return matched_count_ >= least_match_count_
           && max_match_count_ > 0? matched_count_ <= max_match_count_: true;
       }
+
+      inline bool IsLeastConditionSatisfied() const {
+        return matched_count_ >= least_match_count_;
+      }
+
+      inline bool IsExceedMaxCondition() const {
+        return max_match_count_ > 0? matched_count_ > max_match_count_: false;
+      }
+
      private:
       uint32_t matched_count_;
       uint16_t least_match_count_;
@@ -150,6 +166,9 @@ class VirtualMachine {
     LUX_CONST_GETTER(bool, collect_matched_word, vm_flag_.get(0))
     LUX_INLINE void set_matched() {
       vm_flag_.set(1);
+    }
+    LUX_INLINE void unset_matched() {
+      vm_flag_.unset(1);
     }
     LUX_CONST_GETTER(bool, is_matched, vm_flag_.get(1))
 
@@ -181,8 +200,25 @@ class VirtualMachine {
       repeat_acc_stack_.push_back(RepeatAccumulator(least_count, max_count));
     }
 
-    const RepeatAccumulator& repeat_acc() const {
-      return repeat_acc_stack_.back();
+    void IncrementMatchedCountOfRepeatAccumulator() {
+      if (repeat_acc_stack_.size() > 0) {
+        RepeatAccumulator* a = &(repeat_acc_stack_.back());
+        a->matched();
+      }
+    }
+
+    bool IsLeastRepeatConditionSatisfied() const {
+      if (repeat_acc_stack_.size() > 0) {
+        return repeat_acc_stack_.back().IsLeastConditionSatisfied();
+      }
+      return true;
+    }
+
+    bool IsExceedMaxRepeatCondition() const {
+      if (repeat_acc_stack_.size() > 0) {
+        return repeat_acc_stack_.back().IsExceedMaxCondition();
+      }
+      return true;
     }
 
     inline void PrepareStringBuffer() {
@@ -203,15 +239,38 @@ class VirtualMachine {
 
     void Execute();
 
+    inline bool HasThread() const {
+      return thread_stack_.size() > 0;
+    }
+
+    inline Thread* current_thread() {
+      if (thread_stack_.size() > 0) {
+        return &thread_stack_.back();
+      }
+      return nullptr;
+    }
+
+    inline void NewThread(uint32_t pc) {
+      auto last_pc = thread_stack_.size() > 0? thread_stack_.back().pc: -1;
+      thread_stack_.push_back({ pc, position_, pc != last_pc });
+    }
+
+    inline Thread PopThread() {
+      auto ret = thread_stack_.back();
+      thread_stack_.pop_back();
+      return ret;
+    }
+
 #ifdef DEBUG
     struct ExecutionLog {
+      uint32_t position;
       uint32_t start_position;
       Bytecode bytecode;
     };
 
     void CollectExecutionLog(uint32_t start_position,
                              Bytecode bytecode) {
-      ExecutionLog e = {start_position, bytecode};
+      ExecutionLog e = {position_, start_position, bytecode};
       exec_log_list_.push_back(e);
     }
 
@@ -221,7 +280,8 @@ class VirtualMachine {
 
     void PrintLog() const {
       for (auto &log : exec_log_list_) {
-        printf("%d %s\n", log.start_position,
+        printf("%d %d %s\n", log.position,
+               log.start_position,
                BytecodeUtil::ToStringOpecode(static_cast<Bytecode>(
                    log.bytecode)));
       }
@@ -230,6 +290,7 @@ class VirtualMachine {
 
    private:
     std::vector<RepeatAccumulator> repeat_acc_stack_;
+    std::vector<Thread> thread_stack_;
     Smi* flag_;
     Bitset<uint8_t> vm_flag_;
     uint8_t group_;

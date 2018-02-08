@@ -100,6 +100,10 @@ class BytecodeExecutable;
 // Wide2    | instruction | E |      Eax      |
 //          +---------------------------------+
 //
+//          +---------------------------------------------+
+// Wide3    | instruction |      Ebx      |      Eax      |
+//          +---------------------------------------------+
+//
 
 enum class BytecodeLayout: uint8_t {
   kNone,
@@ -112,6 +116,7 @@ enum class BytecodeLayout: uint8_t {
   kWord1,
   kWide1,
   kWide2,
+  kWide3
 };
 
 struct BytecodeOperand {
@@ -125,14 +130,14 @@ struct BytecodeOperand {
   A(RegexEndGroup, None, 1, 0)                                \
   A(RegexRune, Double3, 3, 1, u16)                            \
   A(RegexSome, Word1, (kPointerSize + 1), 1, JSString*)       \
-  A(RegexRepeatRangeStart, Double2, 5, 2, uint16_t, uint16_t) \
-  A(RegexRepeatStart, Short1, 2, 1, uint8_t)                  \
-  A(RegexRepeatEnd, Wide1, 5, 1, BytecodeLabel*)              \
+  A(RegexRepeatRange, Double2, 5, 2, uint16_t, uint16_t)      \
+  A(RegexRepeat, Wide3, 9, 1, BytecodeLabel*, BytecodeLabel*) \
   A(RegexJumpIfMatched, Wide1, 5, 1, BytecodeLabel*)          \
   A(RegexJumpIfFailed, Wide1, 5, 1, BytecodeLabel*)
 
 #define REGEX_BYTECODE_LIST(A)                  \
   REGEX_BYTECODE_LIST_WITOUT_MATCHED(A)         \
+  A(RegexFailed, None, 1, 0)                    \
   A(RegexMatched, None, 1, 0)
 
 #define BYTECODE_LIST_WITHOUT_RETURN(A)                                 \
@@ -396,6 +401,10 @@ class BytecodeFetcher {
     return pc_;
   }
 
+  inline uint32_t length() {
+    return array_->length();
+  }
+
  private:
   uint32_t pc_;
   BytecodeArray* array_;
@@ -474,6 +483,7 @@ class BytecodeNode: public Zone {
       : operands_(operands),
         bytecode_(bytecode),
         jmp_(nullptr),
+        jmp2_(nullptr),
         next_(nullptr) {}
 
   explicit BytecodeNode(Bytecode bytecode,
@@ -481,16 +491,28 @@ class BytecodeNode: public Zone {
       : operands_(0),
         bytecode_(bytecode),
         jmp_(jmp),
+        jmp2_(nullptr),
+        next_(nullptr) {}
+
+  explicit BytecodeNode(Bytecode bytecode,
+                        BytecodeNode* jmp1,
+                        BytecodeNode* jmp2)
+      : operands_(0),
+        bytecode_(bytecode),
+        jmp_(jmp1),
+        jmp2_(jmp2),
         next_(nullptr) {}
 
   explicit BytecodeNode(Bytecode bytecode)
       : operands_(0),
         bytecode_(bytecode),
         jmp_(nullptr),
+        jmp2_(nullptr),
         next_(nullptr) {}
 
   LUX_CONST_PROPERTY(uint32_t, offset, offset_)
   LUX_CONST_PROPERTY(BytecodeNode*, jmp, jmp_)
+  LUX_CONST_PROPERTY(BytecodeNode*, jmp2, jmp2_)
   LUX_CONST_PROPERTY(Bytecode, bytecode, bytecode_)
   LUX_CONST_PROPERTY(BytecodeNode*, next, next_)
   LUX_CONST_PROPERTY(int64_t, operands, operands_)
@@ -508,13 +530,13 @@ class BytecodeNode: public Zone {
   int64_t operands_;
   Bytecode bytecode_;
   BytecodeNode* jmp_;
+  BytecodeNode* jmp2_;
   BytecodeNode* next_;
 };
 
 class BytecodeLabel {
  public:
   using NodeList = std::vector<BytecodeNode*>;
-  using iterator = NodeList::iterator;
 
   BytecodeLabel()
       : jmps_(nullptr) {}
@@ -525,26 +547,35 @@ class BytecodeLabel {
 
   LUX_PROPERTY(BytecodeNode*, bound_node, bound_node_)
 
-  void AddFrom(BytecodeNode* from) {
+  void AddFrom(BytecodeNode* from, bool is_second = false) {
     if (jmps_) {
       INVALIDATE(bound_node_ != nullptr);
       jmps_->push_back(from);
-      from->set_jmp(bound_node_);
+      if (!is_second) {
+        from->set_jmp(bound_node_);
+      } else {
+        from->set_jmp2(bound_node_);
+      }
     } else {
-      from_.push_back(from);
+      if (!is_second) {
+        from_.push_back(from);
+      } else {
+        from2_.push_back(from);
+      }
     }
   }
 
-  iterator begin() {
-    return from_.begin();
+  const NodeList& from_list() const {
+    return from_;
   }
 
-  iterator end() {
-    return from_.end();
+  const NodeList& from2_list() const {
+    return from2_;
   }
 
  private:
   NodeList from_;
+  NodeList from2_;
   NodeList* jmps_;
   BytecodeNode* bound_node_;
   BytecodeNode* to_;

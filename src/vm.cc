@@ -94,6 +94,7 @@ REGEX_HANDLER(RegexRune) {
   if (subject->length() > p) {
     auto matched = ch == subject->at(p).code();
     if (matched) {
+      exec->IncrementMatchedCountOfRepeatAccumulator();
       exec->Advance();
       if (exec->collect_matched_word() && exec->IsInGroup()) {
         INVALIDATE(exec->current_matched_string());
@@ -103,7 +104,7 @@ REGEX_HANDLER(RegexRune) {
     }
     return exec->store_flag(Smi::FromInt(matched));
   }
-  exec->store_flag(Smi::FromInt(1));
+  exec->store_flag(Smi::FromInt(0));
 }
 
 REGEX_HANDLER(RegexSome) {
@@ -116,6 +117,7 @@ REGEX_HANDLER(RegexSome) {
     auto code = subject->at(p);
     for (auto &ch : *chars) {
       if (ch == code) {
+        exec->IncrementMatchedCountOfRepeatAccumulator();
         exec->Advance();
         if (exec->collect_matched_word() && exec->IsInGroup()) {
           INVALIDATE(exec->current_matched_string());
@@ -130,24 +132,26 @@ REGEX_HANDLER(RegexSome) {
   exec->store_flag(Smi::FromInt(1));
 }
 
-REGEX_HANDLER(RegexRepeatRangeStart) {
+REGEX_HANDLER(RegexRepeatRange) {
   auto start = fetcher->FetchNextDoubleOperand();
   auto end = fetcher->FetchNextDoubleOperand();
   exec->StartRepeatRange(start, end);
 }
 
-REGEX_HANDLER(RegexRepeatStart) {
-  auto flag = fetcher->FetchNextShortOperand();
-  auto c = flag? 1: 0;
-  exec->StartRepeat(c);
-}
+REGEX_HANDLER(RegexRepeat) {
+  auto pc = fetcher->FetchNextWideOperand();
+  auto failed = fetcher->FetchNextWideOperand();
+  auto cur_thread = exec->current_thread();
 
-REGEX_HANDLER(RegexRepeatEnd) {
-  auto jmp = fetcher->FetchNextWideOperand();
-  if (!exec->repeat_acc().IsSatisfied()) {
-    fetcher->UpdatePC(jmp);
+  if (exec->is_matched()) {
+    return fetcher->UpdatePC(pc);
   }
-  exec->EndRepeat();
+
+  if (cur_thread && cur_thread->pc == pc
+      && !exec->load_flag()->value()) {
+    return fetcher->UpdatePC(failed);
+  }
+  exec->NewThread(pc);
 }
 
 REGEX_HANDLER(RegexJumpIfMatched) {
@@ -462,7 +466,7 @@ Object* VirtualMachine::ExecuteRegex(BytecodeExecutable* executable,
   RegexExecutor exec(
       isolate_, input, collect_matched_word, executable);
   exec.Execute();
-  //  exec.PrintLog();
+  exec.PrintLog();
   return !collect_matched_word?
       reinterpret_cast<Object*>(
           exec.is_matched()? isolate_->jsval_true(): isolate_->jsval_false())
@@ -481,8 +485,18 @@ void VirtualMachine::RegexExecutor::Execute() {
 #define VM_JMP_TABLES(Name, Layout, size, n, ...) &&Label_##Name,
       REGEX_BYTECODE_LIST_WITOUT_MATCHED(VM_JMP_TABLES)
 #undef VM_JMP_TABLES
+      &&Label_Failed,
       &&Label_Matched
     }};
+
+  NewThread(0);
+
+Label_Retry:
+
+  auto cur_thread = PopThread();
+
+  fetcher_->UpdatePC(cur_thread.pc);
+  position_ = cur_thread.position;
 
   auto bc = fetcher_->FetchBytecodeAsInt();
   COLLECT_EXECUTION_LOG(fetcher_->pc() - 1, bc);
@@ -501,6 +515,13 @@ void VirtualMachine::RegexExecutor::Execute() {
   }
   REGEX_BYTECODE_LIST_WITOUT_MATCHED(VM_EXECUTE)
 #undef VM_EXECUTE
+  Label_Failed: {
+    unset_matched();
+    if (HasThread()) {
+      goto Label_Retry;
+    }
+    return;
+  }
   Label_Matched: {
     set_matched();
     //  DO NOTHING

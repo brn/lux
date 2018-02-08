@@ -31,14 +31,14 @@
 class RegExpBytecodeTest: public lux::IsolateSetup {
  protected:
   template <bool error = false, bool show_error = false>
-  void RunTest(const char* regexp) {
+  void RunTest(const char* regexp, const char* input) {
     lux::HandleScope scope;
     lux::ErrorReporter er;
     lux::SourcePosition sp;
     lux::regexp::Compiler compiler(isolate_, &er, &sp);
     auto jsregexp = compiler.Compile(regexp);
     printf("%s\n", jsregexp->code()->ToString().c_str());
-    auto ret = jsregexp->Match(isolate_, *lux::JSString::New(isolate_, "bbx"));
+    auto ret = jsregexp->Test(isolate_, *lux::JSString::New(isolate_, input));
     printf("%s\n", ret->ToString().c_str());
   }
 };
@@ -46,6 +46,6 @@ class RegExpBytecodeTest: public lux::IsolateSetup {
 
 namespace {
 TEST_F(RegExpBytecodeTest, Simple) {
-  RunTest("(bb)([alkd]|b|x)");
+  RunTest("b+b", "vbb");
 }
 }

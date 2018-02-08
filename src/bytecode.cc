@@ -63,7 +63,9 @@ const BytecodeOperand BytecodeUtil::kOperandRax = {
       : BytecodeLayout::k##Layout == BytecodeLayout::kWord1? size == 9  \
       : BytecodeLayout::k##Layout == BytecodeLayout::kWide1? size == 5  \
       : BytecodeLayout::k##Layout ==                                    \
-      BytecodeLayout::kWide2? size == 6: false,                         \
+      BytecodeLayout::kWide2? size == 6                                 \
+      :BytecodeLayout::k##Layout ==                                     \
+      BytecodeLayout::kWide3? size == 9: false,                         \
       "Bytecode "#Name" size is incorrect.");
 REGEX_BYTECODE_LIST(BYTECODE_CHECK)
 #undef BYTECODE_CHECK
@@ -218,6 +220,13 @@ std::string BytecodeUtil::ToStringField(Bytecode bc,
          << +fetcher->FetchNextShortOperand();
       return st.str();
     }
+    case BytecodeLayout::kWide3: {
+      st << "  Eax = "
+         << +fetcher->FetchNextWideOperand()
+         << "  Ebx = "
+         << +fetcher->FetchNextWideOperand();
+      return st.str();
+    }
     default:
       UNREACHABLE();
   }
@@ -258,10 +267,15 @@ int32_t BytecodeArrayWriter::EmitConstant(BytecodeConstantNode* node) {
 }
 
 void BytecodeArrayWriter::Bind(BytecodeLabel* label) {
-  label->set_to(last_bytecode());
-  label->set_bound_node(last_bytecode());
-  for (auto &from : *label) {
-    from->set_jmp(last_bytecode());
+  auto to = last_bytecode();
+  label->set_to(to);
+  label->set_bound_node(to);
+  for (auto &from : label->from_list()) {
+    from->set_jmp(to);
+    jmps_.push_back(from);
+  }
+  for (auto &from : label->from2_list()) {
+    from->set_jmp2(to);
     jmps_.push_back(from);
   }
   label->set_jmps(&jmps_);
@@ -278,35 +292,59 @@ Handle<BytecodeExecutable> BytecodeArrayWriter::Flush() {
     array->write(index++, static_cast<uint8_t>(bytecode));
     switch (bu::layout(bytecode)) {
       case BytecodeLayout::kNone:
+        INVALIDATE(bu::size(bytecode) == 1);
         break;
       case BytecodeLayout::kShort1:
+        INVALIDATE(bu::size(bytecode) == 2);
         array->write(index++, node->DecodeOperand(bu::kOperandA));
         break;
       case BytecodeLayout::kShort2:
+        INVALIDATE(bu::size(bytecode) == 3);
         array->write(index++, node->DecodeOperand(bu::kOperandA));
         array->write(index++, node->DecodeOperand(bu::kOperandB));
         break;
       case BytecodeLayout::kShort3:
+        INVALIDATE(bu::size(bytecode) == 4);
         array->write(index++, node->DecodeOperand(bu::kOperandA));
         array->write(index++, node->DecodeOperand(bu::kOperandB));
         array->write(index++, node->DecodeOperand(bu::kOperandC));
         break;
       case BytecodeLayout::kDouble1:
+        INVALIDATE(bu::size(bytecode) == 4);
         array->write(index++, node->DecodeOperand(bu::kOperandA));
         array->write(index++, node->DecodeOperand(bu::kOperandB));
         array->write(index++, node->DecodeOperand(bu::kOperandC));
         break;
       case BytecodeLayout::kDouble2:
+        INVALIDATE(bu::size(bytecode) == 5);
         array->write(index++, node->DecodeOperand(bu::kOperandA));
         array->write(index++, node->DecodeOperand(bu::kOperandB));
         array->write(index++, node->DecodeOperand(bu::kOperandC));
         array->write(index++, node->DecodeOperand(bu::kOperandD));
         break;
       case BytecodeLayout::kDouble3:
+        INVALIDATE(bu::size(bytecode) == 3);
         array->write(index++, node->DecodeOperand(bu::kOperandA));
         array->write(index++, node->DecodeOperand(bu::kOperandB));
         break;
+      case BytecodeLayout::kWide1:
+        INVALIDATE(bu::size(bytecode) == 5);
+        array->write(index++, node->DecodeOperand(bu::kOperandA));
+        array->write(index++, node->DecodeOperand(bu::kOperandB));
+        array->write(index++, node->DecodeOperand(bu::kOperandC));
+        array->write(index++, node->DecodeOperand(bu::kOperandD));
+        break;
+      case BytecodeLayout::kWide2:
+        INVALIDATE(bu::size(bytecode) == 6);
+        array->write(index++, node->DecodeOperand(bu::kOperandA));
+        array->write(index++, node->DecodeOperand(bu::kOperandB));
+        array->write(index++, node->DecodeOperand(bu::kOperandC));
+        array->write(index++, node->DecodeOperand(bu::kOperandD));
+        array->write(index++, node->DecodeOperand(bu::kOperandE));
+        break;
+      case BytecodeLayout::kWide3:
       case BytecodeLayout::kWord1:
+        INVALIDATE(bu::size(bytecode) == 9);
         array->write(index++, node->DecodeOperand(bu::kOperandA));
         array->write(index++, node->DecodeOperand(bu::kOperandB));
         array->write(index++, node->DecodeOperand(bu::kOperandC));
@@ -315,19 +353,6 @@ Handle<BytecodeExecutable> BytecodeArrayWriter::Flush() {
         array->write(index++, node->DecodeOperand(bu::kOperandF));
         array->write(index++, node->DecodeOperand(bu::kOperandG));
         array->write(index++, node->DecodeOperand(bu::kOperandH));
-        break;
-      case BytecodeLayout::kWide1:
-        array->write(index++, node->DecodeOperand(bu::kOperandA));
-        array->write(index++, node->DecodeOperand(bu::kOperandB));
-        array->write(index++, node->DecodeOperand(bu::kOperandC));
-        array->write(index++, node->DecodeOperand(bu::kOperandD));
-        break;
-      case BytecodeLayout::kWide2:
-        array->write(index++, node->DecodeOperand(bu::kOperandA));
-        array->write(index++, node->DecodeOperand(bu::kOperandB));
-        array->write(index++, node->DecodeOperand(bu::kOperandC));
-        array->write(index++, node->DecodeOperand(bu::kOperandD));
-        array->write(index++, node->DecodeOperand(bu::kOperandE));
         break;
       default:
         UNREACHABLE();
@@ -338,6 +363,7 @@ Handle<BytecodeExecutable> BytecodeArrayWriter::Flush() {
   for (auto &from : jmps_) {
     auto to = from->jmp();
     auto target = to->next()? to->next()->offset(): to->offset() + 1;
+    INVALIDATE(bu::size(from->bytecode()) >= 5);
     array->write(from->offset() + 1,
                  bu::DecodeOperand(bu::kOperandA, target));
     array->write(from->offset() + 2,
@@ -346,6 +372,20 @@ Handle<BytecodeExecutable> BytecodeArrayWriter::Flush() {
                  bu::DecodeOperand(bu::kOperandC, target));
     array->write(from->offset() + 4,
                  bu::DecodeOperand(bu::kOperandD, target));
+
+    to = from->jmp2();
+    if (to != nullptr) {
+      INVALIDATE(bu::size(from->bytecode()) == 9);
+      auto target = to->next()? to->next()->offset(): to->offset() + 1;
+      array->write(from->offset() + 5,
+                   bu::DecodeOperand(bu::kOperandA, target));
+      array->write(from->offset() + 6,
+                   bu::DecodeOperand(bu::kOperandB, target));
+      array->write(from->offset() + 7,
+                   bu::DecodeOperand(bu::kOperandC, target));
+      array->write(from->offset() + 8,
+                   bu::DecodeOperand(bu::kOperandD, target));
+    }
   }
   auto pool = BytecodeConstantArray::New(isolate_, constant_length_);
   auto bcn = constant_top_;
@@ -377,6 +417,13 @@ BytecodeNode* BytecodeBuilder::RegexMatched() {
   return n;
 }
 
+BytecodeNode* BytecodeBuilder::RegexFailed() {
+  auto n = new(zone()) BytecodeNode(
+      Bytecode::kRegexFailed);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
 BytecodeNode* BytecodeBuilder::RegexStartGroup() {
   auto n = new(zone()) BytecodeNode(
       Bytecode::kRegexStartGroup);
@@ -404,26 +451,22 @@ BytecodeNode* BytecodeBuilder::RegexSome(JSString* input) {
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexRepeatRangeStart(
+BytecodeNode* BytecodeBuilder::RegexRepeatRange(
     uint16_t start, uint16_t end) {
   auto operand = bu::EncodeOperand(bu::kOperandAx, start);
   operand |= bu::EncodeOperand(bu::kOperandBx, end);
-  auto n = new(zone()) BytecodeNode(Bytecode::kRegexRepeatRangeStart, operand);
+  auto n = new(zone()) BytecodeNode(Bytecode::kRegexRepeatRange, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexRepeatStart(uint8_t is_more_than_once) {
-  auto n = new(zone()) BytecodeNode(Bytecode::kRegexRepeatStart,
-                                    is_more_than_once);
-  bytecode_array_writer_->Emit(n);
-  return n;
-}
-
-BytecodeNode* BytecodeBuilder::RegexRepeatEnd(BytecodeLabel* label) {
-  auto n = new(zone()) BytecodeNode(Bytecode::kRegexRepeatEnd,
-                                    label->to());
+BytecodeNode* BytecodeBuilder::RegexRepeat(BytecodeLabel* label,
+                                           BytecodeLabel* label2) {
+  auto n = new(zone()) BytecodeNode(Bytecode::kRegexRepeat,
+                                    label->to(),
+                                    label2->to());
   label->AddFrom(n);
+  label2->AddFrom(n, true);
   bytecode_array_writer_->Emit(n);
   return n;
 }
