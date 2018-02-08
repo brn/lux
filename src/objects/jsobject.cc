@@ -108,11 +108,35 @@ Object* JSFunction::Call(
   return vm.Execute(code(), parameters);
 }
 
+Handle<JSRegExp> JSRegExp::New(Isolate* isolate,
+                               BytecodeExecutable* executable) {
+  return make_handle(NewWithoutHandle(isolate, executable));
+}
+
+JSRegExp* JSRegExp::NewWithoutHandle(Isolate* isolate,
+                                     BytecodeExecutable* be) {
+  auto heap_obj = HeapObject::New(isolate,
+                                  isolate->regexp_shape());
+  auto be_ptr = FIELD_PROPERTY(BytecodeExecutable**, heap_obj, kCodeOffset);
+  *be_ptr = be;
+  return reinterpret_cast<JSRegExp*>(heap_obj);
+}
+
+bool JSRegExp::Test(Isolate* isolate, JSString* input) {
+  lux::VirtualMachine vm(isolate);
+  return vm.ExecuteRegex(code(), input, false);
+}
+
+JSArray* JSRegExp::Match(Isolate* isolate, JSString* input) {
+  lux::VirtualMachine vm(isolate);
+  return JSArray::Cast(vm.ExecuteRegex(code(), input, true));
+}
+
 Handle<JSArray> JSArray::NewEmptyArray(Isolate* isolate,
                                        uint32_t length,
                                        size_t initial_capacity) {
   auto fixed_array = FixedArray::New(isolate, initial_capacity);
-  for (int i = 0; i < initial_capacity; i++) {
+  for (int i = 0; i < length; i++) {
     fixed_array->write(i, isolate->jsval_undefined());
   }
   return NewWithElement(isolate, length, *fixed_array);
@@ -138,19 +162,23 @@ Handle<JSString> JSString::New(Isolate* isolate, const char* data) {
 
 Handle<JSString> JSString::New(
     Isolate* isolate, const Utf16CodePoint* cp, size_t length) {
-  auto required_size = kStringLengthSize
-    + sizeof(u32) * (length + 1);
+  auto required_size = kStringLengthSize + kPointerSize;
+  auto backing_store_size =  sizeof(u32) * (length + 1);
   auto aligned_size = LUX_ALIGN_OFFSET(required_size, kAlignment);
+  auto aligned_backing_store_size = LUX_ALIGN_OFFSET(
+      backing_store_size, kAlignment);
   auto str = HeapObject::New(isolate, isolate->string_shape(),
                              aligned_size);
+  auto store = U32FixedArray::New(isolate, aligned_backing_store_size);
   auto size_field = reinterpret_cast<uint32_t*>(
       FIELD_ADDR(str, kStringLengthOffset));
   *size_field = length;
-  auto u16cp = reinterpret_cast<Utf16CodePoint*>(
+  auto store_field = reinterpret_cast<U32FixedArray**>(
       FIELD_ADDR(str, kStringPtrOffset));
   for (int i = 0; i < length; i++) {
-    u16cp[i] = cp[i];
+    store->write(i, cp[i]);
   }
+  *store_field = *store;
   return make_handle(reinterpret_cast<JSString*>(str));
 }
 
@@ -159,9 +187,22 @@ JSString::Utf8String::Utf8String(JSString* str)
   auto cp = str->data();
   std::stringstream st;
   for (int i = 0; i < length_; i++) {
-    st << cp[i].ToUtf8String();
+    st << cp->at(i).ToUtf8String();
   }
   buffer_ = st.str();
+}
+
+void JSString::Append(Isolate* isolate, u32 v) {
+  auto next_size = length() + 1;
+  if (next_size >= data()->length()) {
+    auto capacity = data()->length();
+    auto next = U32FixedArray::NewWithoutHandle(
+        isolate, (capacity < 10? 10: capacity) * 2);
+    next->Copy(data());
+    *FIELD_PROPERTY(U32FixedArray**, this, kStringPtrOffset) = next;
+  }
+  data()->write(length(), Utf16CodePoint(v));
+  *FIELD_PROPERTY(uint32_t*, this, kStringLengthOffset) = next_size;
 }
 
 bool JSString::Equals(const JSString* js_string) const {
@@ -176,6 +217,33 @@ bool JSString::Equals(const JSString* js_string) const {
   }
 
   return true;
+}
+
+bool JSString::GreaterThan(const JSString* js_string) const {
+  auto bigger = length() > js_string->length();
+  auto len = bigger? length(): js_string->length();
+
+  for (auto i = 0; i < len; i++) {
+    if (at(i) > js_string->at(i)) {
+      return true;
+    }
+  }
+
+  return bigger? true: false;
+}
+
+JSNumber* JSNumber::NewWithoutHandle(Isolate* isolate, double value) {
+  auto required_size = kValueSize;
+  auto aligned_size = LUX_ALIGN_OFFSET(required_size, kAlignment);
+  auto n = HeapObject::New(isolate, isolate->number_shape(),
+                           aligned_size);
+  auto d = FIELD_PROPERTY(double*, n, kValueOffset);
+  *d = value;
+  return reinterpret_cast<JSNumber*>(n);
+}
+
+Handle<JSNumber> JSNumber::New(Isolate* isolate, double value) {
+  return make_handle(NewWithoutHandle(isolate, value));
 }
 
 const uint8_t JSSpecials::kSpecialsStartOffset;

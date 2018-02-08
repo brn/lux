@@ -20,32 +20,15 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <gtest/gtest.h>
-#include "../utils/compare_node.h"
-#include "../../src/heap.h"
-#include "../utils/isolate_setup.h"
-#include "../../src/regexp.h"
-#include "../../src/unicode.h"
-#include "../../src/vm.h"
+#include "./utils.h"
 
-class RegExpBytecodeTest: public lux::IsolateSetup {
- protected:
-  template <bool error = false, bool show_error = false>
-  void RunTest(const char* regexp) {
-    lux::HandleScope scope;
-    lux::ErrorReporter er;
-    lux::SourcePosition sp;
-    lux::regexp::Compiler compiler(isolate_, &er, &sp);
-    auto jsregexp = compiler.Compile(regexp);
-    printf("%s\n", jsregexp->code()->ToString().c_str());
-    auto ret = jsregexp->Match(isolate_, *lux::JSString::New(isolate_, "bbx"));
-    printf("%s\n", ret->ToString().c_str());
-  }
-};
-
-
-namespace {
-TEST_F(RegExpBytecodeTest, Simple) {
-  RunTest("(bb)([alkd]|b|x)");
-}
-}
+namespace lux {
+const uint8_t Double::kSignedShift;
+const uint8_t Double::kExponentShift;
+const uint8_t Double::kExponentMask;
+const uint64_t Double::kFractionMask;
+const uint16_t Double::kMaxExponent;
+const uint16_t Double::kBias;
+const double Double::kNaN = static_cast<double>(
+    uint64_t(uint16_t(~0) >> 4) << 51);
+}  // namespace lux

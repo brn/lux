@@ -38,6 +38,11 @@ namespace lux {
 #define FIELD_PROPERTY(Type, ptr, offset)       \
   reinterpret_cast<Type>(FIELD_ADDR(ptr, offset))
 
+#define OBJECT_CAST(Type, Arg)                  \
+  static inline Type Cast(Arg o) {              \
+    return reinterpret_cast<Type>(o);           \
+  }
+
 class Object {
  public:
   static const int kHeapObjectTag = 1;
@@ -67,11 +72,17 @@ class Object {
   inline static Object* Cast(T v) {
     return reinterpret_cast<Object*>(v);
   }
+
+  std::string ToString();
+
+  bool Equals(Object* o) const;
+
+  bool GreaterThan(Object* o) const;
 };
 
 class Smi: public Object {
  public:
-  static const smi_t kMaxValue = ~smi_t(0) >> 1;
+  static const smi_t kMaxValue = smi_t(~0) >> 1;
 
   LUX_INLINE static bool IsFit(smi_t value) {
     return value <= kMaxValue;
@@ -94,9 +105,8 @@ class Smi: public Object {
     return smi->raw_value() == raw_value();
   }
 
-  static Smi* Cast(Object* o) {
-    return reinterpret_cast<Smi*>(o);
-  }
+  OBJECT_CAST(Smi*, Object*)
+  OBJECT_CAST(const Smi*, const Object*)
 };
 }  // namespace lux
 

@@ -26,7 +26,7 @@
 
 namespace lux {
 namespace regexp {
-#define ENTER()  /*printf("%s\n", __FUNCTION__);*/
+#define ENTER()  /* printf("%s\n", __FUNCTION__); */
 
 #define BASE_REPORT_SYNTAX_ERROR_(parser)                               \
   auto e = std::make_shared<lux::ErrorDescriptor>(parser->position());  \
@@ -71,7 +71,7 @@ const char* Ast::kNodeTypeStringList[] = {
 };
 
 #define AST_VISIT(Name)                           \
-  void Visitor::Visit##Name(Name* node, BytecodeLabel* label)
+  void Visitor::Visit##Name(Name* node)
 
 #define __ builder()->
 using Label = BytecodeLabel;
@@ -79,170 +79,92 @@ using Label = BytecodeLabel;
 Visitor::Visitor(BytecodeBuilder* bytecode_builder,
                  ZoneAllocator* zone_allocator)
     : bytecode_builder_(bytecode_builder),
-      zone_allocator_(zone_allocator) {
-  input_register_ = RegisterAllocator::Parameter(0);
-}
+      zone_allocator_(zone_allocator) {}
 
 AST_VISIT(Root) {
-  RegisterRef offset;
-  __ Comment("RegExp");
-  __ ImmI32(0, position_register());
-  __ LoadRA(input_register());
-  __ CallFastPropertyA(FastProperty::kLength);
-  __ StoreAR(&input_size_register_);
-  return node->regexp()->Visit(this, label);
+  Var offset;
+
+  __ RegexComment("RegExp");
+  node->regexp()->Visit(this);
+
+  __ Bind(&matched_);
+  __ RegexMatched();
 }
 
 AST_VISIT(Conjunction) {
-  __ Comment("Conjunction");
-
-  if (!label) {
-    Label exit, next;
-    __ Jmp(&next);
-    __ Bind(&exit);
-    {
-      __ Return();
-    }
-    __ Bind(&next);
-    label = &exit;
-  }
+  __ RegexComment("Conjunction");
   for (auto &a : *node) {
-    a->Visit(this, label);
+    a->Visit(this);
   }
 }
 
 AST_VISIT(Group) {
-  return node->node()->Visit(this, label);
+  __ RegexComment("Group");
+
+  __ RegexStartGroup();
+  node->node()->Visit(this);
+  __ RegexEndGroup();
 }
 
 AST_VISIT(CharClass) {
-  __ Comment("CharClass");
-
-  auto index = __ StringConstant(node->value());
-  RegisterRef value_reg, index_reg, char_reg,
-    target_char_reg, length_reg;
-  Label loop, if_failed;
-  __ ConstantA(index);
-  __ StoreAR(&value_reg);
-  __ ImmI32(0, &index_reg);
-  __ ImmI32(node->value()->length(), &length_reg);
-
-  __ Bind(&loop);
-  {
-    Label if_continue;
-    __ ICmpGTRRA(&length_reg, &index_reg);
-    __ BranchA(&if_continue, &if_failed);
-    __ Bind(&if_continue);
-    {
-      __ LoadRIxR(&value_reg, &index_reg, &char_reg);
-      __ LoadRIxR(input_register(), &index_reg, &target_char_reg);
-      __ ICmpRR(&char_reg, &target_char_reg);
-      __ Inc(&index_reg);
-      __ JmpIfFalse(&loop);
-    }
-  }
-
-  __ Bind(&if_failed);
-  {
-    if (label) {
-      __ Jmp(label);
-    } else {
-      __ Return();
-    }
-  }
+  __ RegexComment("CharClass");
+  __ RegexSome(node->value());
 }
 
 AST_VISIT(Alternate) {
-  __ Comment("Alternate");
+  __ RegexComment("Alternate");
 
-  Label if_exit, if_first, if_next;
-  RegisterRef save_reg;
-  __ LoadRA(position_register());
-  __ StoreAR(&save_reg);
-  __ Jmp(&if_first);
+  Label next, exit;
+  node->left()->Visit(this);
+  __ RegexJumpIfMatched(&exit);
+  __ RegexJumpIfFailed(&next);
 
-  __ Bind(&if_first);
+  __ Bind(&next);
   {
-    node->left()->Visit(this, &if_next);
-    __ Jmp(&if_exit);
+    node->right()->Visit(this);
+    __ RegexJumpIfMatched(&exit);
+    __ RegexJumpIfFailed(&failed_);
   }
 
-  __ Bind(&if_next);
-  {
-    node->right()->Visit(this, label);
-  }
-
-  __ Bind(&if_exit);
+  __ Bind(&exit);
 }
 
 AST_VISIT(Repeat) {
-  __ Comment("Repeat");
+  __ RegexComment("Repeat");
+  auto is_more_than_once = node->more_than() == 1;
 
-  auto repeat_count = node->more_than();
-  if (repeat_count == 0) {
-    Label loop, next;
-    __ Bind(&loop);
-    {
-      node->target()->Visit(this, &next);
-      __ Jmp(&loop);
-    }
-
-    __ Bind(&next);
-  } else {
-    if (!label) {
-      Label exit;
-      __ Bind(&exit);
-      {
-        __ Return();
-      }
-      label = &exit;
-    }
-
-    RegisterRef repeat_count_reg, zero_reg;
-    Label loop;
-
-    __ ImmI8(0, &zero_reg);
-    __ ImmI32(repeat_count, &repeat_count_reg);
-
-    __ Bind(&loop);
-    {
-      node->target()->Visit(this, label);
-      __ Dec(&repeat_count_reg);
-      __ ICmpRR(&repeat_count_reg, &zero_reg);
-      __ JmpIfFalse(&loop);
-    }
-  }
+  __ RegexRepeatStart(is_more_than_once);
+  Label loop;
+  __ Bind(&loop);
+  node->target()->Visit(this);
+  __ RegexRepeatEnd(&loop);
 }
 
 AST_VISIT(RepeatRange) {
-  return node->target()->Visit(this, label);
+  __ RegexComment("RepeatRange");
+
+  auto least_count = node->more_than();
+  auto max_count = node->less_than();
+
+  __ RegexRepeatRangeStart(least_count, max_count);
+  Label loop;
+  __ Bind(&loop);
+  node->target()->Visit(this);
+  __ RegexRepeatEnd(&loop);
 }
 
 AST_VISIT(Char) {
   auto value = node->value();
   if (value.IsSurrogatePair()) {
-    EmitCompare(value.ToLowSurrogate(), label);
-    EmitCompare(value.ToHighSurrogate(), label);
+    EmitCompare(value.ToLowSurrogate());
+    EmitCompare(value.ToHighSurrogate());
   } else {
-    EmitCompare(value.code(), label);
+    EmitCompare(value.code());
   }
 }
 
-void Visitor::EmitCompare(u16 code, BytecodeLabel* label) {
-  __ Comment("CompareChar");
-
-  RegisterRef reg1, reg2;
-  __ LoadRA(input_register());
-  __ LoadAIxR(position_register(), &reg1);
-  __ ImmI32(code, &reg2);
-  __ LoadRA(&reg1);
-  __ ICmpAR(&reg2);
-
-  if (label) {
-    __ JmpIfFalse(label);
-  }
-
-  __ Inc(position_register());
+void Visitor::EmitCompare(u16 code) {
+  __ RegexRune(code);
 }
 
 void Parser::Parse() {
@@ -427,7 +349,7 @@ Utf16String::ParseIntResult Parser::ToInt() {
       num.push_back(Utf16CodePoint(cur()));
       advance();
     }
-    return Utf16String(num.data(), num.size()).ParseInt();
+    return Utf16String::FromVector(num).ParseInt();
   }
   return Utf16String::ParseIntResult::Failure();
 }
@@ -498,7 +420,7 @@ bool Parser::IsSpecialChar(Utf16CodePoint cp) const {
     || cp == ')';
 }
 
-Handle<JSFunction> Compiler::Compile(const char* source) {
+Handle<JSRegExp> Compiler::Compile(const char* source) {
   HandleScope scope;
   auto regexp = JSString::New(isolate_, source);
   Parser parser(isolate_, error_reporter_, sp_, regexp);
@@ -506,13 +428,9 @@ Handle<JSFunction> Compiler::Compile(const char* source) {
   ZoneAllocator zone_allocator;
   BytecodeBuilder bytecode_builder(isolate_, &zone_allocator);
   Visitor visitor(&bytecode_builder, &zone_allocator);
-  parser.node()->Visit(&visitor, nullptr);
+  parser.node()->Visit(&visitor);
   auto executable = bytecode_builder.flush();
-  return JSFunction::New(isolate_,
-                         *scope.Return(
-                             JSString::New(isolate_, "regexp-scratch-space")),
-                         1,
-                         *scope.Return(executable));
+  return JSRegExp::New(isolate_, *scope.Return(executable));
 }
 }  // namespace regexp
 }  // namespace lux

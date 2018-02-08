@@ -60,10 +60,8 @@ class HeapObject: public Object {
     return *(reinterpret_cast<Shape**>(FIELD_ADDR(this, 0)));
   }
 
-  LUX_INLINE static HeapObject* Cast(Object* o) {
-    INVALIDATE(o->IsHeapObject());
-    return reinterpret_cast<HeapObject*>(o);
-  }
+  OBJECT_CAST(HeapObject*, Object*)
+  OBJECT_CAST(const HeapObject*, const Object*)
 
  protected:
   static HeapObject* New(Isolate* isolate, Shape* shape, size_t size = 0);

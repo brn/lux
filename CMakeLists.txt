@@ -22,6 +22,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
   add_definitions(-DPLATFORM_64BIT)
 
   add_executable(parser_test
+    src/utils.cc
     src/platform/os.cc
     src/isolate.cc
     src/heap.cc
@@ -40,6 +41,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
   target_link_libraries(parser_test libgtest.a libgtest_main.a)
 
   add_executable(unicode_test
+    src/utils.cc
     src/platform/os.cc
     src/isolate.cc
     src/heap.cc
@@ -56,6 +58,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
   target_link_libraries(unicode_test libgtest.a libgtest_main.a)
 
   add_executable(regexp_parse_test
+    src/utils.cc
     src/platform/os.cc
     src/isolate.cc
     src/heap.cc
@@ -74,6 +77,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
   target_link_libraries(regexp_parse_test libgtest.a libgtest_main.a)
 
   add_executable(regexp_bytecode_test
+    src/utils.cc
     src/platform/os.cc
     src/isolate.cc
     src/heap.cc
@@ -92,6 +96,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
   target_link_libraries(regexp_bytecode_test libgtest.a libgtest_main.a)
 
   add_executable(smi_test
+    src/utils.cc
     src/platform/os.cc
     src/isolate.cc
     src/heap.cc
@@ -107,6 +112,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
     test/cases/objects/smi_test.cc)
   target_link_libraries(smi_test libgtest.a libgtest_main.a)
   add_executable(jsstring_test
+    src/utils.cc
     src/platform/os.cc
     src/isolate.cc
     src/heap.cc
@@ -122,6 +128,7 @@ if(CMAKE_BUILD_TYPE STREQUAL "Test")
     test/cases/objects/jsstring_test.cc)
   target_link_libraries(jsstring_test libgtest.a libgtest_main.a)
   add_executable(fixed_array_test
+    src/utils.cc
     src/platform/os.cc
     src/isolate.cc
     src/heap.cc
@@ -140,6 +147,7 @@ endif()
 
 include_directories(./tools/clang+llvm-5.0.1-final-x86_64-apple-darwin/include/c++/v1)
 add_executable(lux
+  src/utils.cc
   src/platform/os.cc
   src/main.cc
   src/heap.cc
@@ -150,6 +158,7 @@ add_executable(lux
   src/zone.cc
   src/bytecode.cc
   src/objects/object.cc
+  src/objects/jsobject.cc
   src/objects/heap_object.cc
   src/objects/shape.cc
   src/objects/jsobject.cc

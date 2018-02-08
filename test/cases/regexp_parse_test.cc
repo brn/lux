@@ -31,6 +31,7 @@ class RegExpTest: public lux::IsolateSetup {
   template <bool error = false, bool show_error = false>
   void RunTest(const char* regexp, int line, const char* expected,
                lux::SourcePosition source_position = lux::SourcePosition()) {
+    lux::HandleScope scope;
     lux::ErrorReporter er;
     lux::SourcePosition sp;
     auto s = lux::JSString::New(isolate_, regexp);
@@ -118,40 +119,14 @@ TEST_F(RegExpTest, CharClass) {
   RunTest("[abcdefg,{}()?]", 16,
           "[Root]\n"
           "  [Conjunction]\n"
-          "    [CharClass exclude = false]\n"
-          "      [Char 'a']\n"
-          "      [Char 'b']\n"
-          "      [Char 'c']\n"
-          "      [Char 'd']\n"
-          "      [Char 'e']\n"
-          "      [Char 'f']\n"
-          "      [Char 'g']\n"
-          "      [Char ',']\n"
-          "      [Char '{']\n"
-          "      [Char '}']\n"
-          "      [Char '(']\n"
-          "      [Char ')']\n"
-          "      [Char '?']\n");
+          "    [CharClass exclude = false <abcdefg,{}()?>]\n");
 }
 
 TEST_F(RegExpTest, CharClassExclude) {
   RunTest("[^abcdefg,{}()?]", 16,
           "[Root]\n"
           "  [Conjunction]\n"
-          "    [CharClass exclude = true]\n"
-          "      [Char 'a']\n"
-          "      [Char 'b']\n"
-          "      [Char 'c']\n"
-          "      [Char 'd']\n"
-          "      [Char 'e']\n"
-          "      [Char 'f']\n"
-          "      [Char 'g']\n"
-          "      [Char ',']\n"
-          "      [Char '{']\n"
-          "      [Char '}']\n"
-          "      [Char '(']\n"
-          "      [Char ')']\n"
-          "      [Char '?']\n");
+          "    [CharClass exclude = true <abcdefg,{}()?>]\n");
 }
 
 TEST_F(RegExpTest, Question) {

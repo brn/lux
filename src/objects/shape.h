@@ -73,6 +73,13 @@ class Shape: public HeapObject {
     return IsSmi();
   }
 
+#define OBJECT_TYPE_CHECKER_DEF(A, N, p)        \
+  inline bool Is##N() const {                   \
+    return instance_type() == InstanceType::A;  \
+  }
+  OBJECT_TYPES(OBJECT_TYPE_CHECKER_DEF)
+#undef OBJECT_TYPE_CHECKER_DEF
+
   LUX_INLINE HeapObject* ForwardingPointer() const {
     return reinterpret_cast<HeapObject*>(
         FIELD_ADDR(this, kForwardingPointerOffset));

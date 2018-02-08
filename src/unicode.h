@@ -23,6 +23,7 @@
 #include <iostream>
 #include <string>
 #include <memory>
+#include <vector>
 #include "./utils.h"
 
 namespace lux {
@@ -357,6 +358,8 @@ class Utf16String {
         utf16_codepoint_(
             std::shared_ptr<const Utf16CodePoint>(utf16_codepoint)) {}
 
+  static Utf16String FromVector(const std::vector<Utf16CodePoint>& v);
+
   LUX_INLINE const Utf16CodePoint* data() const {
     return utf16_codepoint_.get();
   }
@@ -391,30 +394,7 @@ class Utf16String {
 
   std::string ToUtf8String() const;
 
-  ParseIntResult ParseInt() const {
-    static const std::array<int, 10> kAsciiNumericArray = {{
-        0, 1, 2, 3, 4, 5, 6, 7, 8, 9
-      }};
-
-    uint64_t acc = 0;
-    bool parsed = false;
-    int i = 0;
-    for (auto &ch : *this) {
-      if (utf16::IsNumericRange(ch.code())) {
-        acc += PowerOf2<uint64_t>(10, i++)
-          * kAsciiNumericArray[ch.code() - unicode::kAsciiNumericStart];
-        parsed = true;
-      } else {
-        if (!parsed) {
-          return ParseIntResult(1);
-        }
-        return ParseIntResult(acc << 1);
-        break;
-      }
-    }
-
-    return ParseIntResult(acc << 1);
-  }
+  ParseIntResult ParseInt() const;
 
  private:
   static Utf16StringIterator kEnd;

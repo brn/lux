@@ -48,9 +48,137 @@ using VM = VirtualMachine;
       BytecodeFetcher* fetcher,                         \
       BytecodeConstantArray* constant)
 
+#define REGEX_HANDLER(Name)                     \
+    struct Name##BytecodeHandler {              \
+      inline void Execute(                      \
+          Isolate* isolate,                     \
+          VM::RegexExecutor* exec,              \
+          Bytecode bc,                          \
+          BytecodeFetcher* fetcher,             \
+          BytecodeConstantArray* constant);     \
+    };                                          \
+    void Name##BytecodeHandler::Execute(        \
+        Isolate* isolate,                       \
+        VM::RegexExecutor* exec,                \
+        Bytecode bytecode,                      \
+        BytecodeFetcher* fetcher,               \
+        BytecodeConstantArray* constant)
+
+REGEX_HANDLER(RegexStartGroup) {
+  exec->EnterGroup();
+  if (exec->collect_matched_word()) {
+    exec->PrepareStringBuffer();
+  }
+}
+
+REGEX_HANDLER(RegexEndGroup) {
+  exec->LeaveGroup();
+  if (exec->collect_matched_word() &&
+      exec->current_matched_string()->length() > 0) {
+    exec->matched_array()->Push(isolate,
+                                exec->current_matched_string());
+  }
+}
+
+REGEX_HANDLER(RegexRune) {
+  u32 ch = fetcher->FetchNextDoubleOperand();
+  auto p = exec->position();
+  auto subject = exec->input();
+  if (subject->length() > p) {
+    auto matched = ch == subject->at(p).code();
+    if (matched) {
+      exec->Advance();
+      if (exec->collect_matched_word() && exec->IsInGroup()) {
+        INVALIDATE(exec->current_matched_string());
+        exec->current_matched_string()->Append(isolate, subject->at(p));
+        JSString::Utf8String str(exec->current_matched_string());
+      }
+    }
+    return exec->store_flag(Smi::FromInt(matched));
+  }
+  exec->store_flag(Smi::FromInt(1));
+}
+
+REGEX_HANDLER(RegexSome) {
+  auto chars = JSString::Cast(
+      reinterpret_cast<Object*>(fetcher->FetchNextWordOperand()));
+  INVALIDATE(chars->shape()->IsJSString());
+  auto p = exec->position();
+  auto subject = exec->input();
+  if (subject->length() > p) {
+    auto code = subject->at(p);
+    for (auto &ch : *chars) {
+      if (ch == code) {
+        exec->Advance();
+        if (exec->collect_matched_word() && exec->IsInGroup()) {
+          INVALIDATE(exec->current_matched_string());
+          exec->current_matched_string()->Append(isolate, subject->at(p));
+        }
+        return exec->store_flag(Smi::FromInt(1));
+      }
+    }
+    return exec->store_flag(Smi::FromInt(0));
+  }
+
+  exec->store_flag(Smi::FromInt(1));
+}
+
+REGEX_HANDLER(RegexRepeatRangeStart) {
+  auto start = fetcher->FetchNextDoubleOperand();
+  auto end = fetcher->FetchNextDoubleOperand();
+  exec->StartRepeatRange(start, end);
+}
+
+REGEX_HANDLER(RegexRepeatStart) {
+  auto flag = fetcher->FetchNextShortOperand();
+  auto c = flag? 1: 0;
+  exec->StartRepeat(c);
+}
+
+REGEX_HANDLER(RegexRepeatEnd) {
+  auto jmp = fetcher->FetchNextWideOperand();
+  if (!exec->repeat_acc().IsSatisfied()) {
+    fetcher->UpdatePC(jmp);
+  }
+  exec->EndRepeat();
+}
+
+REGEX_HANDLER(RegexJumpIfMatched) {
+  auto jmp = fetcher->FetchNextWideOperand();
+  if (exec->load_flag()->value()) {
+    fetcher->UpdatePC(jmp);
+  }
+}
+
+REGEX_HANDLER(RegexJumpIfFailed) {
+  auto jmp = fetcher->FetchNextWideOperand();
+  if (!exec->load_flag()->value()) {
+    fetcher->UpdatePC(jmp);
+  }
+}
+
+REGEX_HANDLER(RegexComment) {
+  USE(fetcher->FetchNextWordOperand());
+  return;
+}
+
 HANDLER(Comment) {
   USE(fetcher->FetchNextWordOperand());
   return;
+}
+
+HANDLER(Print) {
+  auto i = fetcher->FetchNextShortOperand();
+  auto str = exec->load_register_value_at(i)->ToString();
+  printf("VMDebugPrint: %s\n", str.c_str());
+}
+
+HANDLER(ExecIf) {
+  auto v = exec->load_flag();
+  auto boolean_value = JSSpecials::ToBoolean(v);
+  if (!boolean_value) {
+    fetcher->UpdatePC(fetcher->pc() + 1);
+  }
 }
 
 HANDLER(Jmp) {
@@ -59,101 +187,123 @@ HANDLER(Jmp) {
 }
 
 HANDLER(JmpIfTrue) {
-  auto v = exec->load_accumulator();
-  auto boolean_value = JSSpecials::ToBoolean(v);
+  auto v = exec->load_flag();
   auto next = fetcher->FetchNextWideOperand();
+  auto boolean_value = JSSpecials::ToBoolean(v);
   if (boolean_value) {
     fetcher->UpdatePC(next);
   }
 }
 
 HANDLER(JmpIfFalse) {
-  auto v = exec->load_accumulator();
-  auto boolean_value = JSSpecials::ToBoolean(v);
+  auto v = exec->load_flag();
   auto next = fetcher->FetchNextWideOperand();
+  auto boolean_value = JSSpecials::ToBoolean(v);
   if (!boolean_value) {
     fetcher->UpdatePC(next);
   }
 }
 
-HANDLER(ImmI8) {
+HANDLER(I8Constant) {
   auto value = fetcher->FetchNextShortOperand();
   auto reg = fetcher->FetchNextShortOperand();
   exec->store_register_value_at(reg, Smi::FromInt(value));
 }
 
-HANDLER(ImmI32) {
+HANDLER(I32Constant) {
   auto value = fetcher->FetchNextWideOperand();
   auto reg = fetcher->FetchNextShortOperand();
-  exec->store_register_value_at(reg, Smi::FromInt(value));
-}
-
-HANDLER(CallFastPropertyA) {
-  auto property = fetcher->FetchNextShortOperand();
-  auto obj = exec->load_accumulator();
-  switch (static_cast<FastProperty>(property)) {
-    case FastProperty::kLength:
-      exec->store_accumulator(JSObject::GetLength(isolate, obj));
+  if (value < Smi::kMaxValue) {
+    exec->store_register_value_at(reg, Smi::FromInt(value));
+  } else {
+    exec->store_register_value_at(reg, *JSNumber::New(isolate, value));
   }
 }
 
-HANDLER(ConstantA) {
-  auto index = fetcher->FetchNextDoubleOperand();
-  auto obj = constant->at(index);
-  exec->store_accumulator(obj);
-}
-
-HANDLER(ConstantR) {
-  auto index = fetcher->FetchNextDoubleOperand();
+HANDLER(Append) {
+  auto value_reg = fetcher->FetchNextShortOperand();
   auto reg = fetcher->FetchNextShortOperand();
-  auto obj = constant->at(index);
-  exec->store_register_value_at(reg, obj);
-}
-
-HANDLER(StoreAR) {
-  auto reg = fetcher->FetchNextShortOperand();
-  auto obj = VM_OP(load_accumulator);
-  exec->store_register_value_at(reg, obj);
-}
-
-HANDLER(LoadRA) {
-  auto reg = fetcher->FetchNextShortOperand();
+  auto value = exec->load_register_value_at(value_reg);
   auto obj = exec->load_register_value_at(reg);
-  exec->store_accumulator(obj);
-}
-
-HANDLER(LoadAIxR) {
-  auto reg1 = fetcher->FetchNextShortOperand();
-  auto reg2 = fetcher->FetchNextShortOperand();
-  auto position = exec->load_register_value_at(reg1);
-  auto obj = exec->load_accumulator();
-  auto o = Object::Cast(obj);
-  if (o->IsHeapObject()) {
-    auto v = HeapObject::Cast(o);
-    switch (v->shape()->instance_type()) {
-      case InstanceType::JS_STRING: {
-        auto ret = JSString::Cast(v)->at(Smi::Cast(position)->value());
-        exec->store_register_value_at(reg2, Smi::FromInt(ret.code()));
-        break;
-      }
-      default:
-        return;
+  INVALIDATE(obj->IsHeapObject());
+  auto ho = HeapObject::Cast(obj);
+  switch (ho->shape()->instance_type()) {
+    case InstanceType::JS_STRING: {
+      JSString::Cast(ho)->Append(
+          isolate, static_cast<u32>(JSNumber::GetIntValue(value)));
+      break;
+    }
+    case InstanceType::JS_ARRAY: {
+      JSArray::Cast(obj)->Push(isolate, value);
+      break;
+    }
+    default: {
+      return;
     }
   }
 }
 
-HANDLER(LoadRIxR) {
+HANDLER(CallFastPropertyA) {
+  auto property = fetcher->FetchNextShortOperand();
+  auto input = fetcher->FetchNextShortOperand();
+  auto output = fetcher->FetchNextShortOperand();
+  auto obj = exec->load_register_value_at(input);
+  switch (static_cast<FastProperty>(property)) {
+    case FastProperty::kLength:
+      exec->store_register_value_at(output,
+                                    JSObject::GetLength(isolate, obj));
+  }
+}
+
+HANDLER(LoadConstant) {
+  auto index = fetcher->FetchNextDoubleOperand();
+  auto reg = fetcher->FetchNextShortOperand();
+  auto obj = constant->at(index);
+  exec->store_register_value_at(reg, obj);
+}
+
+HANDLER(NewEmptyJSArray) {
+  auto out = fetcher->FetchNextShortOperand();
+  auto jsa = JSArray::NewEmptyArray(isolate, 0);
+  exec->store_register_value_at(out, *jsa);
+}
+
+HANDLER(NewEmptyJSString) {
+  auto out = fetcher->FetchNextShortOperand();
+  auto jss = JSString::New(isolate, "");
+  exec->store_register_value_at(out, *jss);
+}
+
+HANDLER(LoadIx) {
   auto reg1 = fetcher->FetchNextShortOperand();
-  auto index = fetcher->FetchNextShortOperand();
+  auto index_reg = fetcher->FetchNextShortOperand();
   auto reg2 = fetcher->FetchNextShortOperand();
   auto obj = exec->load_register_value_at(reg1);
+  auto index_obj = exec->load_register_value_at(index_reg);
+
+  int index;
+  if (index_obj->IsSmi()) {
+    index = Smi::Cast(index_obj)->value();
+  } else {
+    auto jsn = JSNumber::Cast(index_obj);
+    if (jsn->IsNaN()) {
+      return exec->store_register_value_at(reg2, isolate->jsval_undefined());
+    }
+    index = jsn->int_value();
+  }
 
   if (obj->IsHeapObject()) {
     auto v = HeapObject::Cast(obj);
     switch (v->shape()->instance_type()) {
       case InstanceType::JS_STRING: {
         auto ret = JSString::Cast(v)->at(index);
-        exec->store_register_value_at(reg2, Smi::FromInt(ret));
+        Object* v = nullptr;
+        if (ret < Smi::kMaxValue) {
+          v = Smi::FromInt(ret);
+        } else {
+          v = JSNumber::NewWithoutHandle(isolate, ret);
+        }
+        exec->store_register_value_at(reg2, v);
         break;
       }
       default:
@@ -162,47 +312,36 @@ HANDLER(LoadRIxR) {
   }
 }
 
-HANDLER(ICmpRR) {
+HANDLER(Cmp) {
   auto reg1 = fetcher->FetchNextShortOperand();
   auto reg2 = fetcher->FetchNextShortOperand();
   auto valueA = exec->load_register_value_at(reg1);
   auto valueB = exec->load_register_value_at(reg2);
-  auto int_a = Smi::Cast(valueA);
-  auto int_b = Smi::Cast(valueB);
-  if (int_a->Equals(int_b)) {
-    exec->store_accumulator(Smi::FromInt(1));
-  } else {
-    exec->store_accumulator(Smi::FromInt(0));
-  }
+  exec->store_flag(Smi::FromInt(valueA->Equals(valueB)));
 }
 
-HANDLER(ICmpAR) {
+HANDLER(Mov) {
   auto reg1 = fetcher->FetchNextShortOperand();
-  auto valueA = exec->load_register_value_at(reg1);
-  auto valueB = exec->load_accumulator();
-  auto int_a = Smi::Cast(valueA);
-  auto int_b = Smi::Cast(valueB);
-  if (int_a->Equals(int_b)) {
-    exec->store_accumulator(Smi::FromInt(1));
-  } else {
-    exec->store_accumulator(Smi::FromInt(0));
-  }
+  auto reg2 = fetcher->FetchNextShortOperand();
+  auto value = exec->load_register_value_at(reg1);
+  exec->store_register_value_at(reg2, value);
 }
 
-HANDLER(ICmpGTRRA) {
+HANDLER(Gt) {
   auto reg1 = fetcher->FetchNextShortOperand();
   auto reg2 = fetcher->FetchNextShortOperand();
   auto valueA = exec->load_register_value_at(reg1);
   auto valueB = exec->load_register_value_at(reg2);
-  exec->store_accumulator(Smi::FromInt(valueA > valueB));
+  exec->store_flag(Smi::FromInt(valueA->GreaterThan(valueB)));
 }
 
-HANDLER(ICmpLTRRA) {
+HANDLER(GtEq) {
   auto reg1 = fetcher->FetchNextShortOperand();
   auto reg2 = fetcher->FetchNextShortOperand();
   auto valueA = exec->load_register_value_at(reg1);
   auto valueB = exec->load_register_value_at(reg2);
-  exec->store_accumulator(Smi::FromInt(valueA < valueB));
+  exec->store_flag(Smi::FromInt(valueA->GreaterThan(valueB) ||
+                                valueA->Equals(valueB)));
 }
 
 HANDLER(Inc) {
@@ -224,7 +363,8 @@ HANDLER(Add) {
   auto add = fetcher->FetchNextShortOperand();
   auto value = exec->load_register_value_at(reg1);
   if (value->IsSmi()) {
-    exec->store_accumulator(
+    exec->store_register_value_at(
+        RegisterAllocator::kAcc,
         Smi::FromInt(Smi::Cast(value)->value() + add));
   }
 }
@@ -233,24 +373,30 @@ HANDLER(Sub) {
   auto reg1 = fetcher->FetchNextShortOperand();
   auto sub = fetcher->FetchNextShortOperand();
   auto value = exec->load_register_value_at(reg1);
-  exec->store_accumulator(Smi::FromInt(
-      Smi::Cast(value)->value() - sub));
+  exec->store_register_value_at(
+      RegisterAllocator::kAcc,
+      Smi::FromInt(
+          Smi::Cast(value)->value() - sub));
 }
 
 HANDLER(Mul) {
   auto reg1 = fetcher->FetchNextShortOperand();
   auto mul = fetcher->FetchNextShortOperand();
   auto value = exec->load_register_value_at(reg1);
-  exec->store_accumulator(Smi::FromInt(
-      Smi::Cast(value)->value() * mul));
+  exec->store_register_value_at(
+      RegisterAllocator::kAcc,
+      Smi::FromInt(
+          Smi::Cast(value)->value() * mul));
 }
 
 HANDLER(Div) {
   auto reg1 = fetcher->FetchNextShortOperand();
   auto div = fetcher->FetchNextShortOperand();
   auto value = exec->load_register_value_at(reg1);
-  exec->store_accumulator(Smi::FromInt(
-      Smi::Cast(value)->value() * div));
+  exec->store_register_value_at(
+      RegisterAllocator::kAcc,
+      Smi::FromInt(
+          Smi::Cast(value)->value() * div));
 }
 
 Object* VirtualMachine::Execute(BytecodeExecutable* bytecode_executable,
@@ -268,11 +414,12 @@ void VirtualMachine::Executor::Execute() {
 
   static const std::array<
     void*,
-    static_cast<uint8_t>(Bytecode::kExit) + 1> kDispatchTable = {{
+    static_cast<uint8_t>(Bytecode::kExit)
+    - static_cast<uint8_t>(Bytecode::kRegexMatched) + 1> kDispatchTable = {{
 #define VM_JMP_TABLES(Name, Layout, size, n, ...) &&Label_##Name,
-      BYTECODE_LIST(VM_JMP_TABLES)
+      BYTECODE_LIST_WITHOUT_RETURN(VM_JMP_TABLES)
 #undef VM_JMP_TABLES
-      &&Label_Exit,
+      &&Label_Return,
       &&Label_Exit,
     }};
 
@@ -292,11 +439,61 @@ void VirtualMachine::Executor::Execute() {
   BYTECODE_LIST_WITHOUT_RETURN(VM_EXECUTE)
 #undef VM_EXECUTE
   Label_Return: {
-    return;
+    auto ret_val = fetcher_->FetchNextShortOperand();
+    return_value_ = load_register_value_at(ret_val);
     //  DO NOTHING
   }
   Label_Exit: {
     return;
+    //  DO NOTHING
+  }
+}
+
+Object* VirtualMachine::ExecuteRegex(BytecodeExecutable* executable,
+                                     JSString* input,
+                                     bool collect_matched_word) {
+  RegexExecutor exec(
+      isolate_, input, collect_matched_word, executable);
+  exec.Execute();
+  return !collect_matched_word?
+      reinterpret_cast<Object*>(
+          exec.is_matched()? isolate_->jsval_true(): isolate_->jsval_false())
+      : reinterpret_cast<Object*>(exec.matched_array());
+}
+
+void VirtualMachine::RegexExecutor::Execute() {
+#define VM_STATIC_HANDLER(Name, Layout, size, n, ...)        \
+  static Name##BytecodeHandler Name##_bytecode_handler;
+  REGEX_BYTECODE_LIST_WITOUT_MATCHED(VM_STATIC_HANDLER)
+#undef VM_STATIC_HANDLER
+
+  static const std::array<
+    void*,
+    static_cast<uint8_t>(Bytecode::kRegexMatched) + 1> kDispatchTable = {{
+#define VM_JMP_TABLES(Name, Layout, size, n, ...) &&Label_##Name,
+      REGEX_BYTECODE_LIST_WITOUT_MATCHED(VM_JMP_TABLES)
+#undef VM_JMP_TABLES
+      &&Label_Matched
+    }};
+
+  auto bc = fetcher_->FetchBytecodeAsInt();
+  goto *kDispatchTable[bc];
+#define VM_EXECUTE(Name, Layout, size, n, ...)        \
+  Label_##Name: {                                     \
+    Name##_bytecode_handler.Execute(                  \
+        isolate_,                                     \
+        this,                                         \
+        static_cast<Bytecode>(bc),                    \
+        fetcher_.Get(),                               \
+        constant_pool_);                              \
+    auto next = fetcher_->FetchBytecodeAsInt();       \
+    printf("%d %s\n", fetcher_->pc() - 1,BytecodeUtil::ToStringOpecode(static_cast<Bytecode>(next))); \
+    goto *kDispatchTable[next];                       \
+  }
+  REGEX_BYTECODE_LIST_WITOUT_MATCHED(VM_EXECUTE)
+#undef VM_EXECUTE
+  Label_Matched: {
+    set_matched();
     //  DO NOTHING
   }
 }

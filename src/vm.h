@@ -24,6 +24,7 @@
 #define SRC_VM_H_
 
 #include <array>
+#include <vector>
 #include "./bytecode.h"
 #include "./utils.h"
 
@@ -49,6 +50,7 @@ class VirtualMachine {
         reg_[i] = nullptr;
       }
     }
+
    private:
     Object* reg_[256];
   };
@@ -61,19 +63,23 @@ class VirtualMachine {
              BytecodeExecutable* executable)
         : isolate_(isolate),
           constant_pool_(executable->constant_pool()) {
-      int i = 0;
+      int i = RegisterAllocator::kParameter1;
       for (auto &r : argv) {
         store_register_value_at(i++, r);
+      }
+      for (; i <= RegisterAllocator::kParameter10; i++) {
+        store_register_value_at(i, isolate->jsval_undefined());
       }
       fetcher_(executable->bytecode_array());
     }
 
-    LUX_INLINE Object* load_accumulator() {
-      return acc_;
+    LUX_INLINE Smi* load_flag() {
+      return Smi::Cast(
+          registers_.load(RegisterAllocator::kFlag));
     }
 
-    LUX_INLINE void store_accumulator(Object* value) {
-      acc_ = value;
+    LUX_INLINE void store_flag(Smi* value) {
+      registers_.store(RegisterAllocator::kFlag, value);
     }
 
     LUX_INLINE Object* load_register_value_at(int index) {
@@ -85,7 +91,7 @@ class VirtualMachine {
     }
 
     Object* return_value() const {
-      return acc_;
+      return return_value_;
     }
 
     void Execute();
@@ -93,8 +99,119 @@ class VirtualMachine {
    private:
     size_t argc_;
     Object* argv_;
-    Object* acc_;
+    Object* return_value_;
     Registers registers_;
+    Isolate* isolate_;
+    BytecodeConstantArray* constant_pool_;
+    LazyInitializer<BytecodeFetcher> fetcher_;
+  };
+
+  class RegexExecutor {
+   public:
+    RegexExecutor(Isolate* isolate,
+                  JSString* input,
+                  bool collect_matched_word,
+                  BytecodeExecutable* executable)
+        : flag_(Smi::FromInt(0)),
+          group_(0),
+          input_(input),
+          position_(0),
+          matched_array_(nullptr),
+          current_matched_string_(nullptr),
+          isolate_(isolate),
+          constant_pool_(executable->constant_pool()) {
+      if (collect_matched_word) {
+        vm_flag_.set(0);
+        matched_array_ = *JSArray::NewEmptyArray(isolate, 0);
+      }
+      fetcher_(executable->bytecode_array());
+    }
+
+    class RepeatAccumulator {
+     public:
+      RepeatAccumulator(int least_match_count,
+                        int max_match_count)
+          : matched_count_(0),
+            least_match_count_(least_match_count),
+            max_match_count_(max_match_count) {}
+
+      void matched() { matched_count_++; }
+
+      inline bool IsSatisfied() const {
+        return matched_count_ >= least_match_count_
+          && max_match_count_ > 0? matched_count_ <= max_match_count_: true;
+      }
+     private:
+      uint32_t matched_count_;
+      uint16_t least_match_count_;
+      int max_match_count_;
+    };
+
+    LUX_CONST_GETTER(bool, collect_matched_word, vm_flag_.get(0))
+    LUX_INLINE void set_matched() {
+      vm_flag_.set(1);
+    }
+    LUX_CONST_GETTER(bool, is_matched, vm_flag_.get(1))
+
+    LUX_INLINE Smi* load_flag() {
+      return flag_;
+    }
+
+    LUX_INLINE void store_flag(Smi* value) {
+      flag_ = value;
+    }
+
+    LUX_GETTER(JSString*, input, input_);
+    LUX_GETTER(uint32_t, position, position_);
+    inline void Advance() {
+      position_++;
+    }
+    LUX_GETTER(JSArray*, matched_array, matched_array_)
+    LUX_GETTER(JSString*, current_matched_string, current_matched_string_)
+
+    void StartRepeat(int least_count) {
+      repeat_acc_stack_.push_back(RepeatAccumulator(least_count, -1));
+    }
+
+    void EndRepeat() {
+      repeat_acc_stack_.pop_back();
+    }
+
+    void StartRepeatRange(int least_count, int max_count) {
+      repeat_acc_stack_.push_back(RepeatAccumulator(least_count, max_count));
+    }
+
+    const RepeatAccumulator& repeat_acc() const {
+      return repeat_acc_stack_.back();
+    }
+
+    inline void PrepareStringBuffer() {
+      current_matched_string_ = *JSString::New(isolate_, "");
+    }
+
+    void EnterGroup() {
+      group_++;
+    }
+
+    void LeaveGroup() {
+      group_--;
+    }
+
+    bool IsInGroup() const {
+      return group_ > 0;
+    }
+
+    void Execute();
+
+   private:
+    std::vector<RepeatAccumulator> repeat_acc_stack_;
+    Smi* flag_;
+    Bitset<uint8_t> vm_flag_;
+    uint8_t group_;
+    JSString* input_;
+    uint32_t position_;
+    JSArray* matched_array_;
+    JSString* current_matched_string_;
     Isolate* isolate_;
     BytecodeConstantArray* constant_pool_;
     LazyInitializer<BytecodeFetcher> fetcher_;
@@ -105,6 +222,10 @@ class VirtualMachine {
 
   Object* Execute(BytecodeExecutable* executable,
                   std::initializer_list<Object*> argv);
+
+  Object* ExecuteRegex(BytecodeExecutable* executable,
+                       JSString* input,
+                       bool collect_matched_word);
 
 
  private:

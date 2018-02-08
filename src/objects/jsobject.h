@@ -173,6 +173,11 @@ class GenericFixedArray: public FixedArrayBase {
     return make_handle(a);
   }
 
+  static U* NewWithoutHandle(Isolate* isolate, uint32_t size) {
+    auto a = reinterpret_cast<U*>(NewArray(isolate, size * object_size));
+    return a;
+  }
+
   void Fill(T* value) {
     for (int i = 0; i < length(); i++) {
       write(i, value);
@@ -231,10 +236,39 @@ class GenericFixedArray: public FixedArrayBase {
     return FixedArrayIterator<T>(
         reinterpret_cast<T*>(data()), length(), length());
   }
+
+  LUX_INLINE FixedArrayIterator<T> begin_with_size(uint32_t length) const {
+    return FixedArrayIterator<T>(reinterpret_cast<T*>(data()), length);
+  }
+
+  LUX_INLINE FixedArrayIterator<T> end_with_size(uint32_t length) const {
+    return FixedArrayIterator<T>(
+        reinterpret_cast<T*>(data()), length, length);
+  }
+
+  LUX_INLINE FixedArrayIterator<T> begin_with_size(uint32_t length) {
+    return FixedArrayIterator<T>(reinterpret_cast<T*>(data()), length);
+  }
+
+  LUX_INLINE FixedArrayIterator<T> end_with_size(uint32_t length) {
+    return FixedArrayIterator<T>(
+        reinterpret_cast<T*>(data()), length, length);
+  }
 };
 
 class FixedArray: public GenericFixedArray<
-  Object*, FixedArray, kPointerSize> {};
+  Object*, FixedArray, kPointerSize> {
+ public:
+  OBJECT_CAST(FixedArray*, Object*)
+  OBJECT_CAST(const FixedArray*, const FixedArray*)
+};
+
+class U32FixedArray: public GenericFixedArray<
+  Utf16CodePoint, U32FixedArray, kPointerSize> {
+ public:
+  OBJECT_CAST(U32FixedArray*, Object*)
+  OBJECT_CAST(const U32FixedArray*, const U32FixedArray*)
+};
 
 class JSFunction: public HeapObject {
  public:
@@ -269,8 +303,27 @@ class JSFunction: public HeapObject {
     return *FIELD_PROPERTY(JSString**, this, kCodeOffset);
   }
 
-  inline static JSFunction* Cast(Object* o) {
-    return reinterpret_cast<JSFunction*>(o);
+  OBJECT_CAST(JSFunction*, Object*)
+  OBJECT_CAST(const JSFunction*, const JSFunction*)
+};
+
+class JSRegExp: public HeapObject {
+ public:
+  enum {
+    kOffset = HeapObject::kHeapObjectOffset,
+    kCodeOffset = kOffset,
+    kCodeSize = kPointerSize,
+    kSize = kCodeOffset + kCodeSize,
+  };
+  static Handle<JSRegExp> New(Isolate* isolate, BytecodeExecutable* executable);
+  static JSRegExp* NewWithoutHandle(
+      Isolate* isolate, BytecodeExecutable* executable);
+
+  bool Test(Isolate* isolate, JSString*);
+  JSArray* Match(Isolate* isolate, JSString*);
+
+  BytecodeExecutable* code() const {
+    return *FIELD_PROPERTY(BytecodeExecutable**, this, kCodeOffset);
   }
 };
 
@@ -327,13 +380,14 @@ class JSArray: public HeapObject {
         HeapObject::kSize + kElementOffset + kElementSize, kPointerSize)
   };
 
-  Handle<JSArray> NewEmptyArray(Isolate* isolate,
-                                uint32_t length,
-                                size_t initial_capacity = kPointerSize * 10);
+  static Handle<JSArray> NewEmptyArray(
+      Isolate* isolate,
+      uint32_t length,
+      size_t initial_capacity = kPointerSize * 10);
 
-  Handle<JSArray> NewWithElement(Isolate* isolate,
-                                 uint32_t length,
-                                 FixedArray* elements);
+  static Handle<JSArray> NewWithElement(Isolate* isolate,
+                                        uint32_t length,
+                                        FixedArray* elements);
 
   inline uint32_t length() const {
     return *reinterpret_cast<uint32_t*>(FIELD_ADDR(this, kLengthOffset));
@@ -367,6 +421,73 @@ class JSArray: public HeapObject {
   }
 };
 
+class JSNumber: public HeapObject {
+ public:
+  enum {
+    kOffset = HeapObject::kSize,
+    kValueOffset = kOffset,
+    kValueSize = sizeof(double),
+    kSize = kValueOffset + kValueSize
+  };
+
+  OBJECT_CAST(JSNumber*, Object*)
+  OBJECT_CAST(const JSNumber*, const Object*)
+
+  static Handle<JSNumber> New(Isolate* isolate, double value);
+  static JSNumber* NewWithoutHandle(Isolate* isolate, double value);
+
+  static bool IsNaN(JSNumber* n) {
+    Double d(n->value());
+    return d.IsNaN();
+  }
+
+  static int64_t GetIntValue(Object* o) {
+    INVALIDATE(
+        o->IsSmi()
+        || HeapObject::Cast(o)->shape()->IsJSNumber());
+    if (o->IsSmi()) {
+      return Smi::Cast(o)->value();
+    }
+    return JSNumber::Cast(o)->int_value();
+  }
+
+  bool IsNaN() {
+    return IsNaN(this);
+  }
+
+  void set_value(double v) {
+    (*FIELD_PROPERTY(double*, this, kValueOffset)) = v;
+  }
+
+  double value() const {
+    return *FIELD_PROPERTY(double*, this, kValueOffset);
+  }
+
+  int64_t int_value() const {
+    return static_cast<int64_t>(value());
+  }
+
+  bool Equals(const JSNumber* number) const {
+    Double a(value()), b(number->value());
+    return a.Equals(b);
+  }
+
+  bool Equals(const Smi* smi) const {
+    Double a(value()), b(static_cast<double>(smi->value()));
+    return a.Equals(b);
+  }
+
+  bool GreaterThan(const JSNumber* number) const {
+    Double a(value()), b(number->value());
+    return a.GreaterThan(b);
+  }
+
+  bool GreaterThan(const Smi* smi) const {
+    Double a(value()), b(static_cast<double>(smi->value()));
+    return a.GreaterThan(b);
+  }
+};
+
 class JSString: public HeapObject {
  public:
   enum {
@@ -377,6 +498,8 @@ class JSString: public HeapObject {
   };
   static const size_t kSize;
 
+  using iterator = U32FixedArray::iterator;
+
   static JSString* Cast(Object* o) {
     auto h = HeapObject::Cast(o);
     INVALIDATE(h->shape()->instance_type()
@@ -384,79 +507,12 @@ class JSString: public HeapObject {
     return reinterpret_cast<JSString*>(h);
   }
 
-  class Iterator:
-      public std::iterator<std::forward_iterator_tag, Utf16CodePoint> {
-    friend class JSString;
-   public:
-    Iterator()
-        : index_(0), utf16_codepoint_(nullptr) {}
-
-    Iterator(const Utf16CodePoint* utf16_codepoint, int32_t size)
-        : index_(0), size_(size), utf16_codepoint_(utf16_codepoint) {}
-
-    Iterator(const Iterator& it)
-        : index_(it.index_), size_(it.size_),
-          utf16_codepoint_(it.utf16_codepoint_) {}
-
-    const Utf16CodePoint& operator*() const {
-      return utf16_codepoint_[index_];
-    }
-
-    const Utf16CodePoint* operator->() const {
-      return &utf16_codepoint_[index_];
-    }
-
-    Iterator& operator =(const Iterator& it) {
-      index_ = it.index_;
-      utf16_codepoint_ = it.utf16_codepoint_;
-      size_ = it.size_;
-      return *this;
-    }
-
-    LUX_INLINE const bool operator ==(const Iterator& it) const {
-      return index_ == it.index_ && it.utf16_codepoint_ == utf16_codepoint_;
-    }
-
-    LUX_INLINE const bool operator !=(const Iterator& it) const {
-      return !this->operator==(it);
-    }
-
-    Iterator& operator++() {
-      if (index_ < size_) {
-        index_++;
-      }
-
-      return *this;
-    }
-
-    LUX_INLINE Iterator operator++(int value) {
-      Iterator tmp = *this;
-      ++*this;
-      return tmp;
-    }
-
-    LUX_INLINE Iterator operator+(int value) {
-      return Iterator(utf16_codepoint_, index_ + value, size_);
-    }
-
-    LUX_INLINE Iterator& operator+=(int value) {
-      index_ += value;
-      return *this;
-    }
-
-    LUX_INLINE uint32_t current_position() const {
-      return index_;
-    }
-
-   private:
-    Iterator(
-        const Utf16CodePoint* utf16_codepoint, int32_t index, int32_t size)
-        : index_(index), utf16_codepoint_(utf16_codepoint) {}
-
-    uint32_t index_;
-    uint32_t size_;
-    const Utf16CodePoint* utf16_codepoint_;
-  };
+  static const JSString* Cast(const Object* o) {
+    auto h = HeapObject::Cast(o);
+    INVALIDATE(h->shape()->instance_type()
+               == InstanceType::JS_STRING);
+    return reinterpret_cast<const JSString*>(h);
+  }
 
   class Utf8String {
    public:
@@ -503,23 +559,31 @@ class JSString: public HeapObject {
 
   LUX_INLINE Utf16CodePoint at(int index) const {
     INVALIDATE(index < length());
-    return data()[index];
+    return data()->at(index);
   }
 
   bool Equals(const JSString* str) const;
 
-  Iterator begin() const {
-    return Iterator(data(), length());
+  bool GreaterThan(const JSString* str) const;
+
+  U32FixedArray::iterator begin() const {
+    return data()->begin_with_size(length());
   }
 
-  Iterator end() const {
-    return Iterator(data(), length(), length());
+  U32FixedArray::iterator end() const {
+    return data()->end_with_size(length());
   }
+
+  void write(int i, u32 v) {
+    data()->write(i, Utf16CodePoint(v));
+  }
+
+  void Append(Isolate* isolate, u32 v);
 
   friend class Utf8String;
  private:
-  LUX_INLINE Utf16CodePoint* data() const {
-    return reinterpret_cast<Utf16CodePoint*>(
+  LUX_INLINE U32FixedArray* data() const {
+    return *reinterpret_cast<U32FixedArray**>(
         FIELD_ADDR(this, kStringPtrOffset));
   }
 };

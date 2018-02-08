@@ -28,6 +28,7 @@ class Heap;
 class RootMaps;
 class Shape;
 class JSSpecials;
+class JSNumber;
 
 class Isolate {
  public:
@@ -41,6 +42,7 @@ class Isolate {
   OBJECT_TYPES(ISOLATE_SHAPE_GETTER)
 #undef ISOLATE_SHAPE_GETTER
 
+  LUX_CONST_GETTER(JSNumber*, jsval_nan, jsval_nan_)
   LUX_CONST_GETTER(JSSpecials*, jsval_null, jsval_null_)
   LUX_CONST_GETTER(JSSpecials*, jsval_undefined, jsval_undefined_)
   LUX_CONST_GETTER(JSSpecials*, jsval_true, jsval_true_)
@@ -52,6 +54,7 @@ class Isolate {
   Heap* heap_;
   RootMaps* root_maps_;
   std::atomic_flag once_flag_;
+  JSNumber* jsval_nan_;
   JSSpecials* jsval_null_;
   JSSpecials* jsval_undefined_;
   JSSpecials* jsval_true_;

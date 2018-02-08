@@ -32,6 +32,7 @@ void Isolate::InitOnce() {
   if (!once_flag_.test_and_set()) {
     heap_ = new Heap();
     root_maps_ = new RootMaps(this);
+    jsval_nan_ = JSNumber::NewWithoutHandle(this, Double::kNaN);
     jsval_true_ = JSSpecials::NewWithoutHandle(this, JSSpecials::kTrue);
     jsval_false_ = JSSpecials::NewWithoutHandle(this, JSSpecials::kFalse);
     jsval_undefined_

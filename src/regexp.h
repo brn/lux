@@ -56,10 +56,10 @@ REGEXP_AST_TYPES(RE_AST_FORWARD_DECL)
 #undef RE_AST_FORWARD_DECL
 
 #define REGEXP_VISIT_INTERNAL_IFACE                   \
-  void VisitInternal(Visitor* v, BytecodeLabel* label)
+  void VisitInternal(Visitor* v)
 #define REGEXP_VISIT_INTERNAL_METHOD_DECL(Name)           \
-  void VisitInternal(Visitor* v, BytecodeLabel* label) {  \
-    v->Visit##Name(this, label);                          \
+  void VisitInternal(Visitor* v) {                        \
+    v->Visit##Name(this);                                 \
   }
 
 class Visitor {
@@ -69,21 +69,19 @@ class Visitor {
 
   LUX_GETTER(BytecodeBuilder*, builder, bytecode_builder_)
   LUX_GETTER(ZoneAllocator*, zone, zone_allocator_)
-  LUX_GETTER(RegisterRef*, input_register, &input_register_)
-  LUX_GETTER(RegisterRef*, input_size_register, &input_size_register_)
-  LUX_GETTER(RegisterRef*, position_register, &position_register_)
 
 #define REGEXP_VISIT_DECL(G, Name)                    \
-  void Visit##Name(Name* ast, BytecodeLabel* label);
+  void Visit##Name(Name* ast);
   REGEXP_AST_TYPES(REGEXP_VISIT_DECL)
 #undef REGEXP_VISIT_DECL
 
  private:
-  void EmitCompare(u16 code, BytecodeLabel* label);
+  void EmitCompare(u16 code);
+  void CollectMatchedChar(Var* char_register);
+  void Return(Var* ret = nullptr);
 
-  RegisterRef input_size_register_;
-  RegisterRef input_register_;
-  RegisterRef position_register_;
+  BytecodeLabel matched_;
+  BytecodeLabel failed_;
   BytecodeBuilder* bytecode_builder_;
   ZoneAllocator* zone_allocator_;
 };
@@ -113,8 +111,8 @@ class Ast: public Zone {
   virtual std::string ToString(std::string* indent = nullptr) const = 0;
 #endif
 
-  LUX_INLINE void Visit(Visitor* visitor, BytecodeLabel* label) {
-    VisitInternal(visitor, label);
+  LUX_INLINE void Visit(Visitor* visitor) {
+    VisitInternal(visitor);
   }
 
  private:
@@ -300,8 +298,12 @@ class CharClass: public Ast {
   std::string ToString(std::string* indent = nullptr) const {
     std::stringstream st;
     JSString::Utf8String u8str(value_);
-    st << "CharClass exclude = " << (exclude_? "true": "false");
-    st << ' ' << '<' << u8str.value() << '>';
+    st << (indent == nullptr? "": *indent)
+       << "[CharClass exclude = " << (exclude_? "true": "false");
+    st << ' ' << '<' << u8str.value() << ">]\n";
+    if (indent != nullptr) {
+      (*indent) = (*indent).substr(0, indent->size() - 2);
+    }
     return st.str();
   }
 #endif
@@ -452,7 +454,8 @@ class Parser {
          ErrorReporter* error_reporter,
          SourcePosition* source_position,
          Handle<JSString> source)
-      : reporter_(error_reporter),
+      : isolate_(isolate),
+        reporter_(error_reporter),
         source_position_(source_position),
         it_(source->begin()), end_(source->end()),
         source_(source) {}
@@ -509,8 +512,8 @@ class Parser {
   Isolate* isolate_;
   ErrorReporter* reporter_;
   SourcePosition* source_position_;
-  JSString::Iterator it_;
-  JSString::Iterator end_;
+  JSString::iterator it_;
+  JSString::iterator end_;
   Handle<JSString> source_;
   ZoneAllocator zone_allocator_;
 };
@@ -524,7 +527,7 @@ class Compiler {
         error_reporter_(error_reporter),
         sp_(sp) {}
 
-  Handle<JSFunction> Compile(const char* source);
+  Handle<JSRegExp> Compile(const char* source);
 
  private:
   Isolate* isolate_;

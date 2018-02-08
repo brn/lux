@@ -195,6 +195,44 @@ bool Utf16String::IsAsciiEqual(const char* ascii) const {
   return true;
 }
 
+Utf16String::ParseIntResult Utf16String::ParseInt() const {
+  static const std::array<int, 10> kAsciiNumericArray = {{
+      0, 1, 2, 3, 4, 5, 6, 7, 8, 9
+    }};
+
+  uint64_t acc = 0;
+  bool parsed = false;
+  int i = 0;
+  for (auto &ch : *this) {
+    if (utf16::IsNumericRange(ch.code())) {
+      acc += PowerOf2<uint64_t>(10, i++)
+        * kAsciiNumericArray[ch.code() - unicode::kAsciiNumericStart];
+      parsed = true;
+    } else {
+      if (!parsed) {
+        return ParseIntResult(1);
+      }
+      return ParseIntResult(acc << 1);
+      break;
+    }
+  }
+  return ParseIntResult(acc << 1);
+}
+
+Utf16String Utf16String::FromVector(const std::vector<Utf16CodePoint>& v) {
+  Utf16String ret;
+  auto arr = new Utf16CodePoint[v.size()];
+  ret.size_ = v.size();
+  for (int i = 0; i < v.size(); i++) {
+    arr[i] = v[i];
+  }
+  ret.utf16_codepoint_ = std::shared_ptr<Utf16CodePoint>(arr,
+                                         [](Utf16CodePoint* p) {
+                                           delete[] p;
+                                         });
+  return ret;
+}
+
 std::string Utf16String::ToUtf8String() const {
   std::stringstream st;
   auto ptr = utf16_codepoint_.get();

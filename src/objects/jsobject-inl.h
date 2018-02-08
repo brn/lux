@@ -45,16 +45,15 @@ bool JSSpecials::ToBoolean(Object* obj) {
 
 void JSArray::Push(Isolate* isolate, Object* object) {
   auto len = length();
-  auto next_len = len + 1;
   if (length() < element()->length()) {
-    element()->write(next_len, object);
+    element()->write(len, object);
   } else {
     auto next = FixedArray::New(isolate, element()->length() * 2);
     next->Copy(element());
-    next->write(next_len, object);
+    next->write(len, object);
     set_element(*next);
   }
-  set_length(next_len);
+  set_length(len + 1);
 }
 
 Object* JSArray::Pop(Isolate* isolate) {

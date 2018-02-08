@@ -433,6 +433,67 @@ class LazyInitializer {
   Address heap_[sizeof(T) + 1];
   T* ptr_;
 };
+
+class Double {
+ public:
+  static const uint8_t kSignedShift = 63;
+  static const uint8_t kExponentShift = 52;
+  static const uint8_t kExponentMask = 1 << 1;
+  static const uint64_t kFractionMask = uint64_t(~0) >> 12;
+  static const uint16_t kMaxExponent = uint16_t(~0) >> 5;
+  static const uint16_t kBias = 1023;
+
+  static const double kNaN;
+
+  explicit Double(double value) {
+    value_.floating_value = value;
+  }
+
+  inline bool is_signed() const {
+    return (value_.bit >> kSignedShift) == 1;
+  }
+
+  inline uint16_t exponent() const {
+    return ((value_.bit >> kExponentShift) & kExponentMask) - kBias;
+  }
+
+  inline uint64_t fraction() const {
+    return (value_.bit & kFractionMask) + 1;
+  }
+
+  inline bool Equals(const Double& d) const {
+    return d.is_signed() == is_signed() &&
+      d.exponent() == exponent() &&
+      (d.fraction() > fraction()? d.fraction() - fraction():
+      fraction() - d.fraction()) <= 4;
+  }
+
+  inline bool GreaterThan(const Double& d) const {
+    if (!is_signed() && d.is_signed()) {
+      return true;
+    }
+    return exponent() > d.exponent()
+      || (fraction() - d.fraction()) > 4;
+  }
+
+  inline bool IsNaN() const {
+    return exponent() == kMaxExponent
+      && fraction() > 0;
+  }
+
+  inline double value() const {
+    return value_.floating_value;
+  }
+
+ private:
+  union Value {
+    double floating_value;
+    uint64_t bit;
+  };
+
+ private:
+  Value value_;
+};
 }  // namespace lux
 
 #endif  // SRC_UTILS_H_
