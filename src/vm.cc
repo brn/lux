@@ -31,6 +31,13 @@ namespace lux {
 using VM = VirtualMachine;
 #define VM_OP(Name, ...) exec->Name(__VA_ARGS__)
 
+#ifdef DEBUG
+#define COLLECT_EXECUTION_LOG(pos, bc) \
+  CollectExecutionLog(pos, static_cast<Bytecode>(bc))
+#else
+#define COLLECT_EXECUTION_LOG(pos, bc)
+#endif
+
 
 #define HANDLER(Name)                                   \
   struct Name##BytecodeHandler {                        \
@@ -455,6 +462,7 @@ Object* VirtualMachine::ExecuteRegex(BytecodeExecutable* executable,
   RegexExecutor exec(
       isolate_, input, collect_matched_word, executable);
   exec.Execute();
+  //  exec.PrintLog();
   return !collect_matched_word?
       reinterpret_cast<Object*>(
           exec.is_matched()? isolate_->jsval_true(): isolate_->jsval_false())
@@ -477,6 +485,7 @@ void VirtualMachine::RegexExecutor::Execute() {
     }};
 
   auto bc = fetcher_->FetchBytecodeAsInt();
+  COLLECT_EXECUTION_LOG(fetcher_->pc() - 1, bc);
   goto *kDispatchTable[bc];
 #define VM_EXECUTE(Name, Layout, size, n, ...)        \
   Label_##Name: {                                     \
@@ -487,7 +496,7 @@ void VirtualMachine::RegexExecutor::Execute() {
         fetcher_.Get(),                               \
         constant_pool_);                              \
     auto next = fetcher_->FetchBytecodeAsInt();       \
-    printf("%d %s\n", fetcher_->pc() - 1,BytecodeUtil::ToStringOpecode(static_cast<Bytecode>(next))); \
+    COLLECT_EXECUTION_LOG(fetcher_->pc() - 1, next);  \
     goto *kDispatchTable[next];                       \
   }
   REGEX_BYTECODE_LIST_WITOUT_MATCHED(VM_EXECUTE)

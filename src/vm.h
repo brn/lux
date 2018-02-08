@@ -203,6 +203,31 @@ class VirtualMachine {
 
     void Execute();
 
+#ifdef DEBUG
+    struct ExecutionLog {
+      uint32_t start_position;
+      Bytecode bytecode;
+    };
+
+    void CollectExecutionLog(uint32_t start_position,
+                             Bytecode bytecode) {
+      ExecutionLog e = {start_position, bytecode};
+      exec_log_list_.push_back(e);
+    }
+
+    const std::vector<ExecutionLog>& exec_log() const {
+      return exec_log_list_;
+    }
+
+    void PrintLog() const {
+      for (auto &log : exec_log_list_) {
+        printf("%d %s\n", log.start_position,
+               BytecodeUtil::ToStringOpecode(static_cast<Bytecode>(
+                   log.bytecode)));
+      }
+    }
+#endif
+
    private:
     std::vector<RepeatAccumulator> repeat_acc_stack_;
     Smi* flag_;
@@ -215,6 +240,10 @@ class VirtualMachine {
     Isolate* isolate_;
     BytecodeConstantArray* constant_pool_;
     LazyInitializer<BytecodeFetcher> fetcher_;
+
+#ifdef DEBUG
+    std::vector<ExecutionLog> exec_log_list_;
+#endif
   };
 
   explicit VirtualMachine(Isolate* isolate)

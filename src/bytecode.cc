@@ -269,7 +269,7 @@ void BytecodeArrayWriter::Bind(BytecodeLabel* label) {
 
 Handle<BytecodeExecutable> BytecodeArrayWriter::Flush() {
   HandleScope scope;
-  auto array = BytecodeArray::New(isolate_, current_offset_);
+  auto array = BytecodeArray::New(isolate_, current_offset_ + 2);
   size_t index = 0;
   auto node = bytecode_top_;
   while (node) {
