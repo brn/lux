@@ -47,6 +47,7 @@ namespace regexp {
   A(ALTERNATE, Alternate)                       \
   A(REPEAT, Repeat)                             \
   A(REPEAT_RANGE, RepeatRange)                  \
+  A(CHAR_SEQUENCE, CharSequence)                \
   A(CHAR, Char)                                 \
   A(CONJUNCTION, Conjunction)                   \
   A(ROOT, Root)
@@ -64,7 +65,8 @@ REGEXP_AST_TYPES(RE_AST_FORWARD_DECL)
 
 class Visitor {
  public:
-  explicit Visitor(BytecodeBuilder* bytecode_builder,
+  explicit Visitor(uint16_t captured_count,
+                   BytecodeBuilder* bytecode_builder,
                    ZoneAllocator* zone_allocator);
 
   LUX_GETTER(BytecodeBuilder*, builder, bytecode_builder_)
@@ -79,7 +81,9 @@ class Visitor {
   void EmitCompare(u16 code);
   void CollectMatchedChar(Var* char_register);
   void Return(Var* ret = nullptr);
+  LUX_CONST_GETTER(uint16_t, captured_count, captured_count_)
 
+  uint16_t captured_count_;
   BytecodeLabel matched_;
   BytecodeLabel failed_;
   BytecodeBuilder* bytecode_builder_;
@@ -223,7 +227,7 @@ class Conjunction: public Ast, public AstListTrait {
   REGEXP_VISIT_INTERNAL_METHOD_DECL(Conjunction);
 };
 
-class Group: public Ast {
+class Group: public Ast, public AstListTrait {
  public:
 #define REGEXP_GROUP_TYPE_LIST(A)               \
   A(CAPTURE)                                    \
@@ -237,14 +241,22 @@ class Group: public Ast {
 #undef REGEXP_GROUP_TYPE_DECL
   };
   Group()
-    : Ast(Ast::GROUP) {}
-  explicit Group(Type type, Ast* node)
+      : Ast(Ast::GROUP) {}
+  explicit Group(Type type, uint16_t captured_index)
       : Ast(Ast::GROUP),
         type_(type),
-        node_(node) {}
+        captured_index_(captured_index) {}
 
-  LUX_CONST_PROPERTY(Ast*, node, node_)
   LUX_CONST_PROPERTY(Type, type, type_)
+  LUX_CONST_GETTER(uint16_t, captured_index, captured_index_)
+
+  inline bool IsCapturable() const {
+    return type_ != Group::UNCAPTURE;
+  }
+
+  inline bool Is(Type type) const {
+    return type_ == type;
+  }
 
   REGEXP_VISIT_INTERNAL_METHOD_DECL(Group);
 
@@ -257,24 +269,15 @@ class Group: public Ast {
           }};
 
     std::stringstream st;
-    st << (indent == nullptr? "": *indent)
-       << "[Group type = " << kGroupTypeNameMap[type_] << "]\n";
-    if (indent != nullptr) {
-      (*indent) += "  ";
-    }
-    if (node_ != nullptr) {
-      st << node_->ToString(indent);
-    }
-    if (indent != nullptr) {
-      (*indent) = (*indent).substr(0, indent->size() - 2);
-    }
-    return st.str();
+    st << "Group type = " << kGroupTypeNameMap[type_] << "";
+    auto x = st.str();
+    return ToStringList(x.c_str(), indent);
   }
 #endif
 
  private:
   Type type_;
-  Ast* node_;
+  uint16_t captured_index_;
 };
 
 class BackReference: public Ast {
@@ -422,6 +425,33 @@ class RepeatRange: public Ast {
   Ast* target_;
 };
 
+class CharSequence: public Ast {
+ public:
+  explicit CharSequence(JSString* value)
+      : Ast(Ast::CHAR_SEQUENCE),
+        value_(value) {}
+
+  REGEXP_VISIT_INTERNAL_METHOD_DECL(CharSequence);
+
+  LUX_CONST_GETTER(JSString*, value, value_)
+
+#ifdef DEBUG
+  std::string ToString(std::string* indent = nullptr) const {
+    std::stringstream st;
+    JSString::Utf8String u8str(value_);
+    st << (indent == nullptr? "": *indent)
+       << "[CharSequence <" << u8str.value() << ">]\n";
+    if (indent != nullptr) {
+      (*indent) = (*indent).substr(0, indent->size() - 2);
+    }
+    return st.str();
+  }
+#endif
+
+ private:
+  JSString* value_;
+};
+
 class Char: public Ast {
  public:
   Char()
@@ -454,7 +484,8 @@ class Parser {
          ErrorReporter* error_reporter,
          SourcePosition* source_position,
          Handle<JSString> source)
-      : isolate_(isolate),
+      : capture_count_(0),
+        isolate_(isolate),
         reporter_(error_reporter),
         source_position_(source_position),
         it_(source->begin()), end_(source->end()),
@@ -465,6 +496,8 @@ class Parser {
   Root* node() {
     return &root_;
   }
+
+  LUX_CONST_GETTER(uint32_t, capture_count, capture_count_)
 
  private:
   LUX_GETTER(SourcePosition&, position, *source_position_)
@@ -483,6 +516,10 @@ class Parser {
   Ast* ParseRangeRepeat(Ast* a);
 
   Utf16String::ParseIntResult ToInt();
+
+  inline void Capture() {
+    capture_count_++;
+  }
 
   void update_start_pos() {
     source_position_->set_start_col(source_position_->end_col());
@@ -508,6 +545,7 @@ class Parser {
     return &zone_allocator_;
   }
 
+  uint32_t capture_count_;
   Root root_;
   Isolate* isolate_;
   ErrorReporter* reporter_;

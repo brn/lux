@@ -113,54 +113,61 @@ class VirtualMachine {
                   bool collect_matched_word,
                   BytecodeExecutable* executable)
         : flag_(Smi::FromInt(0)),
-          group_(0),
           input_(input),
-          position_(0),
-          matched_array_(nullptr),
-          current_matched_string_(nullptr),
+          current_capture_(nullptr),
+          captured_array_(isolate->jsval_null()),
           isolate_(isolate),
           constant_pool_(executable->constant_pool()) {
       if (collect_matched_word) {
         vm_flag_.set(0);
-        matched_array_ = *JSArray::NewEmptyArray(isolate, 0);
       }
+      current_thread_ = new(zone()) Thread(0, 0, 0, 0, Smi::FromInt(0));
       unset_matched();
       fetcher_(executable->bytecode_array());
     }
 
-    struct Thread {
-      uint32_t pc;
-      uint32_t position;
-      bool is_first_thread;
+    class Captured: public Zone {
+     public:
+      explicit Captured(uint32_t start)
+          : start_(start),
+            end_(0) {}
+
+      LUX_CONST_PROPERTY(uint32_t, start, start_)
+      LUX_CONST_PROPERTY(uint32_t, end, end_)
+
+     private:
+      uint32_t start_;
+      uint32_t end_;
     };
 
-    class RepeatAccumulator {
+    class Thread: public Zone {
      public:
-      RepeatAccumulator(int least_match_count,
-                        int max_match_count)
-          : matched_count_(0),
-            least_match_count_(least_match_count),
-            max_match_count_(max_match_count) {}
+      Thread(uint32_t pc, uint32_t position,
+             uint32_t matched_count,
+             uint16_t capture_index, Smi* flag)
+          : pc_(pc),
+            position_(position),
+            matched_count_(matched_count),
+            capture_index_(0),
+            flag_(flag) {}
 
-      void matched() { matched_count_++; }
-
-      inline bool IsSatisfied() const {
-        return matched_count_ >= least_match_count_
-          && max_match_count_ > 0? matched_count_ <= max_match_count_: true;
-      }
-
-      inline bool IsLeastConditionSatisfied() const {
-        return matched_count_ >= least_match_count_;
-      }
-
-      inline bool IsExceedMaxCondition() const {
-        return max_match_count_ > 0? matched_count_ > max_match_count_: false;
+      LUX_CONST_PROPERTY(uint32_t, pc, pc_)
+      LUX_CONST_PROPERTY(uint32_t, position, position_)
+      LUX_CONST_PROPERTY(uint32_t, matched_count, matched_count_)
+      LUX_CONST_PROPERTY(Smi*, flag, flag_)
+      LUX_CONST_PROPERTY(uint16_t, capture_index, capture_index_)
+      void Matched() { matched_count_++; }
+      void Advance() { position_++; }
+      void ResetMatchedCount() {
+        matched_count_ = 0;
       }
 
      private:
+      uint32_t pc_;
+      uint32_t position_;
       uint32_t matched_count_;
-      uint16_t least_match_count_;
-      int max_match_count_;
+      uint32_t capture_index_;
+      Smi* flag_;
     };
 
     LUX_CONST_GETTER(bool, collect_matched_word, vm_flag_.get(0))
@@ -181,61 +188,10 @@ class VirtualMachine {
     }
 
     LUX_GETTER(JSString*, input, input_);
-    LUX_GETTER(uint32_t, position, position_);
     inline void Advance() {
-      position_++;
+      current_thread_->Advance();
     }
-    LUX_GETTER(JSArray*, matched_array, matched_array_)
-    LUX_GETTER(JSString*, current_matched_string, current_matched_string_)
-
-    void StartRepeat(int least_count) {
-      repeat_acc_stack_.push_back(RepeatAccumulator(least_count, -1));
-    }
-
-    void EndRepeat() {
-      repeat_acc_stack_.pop_back();
-    }
-
-    void StartRepeatRange(int least_count, int max_count) {
-      repeat_acc_stack_.push_back(RepeatAccumulator(least_count, max_count));
-    }
-
-    void IncrementMatchedCountOfRepeatAccumulator() {
-      if (repeat_acc_stack_.size() > 0) {
-        RepeatAccumulator* a = &(repeat_acc_stack_.back());
-        a->matched();
-      }
-    }
-
-    bool IsLeastRepeatConditionSatisfied() const {
-      if (repeat_acc_stack_.size() > 0) {
-        return repeat_acc_stack_.back().IsLeastConditionSatisfied();
-      }
-      return true;
-    }
-
-    bool IsExceedMaxRepeatCondition() const {
-      if (repeat_acc_stack_.size() > 0) {
-        return repeat_acc_stack_.back().IsExceedMaxCondition();
-      }
-      return true;
-    }
-
-    inline void PrepareStringBuffer() {
-      current_matched_string_ = *JSString::New(isolate_, "");
-    }
-
-    void EnterGroup() {
-      group_++;
-    }
-
-    void LeaveGroup() {
-      group_--;
-    }
-
-    bool IsInGroup() const {
-      return group_ > 0;
-    }
+    LUX_GETTER(Object*, captured_array, captured_array_)
 
     void Execute();
 
@@ -244,21 +200,61 @@ class VirtualMachine {
     }
 
     inline Thread* current_thread() {
-      if (thread_stack_.size() > 0) {
-        return &thread_stack_.back();
+      return current_thread_;
+    }
+
+    inline void ClearAllThread() {
+      thread_stack_.clear();
+    }
+
+    inline void NewThread(uint32_t pc) {
+      auto t = new(zone()) Thread(pc, current_thread_->position(),
+                                  current_thread_->matched_count(),
+                                  current_thread_->capture_index(),
+                                  flag_);
+      thread_stack_.push_back(t);
+    }
+
+    Thread* PopThread() {
+      if (thread_stack_.size()) {
+        auto ret = thread_stack_.back();
+        thread_stack_.pop_back();
+        current_thread_ = ret;
+        flag_ = ret->flag();
+        fetcher_->UpdatePC(ret->pc());
+        StartCapture(ret->capture_index(), false);
+        return current_thread_;
       }
       return nullptr;
     }
 
-    inline void NewThread(uint32_t pc) {
-      auto last_pc = thread_stack_.size() > 0? thread_stack_.back().pc: -1;
-      thread_stack_.push_back({ pc, position_, pc != last_pc });
+    Handle<JSArray> FixCaptured();
+
+    inline void StartCapture(uint16_t index, bool set_start = true) {
+      if (captured_stack_.size()) {
+        current_capture_ = captured_stack_[index];
+        if (set_start) {
+          current_capture_->set_start(current_thread()->position());
+        }
+        current_thread()->set_capture_index(index);
+      }
     }
 
-    inline Thread PopThread() {
-      auto ret = thread_stack_.back();
-      thread_stack_.pop_back();
-      return ret;
+    inline void UpdateCapture() {
+      INVALIDATE(current_capture_);
+      current_capture_->set_end(
+          current_thread()->position());
+    }
+
+    inline void ReserveCapture(uint16_t size) {
+      captured_stack_.resize(size);
+      for (auto i = 0; i < size; i++) {
+        captured_stack_[i] = new(zone()) Captured(0);
+      }
+    }
+
+    inline void ClearCapture() {
+      captured_stack_.clear();
     }
 
 #ifdef DEBUG
@@ -270,7 +266,7 @@ class VirtualMachine {
 
     void CollectExecutionLog(uint32_t start_position,
                              Bytecode bytecode) {
-      ExecutionLog e = {position_, start_position, bytecode};
+      ExecutionLog e = {current_thread_->position(), start_position, bytecode};
       exec_log_list_.push_back(e);
     }
 
@@ -289,18 +285,22 @@ class VirtualMachine {
 #endif
 
    private:
-    std::vector<RepeatAccumulator> repeat_acc_stack_;
-    std::vector<Thread> thread_stack_;
+    ZoneAllocator* zone() {
+      return &zone_allocator_;
+    }
+
+    std::vector<Captured*> captured_stack_;
+    std::vector<Thread*> thread_stack_;
+    Captured* current_capture_;
+    Thread* current_thread_;
     Smi* flag_;
     Bitset<uint8_t> vm_flag_;
-    uint8_t group_;
     JSString* input_;
-    uint32_t position_;
-    JSArray* matched_array_;
-    JSString* current_matched_string_;
+    Object* captured_array_;
     Isolate* isolate_;
     BytecodeConstantArray* constant_pool_;
     LazyInitializer<BytecodeFetcher> fetcher_;
+    ZoneAllocator zone_allocator_;
 
 #ifdef DEBUG
     std::vector<ExecutionLog> exec_log_list_;

@@ -38,7 +38,7 @@ class RegExpBytecodeTest: public lux::IsolateSetup {
     lux::regexp::Compiler compiler(isolate_, &er, &sp);
     auto jsregexp = compiler.Compile(regexp);
     printf("%s\n", jsregexp->code()->ToString().c_str());
-    auto ret = jsregexp->Test(isolate_, *lux::JSString::New(isolate_, input));
+    auto ret = jsregexp->Match(isolate_, *lux::JSString::New(isolate_, input));
     printf("%s\n", ret->ToString().c_str());
   }
 };
@@ -46,6 +46,6 @@ class RegExpBytecodeTest: public lux::IsolateSetup {
 
 namespace {
 TEST_F(RegExpBytecodeTest, Simple) {
-  RunTest("b+b", "vbb");
+  RunTest("(abcde)(f)", "abcdegabcdef");
 }
 }

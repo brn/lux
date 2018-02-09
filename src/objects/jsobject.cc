@@ -160,6 +160,10 @@ Handle<JSString> JSString::New(Isolate* isolate, const char* data) {
   return New(isolate, utf16_string.data(), utf16_string.size());
 }
 
+Handle<JSString> JSString::New(Isolate* isolate, size_t length) {
+  return New(isolate, nullptr, length);
+}
+
 Handle<JSString> JSString::New(
     Isolate* isolate, const Utf16CodePoint* cp, size_t length) {
   auto required_size = kStringLengthSize + kPointerSize;
@@ -175,8 +179,10 @@ Handle<JSString> JSString::New(
   *size_field = length;
   auto store_field = reinterpret_cast<U32FixedArray**>(
       FIELD_ADDR(str, kStringPtrOffset));
-  for (int i = 0; i < length; i++) {
-    store->write(i, cp[i]);
+  if (cp) {
+    for (int i = 0; i < length; i++) {
+      store->write(i, cp[i]);
+    }
   }
   *store_field = *store;
   return make_handle(reinterpret_cast<JSString*>(str));

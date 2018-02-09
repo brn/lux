@@ -24,6 +24,21 @@
 #define SRC_OBJECTS_JSOBJECT_INL_H_
 
 namespace lux {
+Handle<JSString> JSString::Slice(Isolate* isolate,
+                                 uint32_t start, uint32_t end) {
+  PRECONDITION_ASSERT(start >= 0 && end >= 0
+                      && start <= end && end <= length());
+  auto size = end - start;
+  auto str = JSString::New(isolate, size);
+  auto arr = U32FixedArray::New(isolate, size);
+  for (int i = start, j = 0; i < end; i++) {
+    arr->write(j++, at(i));
+  }
+  auto arr_ptr = FIELD_PROPERTY(U32FixedArray**, *str, kStringPtrOffset);
+  *arr_ptr = *arr;
+  return str;
+}
+
 bool JSSpecials::ToBoolean(Object* obj) {
   if (obj->IsSmi()) {
     return Smi::Cast(obj)->value() != 0;

@@ -57,7 +57,7 @@ using VM = VirtualMachine;
 
 #define REGEX_HANDLER(Name)                     \
     struct Name##BytecodeHandler {              \
-      inline void Execute(                      \
+      LUX_INLINE void Execute(                  \
           Isolate* isolate,                     \
           VM::RegexExecutor* exec,              \
           Bytecode bc,                          \
@@ -71,36 +71,65 @@ using VM = VirtualMachine;
         BytecodeFetcher* fetcher,               \
         BytecodeConstantArray* constant)
 
-REGEX_HANDLER(RegexStartGroup) {
-  exec->EnterGroup();
+REGEX_HANDLER(RegexStartCapture) {
+  auto index = fetcher->FetchNextDoubleOperand();
   if (exec->collect_matched_word()) {
-    exec->PrepareStringBuffer();
+    exec->StartCapture(index);
   }
 }
 
-REGEX_HANDLER(RegexEndGroup) {
-  exec->LeaveGroup();
-  if (exec->collect_matched_word() &&
-      exec->current_matched_string()->length() > 0) {
-    exec->matched_array()->Push(isolate,
-                                exec->current_matched_string());
+REGEX_HANDLER(RegexUpdateCapture) {
+  if (exec->collect_matched_word()) {
+    exec->UpdateCapture();
   }
+}
+
+REGEX_HANDLER(RegexReserveCapture) {
+  auto size = fetcher->FetchNextDoubleOperand();
+  if (exec->collect_matched_word()) {
+    exec->ReserveCapture(size);
+  }
+}
+
+REGEX_HANDLER(RegexJumpIfMatchedCountEqual) {
+  auto jmp = fetcher->FetchNextWideOperand();
+  auto max = fetcher->FetchNextDoubleOperand();
+  if (max == exec->current_thread()->matched_count()) {
+    fetcher->UpdatePC(jmp);
+  }
+}
+
+REGEX_HANDLER(RegexJumpIfMatchedCountLT) {
+  auto jmp = fetcher->FetchNextWideOperand();
+  auto max = fetcher->FetchNextDoubleOperand();
+  if (max > exec->current_thread()->matched_count()) {
+    fetcher->UpdatePC(jmp);
+  }
+}
+
+REGEX_HANDLER(RegexBranch) {
+  auto j_then = fetcher->FetchNextWideOperand();
+  auto j_else = fetcher->FetchNextWideOperand();
+  if (exec->load_flag()->value()) {
+    fetcher->UpdatePC(j_then);
+  } else {
+    fetcher->UpdatePC(j_else);
+  }
+}
+
+REGEX_HANDLER(RegexResetMatchedCount) {
+  exec->current_thread()->ResetMatchedCount();
 }
 
 REGEX_HANDLER(RegexRune) {
   u32 ch = fetcher->FetchNextDoubleOperand();
-  auto p = exec->position();
+  auto p = exec->current_thread()->position();
   auto subject = exec->input();
   if (subject->length() > p) {
     auto matched = ch == subject->at(p).code();
     if (matched) {
-      exec->IncrementMatchedCountOfRepeatAccumulator();
+      exec->current_thread()->Matched();
       exec->Advance();
-      if (exec->collect_matched_word() && exec->IsInGroup()) {
-        INVALIDATE(exec->current_matched_string());
-        exec->current_matched_string()->Append(isolate, subject->at(p));
-        JSString::Utf8String str(exec->current_matched_string());
-      }
     }
     return exec->store_flag(Smi::FromInt(matched));
   }
@@ -111,18 +140,14 @@ REGEX_HANDLER(RegexSome) {
   auto chars = JSString::Cast(
       reinterpret_cast<Object*>(fetcher->FetchNextWordOperand()));
   INVALIDATE(chars->shape()->IsJSString());
-  auto p = exec->position();
+  auto p = exec->current_thread()->position();
   auto subject = exec->input();
   if (subject->length() > p) {
     auto code = subject->at(p);
     for (auto &ch : *chars) {
       if (ch == code) {
-        exec->IncrementMatchedCountOfRepeatAccumulator();
+        exec->current_thread()->Matched();
         exec->Advance();
-        if (exec->collect_matched_word() && exec->IsInGroup()) {
-          INVALIDATE(exec->current_matched_string());
-          exec->current_matched_string()->Append(isolate, subject->at(p));
-        }
         return exec->store_flag(Smi::FromInt(1));
       }
     }
@@ -132,26 +157,53 @@ REGEX_HANDLER(RegexSome) {
   exec->store_flag(Smi::FromInt(1));
 }
 
-REGEX_HANDLER(RegexRepeatRange) {
-  auto start = fetcher->FetchNextDoubleOperand();
-  auto end = fetcher->FetchNextDoubleOperand();
-  exec->StartRepeatRange(start, end);
+REGEX_HANDLER(RegexEvery) {
+  auto chars = JSString::Cast(
+      reinterpret_cast<Object*>(fetcher->FetchNextWordOperand()));
+  INVALIDATE(chars->shape()->IsJSString());
+  auto subject = exec->input();
+  auto p = exec->current_thread()->position();
+  for (auto &ch : *chars) {
+    if (subject->length() == p) {
+      return exec->store_flag(Smi::FromInt(1));
+    }
+    auto code = subject->at(p);
+    if (ch == code) {
+      exec->current_thread()->Matched();
+      exec->Advance();
+      ++p;
+    } else {
+      return exec->store_flag(Smi::FromInt(0));
+    }
+  }
+  exec->store_flag(Smi::FromInt(1));
 }
 
-REGEX_HANDLER(RegexRepeat) {
+REGEX_HANDLER(RegexCheckPosition) {
+  auto j = fetcher->FetchNextWideOperand();
+  if (exec->current_thread()->position() == exec->input()->length()) {
+    if (exec->load_flag()->value()) {
+      return fetcher->UpdatePC(j);
+    }
+    return fetcher->UpdatePCToRegexFailed();
+  }
+}
+
+REGEX_HANDLER(RegexPushThread) {
   auto pc = fetcher->FetchNextWideOperand();
-  auto failed = fetcher->FetchNextWideOperand();
-  auto cur_thread = exec->current_thread();
-
-  if (exec->is_matched()) {
-    return fetcher->UpdatePC(pc);
-  }
-
-  if (cur_thread && cur_thread->pc == pc
-      && !exec->load_flag()->value()) {
-    return fetcher->UpdatePC(failed);
-  }
   exec->NewThread(pc);
+}
+
+REGEX_HANDLER(RegexPopThread) {
+  auto r = exec->PopThread();
+  if (!r) {
+    fetcher->UpdatePCToRegexFailed();
+  }
+}
+
+REGEX_HANDLER(RegexJump) {
+  auto jmp = fetcher->FetchNextWideOperand();
+  fetcher->UpdatePC(jmp);
 }
 
 REGEX_HANDLER(RegexJumpIfMatched) {
@@ -460,6 +512,16 @@ void VirtualMachine::Executor::Execute() {
   }
 }
 
+Handle<JSArray> VirtualMachine::RegexExecutor::FixCaptured() {
+  auto arr = JSArray::NewEmptyArray(isolate_, 0);
+  for (auto &c : captured_stack_) {
+    std::cout << c->start() << c->end() << std::endl;
+    auto str = input_->Slice(isolate_, c->start(), c->end());
+    arr->Push(isolate_, *str);
+  }
+  return arr;
+}
+
 Object* VirtualMachine::ExecuteRegex(BytecodeExecutable* executable,
                                      JSString* input,
                                      bool collect_matched_word) {
@@ -468,9 +530,9 @@ Object* VirtualMachine::ExecuteRegex(BytecodeExecutable* executable,
   exec.Execute();
   exec.PrintLog();
   return !collect_matched_word?
-      reinterpret_cast<Object*>(
-          exec.is_matched()? isolate_->jsval_true(): isolate_->jsval_false())
-      : reinterpret_cast<Object*>(exec.matched_array());
+    reinterpret_cast<Object*>(
+        exec.is_matched()? isolate_->jsval_true(): isolate_->jsval_false())
+    : reinterpret_cast<Object*>(exec.captured_array());
 }
 
 void VirtualMachine::RegexExecutor::Execute() {
@@ -490,14 +552,9 @@ void VirtualMachine::RegexExecutor::Execute() {
     }};
 
   NewThread(0);
+  PopThread();
 
 Label_Retry:
-
-  auto cur_thread = PopThread();
-
-  fetcher_->UpdatePC(cur_thread.pc);
-  position_ = cur_thread.position;
-
   auto bc = fetcher_->FetchBytecodeAsInt();
   COLLECT_EXECUTION_LOG(fetcher_->pc() - 1, bc);
   goto *kDispatchTable[bc];
@@ -511,19 +568,30 @@ Label_Retry:
         constant_pool_);                              \
     auto next = fetcher_->FetchBytecodeAsInt();       \
     COLLECT_EXECUTION_LOG(fetcher_->pc() - 1, next);  \
+    printf("%s\n", BytecodeUtil::ToStringOpecode(static_cast<Bytecode>(next))); \
     goto *kDispatchTable[next];                       \
   }
   REGEX_BYTECODE_LIST_WITOUT_MATCHED(VM_EXECUTE)
 #undef VM_EXECUTE
   Label_Failed: {
     unset_matched();
-    if (HasThread()) {
+    if (input_->length() > current_thread()->position()) {
+      auto next = current_thread()->position() + 1;
+      ClearAllThread();
+      ClearCapture();
+      fetcher_->UpdatePC(0);
+      NewThread(0);
+      PopThread();
+      current_thread()->set_position(next);
       goto Label_Retry;
     }
     return;
   }
   Label_Matched: {
     set_matched();
+    if (collect_matched_word()) {
+      captured_array_ = *FixCaptured();
+    }
     //  DO NOTHING
   }
 }

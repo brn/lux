@@ -65,7 +65,9 @@ const BytecodeOperand BytecodeUtil::kOperandRax = {
       : BytecodeLayout::k##Layout ==                                    \
       BytecodeLayout::kWide2? size == 6                                 \
       :BytecodeLayout::k##Layout ==                                     \
-      BytecodeLayout::kWide3? size == 9: false,                         \
+      BytecodeLayout::kWide3? size == 9                                 \
+      :BytecodeLayout::k##Layout ==                                     \
+      BytecodeLayout::kWide4? size == 7: false,                         \
       "Bytecode "#Name" size is incorrect.");
 REGEX_BYTECODE_LIST(BYTECODE_CHECK)
 #undef BYTECODE_CHECK
@@ -156,7 +158,7 @@ std::string BytecodeUtil::ToStringField(Bytecode bc,
                                         BytecodeFetcher* fetcher,
                                         size_t len) {
   std::stringstream st;
-  std::string indent(21 - len, ' ');
+  std::string indent(28 - len, ' ');
   BytecodeLayout l = layout(bc);
   st << indent;
   switch (l) {
@@ -225,6 +227,13 @@ std::string BytecodeUtil::ToStringField(Bytecode bc,
          << +fetcher->FetchNextWideOperand()
          << "  Ebx = "
          << +fetcher->FetchNextWideOperand();
+      return st.str();
+    }
+    case BytecodeLayout::kWide4: {
+      st << "  Eax = "
+         << +fetcher->FetchNextWideOperand()
+         << "  Cx = "
+         << +fetcher->FetchNextDoubleOperand();
       return st.str();
     }
     default:
@@ -342,6 +351,15 @@ Handle<BytecodeExecutable> BytecodeArrayWriter::Flush() {
         array->write(index++, node->DecodeOperand(bu::kOperandD));
         array->write(index++, node->DecodeOperand(bu::kOperandE));
         break;
+      case BytecodeLayout::kWide4:
+        INVALIDATE(bu::size(bytecode) == 7);
+        array->write(index++, node->DecodeOperand(bu::kOperandA));
+        array->write(index++, node->DecodeOperand(bu::kOperandB));
+        array->write(index++, node->DecodeOperand(bu::kOperandC));
+        array->write(index++, node->DecodeOperand(bu::kOperandD));
+        array->write(index++, node->DecodeOperand(bu::kOperandE));
+        array->write(index++, node->DecodeOperand(bu::kOperandF));
+        break;
       case BytecodeLayout::kWide3:
       case BytecodeLayout::kWord1:
         INVALIDATE(bu::size(bytecode) == 9);
@@ -424,16 +442,73 @@ BytecodeNode* BytecodeBuilder::RegexFailed() {
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexStartGroup() {
+BytecodeNode* BytecodeBuilder::RegexReserveCapture(uint16_t v) {
   auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexStartGroup);
+      Bytecode::kRegexReserveCapture, v);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexEndGroup() {
+BytecodeNode* BytecodeBuilder::RegexStartCapture(uint16_t v) {
   auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexEndGroup);
+      Bytecode::kRegexStartCapture, v);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexUpdateCapture() {
+  auto n = new(zone()) BytecodeNode(
+      Bytecode::kRegexUpdateCapture);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexResetMatchedCount() {
+  auto n = new(zone()) BytecodeNode(
+      Bytecode::kRegexResetMatchedCount);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexJumpIfMatchedCountEqual(
+    uint16_t count, BytecodeLabel* label) {
+  auto operand = bu::EncodeOperand(bu::kOperandCx, count);
+  auto n = new(zone()) BytecodeNode(
+      Bytecode::kRegexJumpIfMatchedCountEqual, operand, label->to());
+  label->AddFrom(n);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexJumpIfMatchedCountLT(
+    uint16_t count, BytecodeLabel* label) {
+  auto operand = bu::EncodeOperand(bu::kOperandCx, count);
+  auto n = new(zone()) BytecodeNode(
+      Bytecode::kRegexJumpIfMatchedCountLT, operand, label->to());
+  label->AddFrom(n);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexCheckPosition(BytecodeLabel* label) {
+  auto n = new(zone()) BytecodeNode(
+      Bytecode::kRegexCheckPosition, label->to());
+  label->AddFrom(n);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexPushThread(BytecodeLabel* label) {
+  auto n = new(zone()) BytecodeNode(
+      Bytecode::kRegexPushThread, label->to());
+  label->AddFrom(n);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexPopThread() {
+  auto n = new(zone()) BytecodeNode(
+      Bytecode::kRegexPopThread);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -451,22 +526,27 @@ BytecodeNode* BytecodeBuilder::RegexSome(JSString* input) {
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexRepeatRange(
-    uint16_t start, uint16_t end) {
-  auto operand = bu::EncodeOperand(bu::kOperandAx, start);
-  operand |= bu::EncodeOperand(bu::kOperandBx, end);
-  auto n = new(zone()) BytecodeNode(Bytecode::kRegexRepeatRange, operand);
+BytecodeNode* BytecodeBuilder::RegexEvery(JSString* input) {
+  auto n = new(zone()) BytecodeNode(Bytecode::kRegexEvery,
+                                    reinterpret_cast<uintptr_t>(input));
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexRepeat(BytecodeLabel* label,
+BytecodeNode* BytecodeBuilder::RegexBranch(BytecodeLabel* label,
                                            BytecodeLabel* label2) {
-  auto n = new(zone()) BytecodeNode(Bytecode::kRegexRepeat,
+  auto n = new(zone()) BytecodeNode(Bytecode::kRegexBranch,
                                     label->to(),
                                     label2->to());
   label->AddFrom(n);
   label2->AddFrom(n, true);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexJump(BytecodeLabel* label) {
+  auto n = new(zone()) BytecodeNode(Bytecode::kRegexJump, label->to());
+  label->AddFrom(n);
   bytecode_array_writer_->Emit(n);
   return n;
 }

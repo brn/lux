@@ -26,7 +26,7 @@
 
 namespace lux {
 namespace regexp {
-#define ENTER()  /* printf("%s\n", __FUNCTION__); */
+#define ENTER()   printf("%s\n", __FUNCTION__);
 
 #define BASE_REPORT_SYNTAX_ERROR_(parser)                               \
   auto e = std::make_shared<lux::ErrorDescriptor>(parser->position());  \
@@ -76,15 +76,18 @@ const char* Ast::kNodeTypeStringList[] = {
 #define __ builder()->
 using Label = BytecodeLabel;
 
-Visitor::Visitor(BytecodeBuilder* bytecode_builder,
+Visitor::Visitor(uint16_t captured_count,
+                 BytecodeBuilder* bytecode_builder,
                  ZoneAllocator* zone_allocator)
-    : bytecode_builder_(bytecode_builder),
+    : captured_count_(captured_count),
+      bytecode_builder_(bytecode_builder),
       zone_allocator_(zone_allocator) {}
 
 AST_VISIT(Root) {
   Var offset;
 
   __ RegexComment("RegExp");
+  __ RegexReserveCapture(captured_count());
   node->regexp()->Visit(this);
   __ RegexJumpIfFailed(&failed_);
 
@@ -105,14 +108,33 @@ AST_VISIT(Conjunction) {
 AST_VISIT(Group) {
   __ RegexComment("Group");
 
-  __ RegexStartGroup();
-  node->node()->Visit(this);
-  __ RegexEndGroup();
+  if (node->IsCapturable()) {
+    __ RegexStartCapture(node->captured_index());
+  }
+
+  for (auto &a : *node) {
+    a->Visit(this);
+  }
+
+  if (node->IsCapturable()) {
+    __ RegexUpdateCapture();
+  }
 }
 
 AST_VISIT(CharClass) {
   __ RegexComment("CharClass");
+
+  Label ok, pop;
+
   __ RegexSome(node->value());
+  __ RegexBranch(&ok, &pop);
+
+  __ Bind(&pop);
+  {
+    __ RegexPopThread();
+  }
+
+  __ Bind(&ok);
 }
 
 AST_VISIT(Alternate) {
@@ -120,14 +142,16 @@ AST_VISIT(Alternate) {
 
   Label next, exit;
   node->left()->Visit(this);
-  __ RegexJumpIfMatched(&exit);
-  __ RegexJumpIfFailed(&next);
+  __ RegexBranch(&exit, &next);
 
   __ Bind(&next);
   {
+    Label pop;
     node->right()->Visit(this);
-    __ RegexJumpIfMatched(&exit);
-    __ RegexJumpIfFailed(&failed_);
+    __ RegexBranch(&exit, &pop);
+
+    __ Bind(&pop);
+    __ RegexPopThread();
   }
 
   __ Bind(&exit);
@@ -135,18 +159,30 @@ AST_VISIT(Alternate) {
 
 AST_VISIT(Repeat) {
   __ RegexComment("Repeat");
-  auto is_more_than_once = node->more_than() == 1;
+  auto count = node->more_than();
 
-  Label loop, next;
-  if (is_more_than_once) {
-    node->target()->Visit(this);
+  Label loop, pop, next;
+
+  if (count == 1) {
+    __ RegexCheckPosition(&pop);
   }
 
   __ Bind(&loop);
-  __ RegexRepeat(&next, &failed_);
+  __ RegexCheckPosition(&next);
+  __ RegexPushThread(&next);
   node->target()->Visit(this);
   __ RegexJumpIfMatched(&loop);
   __ Bind(&next);
+  if (count == 1) {
+    Label ok;
+    __ RegexJumpIfMatchedCountLT(count, &pop);
+    __ RegexJump(&ok);
+
+    __ Bind(&pop);
+    __ RegexPopThread();
+
+    __ Bind(&ok);
+  }
 }
 
 AST_VISIT(RepeatRange) {
@@ -155,10 +191,35 @@ AST_VISIT(RepeatRange) {
   auto least_count = node->more_than();
   auto max_count = node->less_than();
 
-  __ RegexRepeatRange(least_count, max_count);
-  Label loop;
+  Label loop, next, pop;
+
+  if (least_count > 0) {
+    __ RegexCheckPosition(&pop);
+  }
+
   __ Bind(&loop);
-  node->target()->Visit(this);
+  {
+    __ RegexJumpIfMatchedCountEqual(max_count, &next);
+    __ RegexCheckPosition(&next);
+    __ RegexPushThread(&next);
+    node->target()->Visit(this);
+    __ RegexJumpIfMatched(&loop);
+
+    __ Bind(&next);
+    {
+      if (least_count > 0) {
+        Label ok;
+        __ RegexJumpIfMatchedCountLT(least_count, &pop);
+        __ RegexResetMatchedCount();
+        __ RegexJump(&ok);
+
+        __ Bind(&pop);
+        __ RegexPopThread();
+
+        __ Bind(&ok);
+      }
+    }
+  }
 }
 
 AST_VISIT(Char) {
@@ -171,8 +232,29 @@ AST_VISIT(Char) {
   }
 }
 
+AST_VISIT(CharSequence) {
+  __ RegexComment("CharSequence");
+
+  Label ok, pop;
+
+  __ RegexEvery(node->value());
+  __ RegexBranch(&ok, &pop);
+
+  __ Bind(&pop);
+  {
+    __ RegexPopThread();
+  }
+
+  __ Bind(&ok);
+}
+
 void Visitor::EmitCompare(u16 code) {
+  Label ok, pop;
   __ RegexRune(code);
+  __ RegexBranch(&ok, &pop);
+  __ Bind(&pop);
+  __ RegexPopThread();
+  __ Bind(&ok);
 }
 
 void Parser::Parse() {
@@ -237,9 +319,15 @@ Ast* Parser::ParseGroup() {
         break;  // TODO(Taketoshi Aono): Report Error.
     }
   }
-  auto p = ParseRoot();
-  if (!p) { return nullptr; }
-  auto ret = new(zone()) Group(t, p);
+
+  auto ret = new(zone()) Group(t, capture_count());
+  if (t != Group::UNCAPTURE) {
+    Capture();
+  }
+  while (cur() != ')') {
+    auto p = ParseRoot();
+    ret->Push(p);
+  }
   update_start_pos();
   EXPECT(this, cur(), ')');
   return ParseSelection(ret);
@@ -291,8 +379,8 @@ bool IsRepeatChar(u16 ch) {
 
 Ast* Parser::ParseChar(bool allow_selection) {
   ENTER();
-  auto cj = new(zone()) Conjunction();
   bool escaped = false;
+  std::vector<Utf16CodePoint> buf;
   while (has_more()
          && (!IsSpecialChar(cur()) || escaped)) {
     if (cur() == '\\') {
@@ -301,14 +389,23 @@ Ast* Parser::ParseChar(bool allow_selection) {
       escaped = false;
     }
     auto n = advance();
-    auto c = new(zone()) Char(n);
-    cj->Push(c);
+    buf.push_back(n);
   }
-  if (cj->size() == 0 && IsRepeatChar(cur().code())) {
+
+  if (buf.size() == 0 && IsRepeatChar(cur().code())) {
     advance();
     REPORT_SYNTAX_ERROR(this, "Nothing to repeat.");
   }
-  return allow_selection? ParseSelection(cj): cj;
+
+  Ast* node = nullptr;
+  if (buf.size() == 1) {
+    node = new(zone()) Char(buf.back());
+  } else {
+    auto str = JSString::New(isolate_, buf.data(), buf.size());
+    node = new(zone()) CharSequence(*str);
+  }
+
+  return allow_selection? ParseSelection(node): node;
 }
 
 Ast* Parser::ParseSelection(Ast* node) {
@@ -435,7 +532,8 @@ Handle<JSRegExp> Compiler::Compile(const char* source) {
   parser.Parse();
   ZoneAllocator zone_allocator;
   BytecodeBuilder bytecode_builder(isolate_, &zone_allocator);
-  Visitor visitor(&bytecode_builder, &zone_allocator);
+  Visitor visitor(parser.capture_count(),
+                  &bytecode_builder, &zone_allocator);
   parser.node()->Visit(&visitor);
   auto executable = bytecode_builder.flush();
   return JSRegExp::New(isolate_, *scope.Return(executable));

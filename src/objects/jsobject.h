@@ -558,6 +558,8 @@ class JSString: public HeapObject {
   static Handle<JSString> New(Isolate* isolate, const char* data);
   static Handle<JSString> New(
       Isolate* isolate, const Utf16CodePoint* p, size_t length);
+  static Handle<JSString> New(
+      Isolate* isolate, size_t length);
 
   LUX_INLINE uint32_t length() const {
     return *reinterpret_cast<uint32_t*>(
@@ -568,6 +570,9 @@ class JSString: public HeapObject {
     INVALIDATE(index < length());
     return data()->at(index);
   }
+
+  inline Handle<JSString> Slice(Isolate* isolate,
+                                uint32_t start, uint32_t end);
 
   bool Equals(const JSString* str) const;
 

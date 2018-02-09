@@ -104,6 +104,10 @@ class BytecodeExecutable;
 // Wide3    | instruction |      Ebx      |      Eax      |
 //          +---------------------------------------------+
 //
+//          +------------------------------------+
+// Wide4    | instruction |  Cx  |      Eax      |
+//          +------------------------------------+
+//
 
 enum class BytecodeLayout: uint8_t {
   kNone,
@@ -116,7 +120,8 @@ enum class BytecodeLayout: uint8_t {
   kWord1,
   kWide1,
   kWide2,
-  kWide3
+  kWide3,
+  kWide4
 };
 
 struct BytecodeOperand {
@@ -126,12 +131,20 @@ struct BytecodeOperand {
 
 #define REGEX_BYTECODE_LIST_WITOUT_MATCHED(A)                 \
   A(RegexComment, Word1, (kPointerSize + 1), 1, const char*)  \
-  A(RegexStartGroup, None, 1, 0)                              \
-  A(RegexEndGroup, None, 1, 0)                                \
+  A(RegexReserveCapture, Double3, 3, 1, uint16_t)             \
+  A(RegexStartCapture, Double3, 3, 1, uint16_t)               \
+  A(RegexUpdateCapture, None, 1, 0)                           \
+  A(RegexPopThread, None, 1, 0)                               \
+  A(RegexResetMatchedCount, None, 1, 0)                       \
   A(RegexRune, Double3, 3, 1, u16)                            \
+  A(RegexCheckPosition, Wide1, 5, 1, BytecodeLabel*)          \
+  A(RegexJumpIfMatchedCountLT, Wide4, 7, 2, uint16_t, BytecodeLabel*) \
+  A(RegexJumpIfMatchedCountEqual, Wide4, 7, 2, uint16_t, BytecodeLabel*) \
+  A(RegexPushThread, Wide1, 5, 1, BytecodeLabel*)             \
   A(RegexSome, Word1, (kPointerSize + 1), 1, JSString*)       \
-  A(RegexRepeatRange, Double2, 5, 2, uint16_t, uint16_t)      \
-  A(RegexRepeat, Wide3, 9, 1, BytecodeLabel*, BytecodeLabel*) \
+  A(RegexEvery, Word1, (kPointerSize + 1), 1, JSString*)      \
+  A(RegexBranch, Wide3, 9, 1, BytecodeLabel*, BytecodeLabel*) \
+  A(RegexJump, Wide1, 5, 1, BytecodeLabel*)                   \
   A(RegexJumpIfMatched, Wide1, 5, 1, BytecodeLabel*)          \
   A(RegexJumpIfFailed, Wide1, 5, 1, BytecodeLabel*)
 
@@ -389,6 +402,14 @@ class BytecodeFetcher {
   }
 #endif
 
+  inline void UpdatePCToRegexFailed() {
+    pc_ = length() - 3;
+  }
+
+  inline void UpdatePCToRegexMatched() {
+    pc_ = length() - 4;
+  }
+
   inline void UpdatePC(uint32_t jmp) {
     pc_ = jmp;
   }
@@ -489,6 +510,15 @@ class BytecodeNode: public Zone {
   explicit BytecodeNode(Bytecode bytecode,
                         BytecodeNode* jmp)
       : operands_(0),
+        bytecode_(bytecode),
+        jmp_(jmp),
+        jmp2_(nullptr),
+        next_(nullptr) {}
+
+  explicit BytecodeNode(Bytecode bytecode,
+                        int64_t operands,
+                        BytecodeNode* jmp)
+      : operands_(operands),
         bytecode_(bytecode),
         jmp_(jmp),
         jmp2_(nullptr),
