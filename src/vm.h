@@ -179,6 +179,30 @@ class VirtualMachine {
     }
     LUX_CONST_GETTER(bool, is_matched, vm_flag_.get(1))
 
+    LUX_INLINE bool is_advanceable() {
+      return input()->length() > current_thread()->position();
+    }
+
+    void enable_search() {
+      vm_flag_.set(2);
+    }
+
+    bool is_search_enabled() {
+      return vm_flag_.get(2);
+    }
+
+    void disable_search() {
+      vm_flag_.unset(2);
+    }
+
+    void disable_retry() {
+      vm_flag_.set(3);
+    }
+
+    bool is_retryable() {
+      return !vm_flag_.get(3);
+    }
+
     LUX_INLINE Smi* load_flag() {
       return flag_;
     }
@@ -240,10 +264,20 @@ class VirtualMachine {
       }
     }
 
+    inline void ResetCurrentCapturedStartPosition() {
+      if (current_captured()) {
+        current_captured()->set_start(current_thread()->position());
+      }
+    }
+
     inline void UpdateCapture() {
       INVALIDATE(current_capture_);
       current_capture_->set_end(
           current_thread()->position());
+    }
+
+    inline Captured* current_captured() {
+      return current_capture_;
     }
 
     inline void ReserveCapture(uint16_t size) {

@@ -247,6 +247,9 @@ struct BitUtil<sizeof(uint64_t), uint64_t> {
 template <typename T>
 class Bitset {
  public:
+  Bitset()
+      : bit_field_(0) {}
+
   void set(uint32_t index) {
     bit_field_ |= (0x1 << index);
   }

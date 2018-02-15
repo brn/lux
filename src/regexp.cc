@@ -85,10 +85,18 @@ Visitor::Visitor(uint16_t captured_count,
 
 AST_VISIT(Root) {
   Var offset;
-
   __ RegexComment("RegExp");
+
+  if (node->is_from_start()) {
+    disable_retry();
+    __ RegexDisableRetry();
+  }
+
   __ RegexReserveCapture(captured_count());
   node->regexp()->Visit(this);
+  if (node->is_to_end()) {
+    __ RegexCheckEnd();
+  }
   __ RegexJumpIfFailed(&failed_);
 
   __ Bind(&matched_);
@@ -123,6 +131,7 @@ AST_VISIT(Group) {
 
 AST_VISIT(CharClass) {
   __ RegexComment("CharClass");
+  EnableSearchIf();
 
   Label ok, pop;
 
@@ -169,9 +178,20 @@ AST_VISIT(Repeat) {
 
   __ Bind(&loop);
   __ RegexCheckPosition(&next);
-  __ RegexPushThread(&next);
-  node->target()->Visit(this);
-  __ RegexJumpIfMatched(&loop);
+  if (node->type() == Repeat::GREEDY) {
+    __ RegexPushThread(&next);
+    node->target()->Visit(this);
+    __ RegexJumpIfMatched(&loop);
+  } else {
+    INVALIDATE(node->type() == Repeat::SHORTEST);
+    Label push;
+    node->target()->Visit(this);
+    __ Branch(&push, &next);
+    __ Bind(&push);
+    {
+      __ RegexPushThread(&loop);
+    }
+  }
   __ Bind(&next);
   if (count == 1) {
     Label ok;
@@ -234,6 +254,7 @@ AST_VISIT(Char) {
 
 AST_VISIT(CharSequence) {
   __ RegexComment("CharSequence");
+  EnableSearchIf();
 
   Label ok, pop;
 
@@ -248,13 +269,75 @@ AST_VISIT(CharSequence) {
   __ Bind(&ok);
 }
 
+AST_VISIT(Any) {
+  EnableSearchIf();
+  bool fall_through = false;
+
+  switch (node->type()) {
+    case Any::EAT_ANY:
+      __ RegexComment("Any");
+      __ RegexMatchAny();
+      break;
+    case Any::EAT_MINIMUM_L1: {
+      fall_through = true;
+      __ RegexComment("Any-Shortest-L1");
+      __ RegexMatchAny();
+      // FALL THROUGH
+    }
+    case Any::EAT_MINIMUM: {
+      if (!fall_through) {
+        __ RegexComment("Any-Shortest");
+      }
+      Label loop, pop, next;
+
+      __ Bind(&loop);
+      __ RegexCheckPosition(&next);
+      __ RegexMatchAny();
+      __ RegexPushThread(&loop);
+      __ Bind(&next);
+    }
+      break;
+    case Any::EAT_GREEDY_L1: {
+      fall_through = true;
+      __ RegexComment("Any-Greedy-L1");
+      __ RegexMatchAny();
+      // FALL THROUGH
+    }
+    case Any::EAT_GREEDY: {
+      if (!fall_through) {
+        __ RegexComment("Any-Greedy");
+      }
+      Label loop, pop, next;
+
+      __ Bind(&loop);
+      __ RegexCheckPosition(&next);
+      __ RegexPushThread(&next);
+      __ RegexMatchAny();
+      __ RegexJump(&loop);
+      __ Bind(&next);
+    }
+      break;
+    default:
+      UNREACHABLE();
+  }
+}
+
 void Visitor::EmitCompare(u16 code) {
+  EnableSearchIf();
+
   Label ok, pop;
   __ RegexRune(code);
   __ RegexBranch(&ok, &pop);
   __ Bind(&pop);
   __ RegexPopThread();
   __ Bind(&ok);
+}
+
+void Visitor::EnableSearchIf() {
+  if (first_op() && is_retryable()) {
+    __ RegexEnableSearch();
+    set_first_op();
+  }
 }
 
 void Parser::Parse() {
@@ -264,13 +347,20 @@ void Parser::Parse() {
     root_.set_config(Config::FROM_START);
   }
 
-  root_.set_regexp(ParseRegExp());
+  auto regexp = ParseRegExp();
+
+  if (cur() == '$') {
+    advance();
+    root_.set_config(Config::TO_END);
+  }
+
+  root_.set_regexp(regexp);
 }
 
 Ast* Parser::ParseRegExp() {
   ENTER();
   auto cj = new(zone()) Conjunction();
-  while (has_more()) {
+  while (has_more() && cur() != '$') {
     auto a = ParseRoot();
     if (!a) {
       return cj;
@@ -288,6 +378,9 @@ Ast* Parser::ParseRoot() {
       return ParseGroup();
     case '[':
       return ParseCharClass();
+    case '.':
+      advance();
+      return ParseSelection(new(zone()) Any());
     default:
       return ParseChar();
   }
@@ -324,7 +417,7 @@ Ast* Parser::ParseGroup() {
   if (t != Group::UNCAPTURE) {
     Capture();
   }
-  while (cur() != ')') {
+  while (cur() != ')' && cur() != '$') {
     auto p = ParseRoot();
     ret->Push(p);
   }
@@ -430,12 +523,42 @@ Ast* Parser::ParseSelection(Ast* node) {
       }
       case '*': {
         advance();
-        node = new(zone()) Repeat(0, node);
+        if (node->IsAny()) {
+          if (cur() == '?') {
+            advance();
+            node = new(zone()) Any(Any::EAT_MINIMUM);
+            break;
+          }
+          node = new(zone()) Any(Any::EAT_GREEDY);
+          break;
+        }
+
+        auto type = Repeat::GREEDY;
+        if (cur() == '?') {
+          advance();
+          type = Repeat::SHORTEST;
+        }
+        node = new(zone()) Repeat(type, 0, node);
         break;
       }
       case '+': {
         advance();
-        node = new(zone()) Repeat(1, node);
+        if (node->IsAny()) {
+          if (cur() == '?') {
+            advance();
+            node = new(zone()) Any(Any::EAT_MINIMUM_L1);
+            break;
+          }
+          node = new(zone()) Any(Any::EAT_GREEDY_L1);
+          break;
+        }
+
+        auto type = Repeat::GREEDY;
+        if (cur() == '?') {
+          advance();
+          type = Repeat::SHORTEST;
+        }
+        node = new(zone()) Repeat(type, 1, node);
         break;
       }
       default:
@@ -511,6 +634,7 @@ Ast* Parser::ParseRangeRepeat(Ast* node) {
 
 bool Parser::IsSpecialChar(Utf16CodePoint cp) const {
   return cp == '^'
+    || cp == '$'
     || cp == '['
     || cp == ']'
     || cp == '{'

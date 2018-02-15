@@ -133,7 +133,11 @@ struct BytecodeOperand {
   A(RegexComment, Word1, (kPointerSize + 1), 1, const char*)  \
   A(RegexReserveCapture, Double3, 3, 1, uint16_t)             \
   A(RegexStartCapture, Double3, 3, 1, uint16_t)               \
+  A(RegexDisableRetry, None, 1, 0)                            \
+  A(RegexCheckEnd, None, 1, 0)                                \
+  A(RegexEnableSearch, None, 1, 0)                            \
   A(RegexUpdateCapture, None, 1, 0)                           \
+  A(RegexMatchAny, None, 1, 0)                                \
   A(RegexPopThread, None, 1, 0)                               \
   A(RegexResetMatchedCount, None, 1, 0)                       \
   A(RegexRune, Double3, 3, 1, u16)                            \

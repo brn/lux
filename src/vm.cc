@@ -84,6 +84,34 @@ REGEX_HANDLER(RegexUpdateCapture) {
   }
 }
 
+REGEX_HANDLER(RegexDisableRetry) {
+  exec->disable_retry();
+}
+
+REGEX_HANDLER(RegexCheckEnd) {
+  if (exec->is_advanceable()) {
+    fetcher->UpdatePCToRegexFailed();
+  }
+}
+
+REGEX_HANDLER(RegexEnableSearch) {
+  exec->enable_search();
+}
+
+REGEX_HANDLER(RegexMatchAny) {
+  auto pos = exec->current_thread()->position();
+  if (exec->is_advanceable()) {
+    if (exec->input()->at(pos) != '\n') {
+      exec->current_thread()->Matched();
+      exec->store_flag(Smi::FromInt(1));
+      return exec->Advance();
+    }
+    return exec->store_flag(Smi::FromInt(0));
+  }
+
+  exec->store_flag(Smi::FromInt(0));
+}
+
 REGEX_HANDLER(RegexReserveCapture) {
   auto size = fetcher->FetchNextDoubleOperand();
   if (exec->collect_matched_word()) {
@@ -122,60 +150,108 @@ REGEX_HANDLER(RegexResetMatchedCount) {
 }
 
 REGEX_HANDLER(RegexRune) {
+  LUX_SCOPED([exec]() mutable { exec->disable_search(); });
   u32 ch = fetcher->FetchNextDoubleOperand();
-  auto p = exec->current_thread()->position();
-  auto subject = exec->input();
-  if (subject->length() > p) {
-    auto matched = ch == subject->at(p).code();
-    if (matched) {
-      exec->current_thread()->Matched();
-      exec->Advance();
-    }
-    return exec->store_flag(Smi::FromInt(matched));
-  }
-  exec->store_flag(Smi::FromInt(0));
-}
 
-REGEX_HANDLER(RegexSome) {
-  auto chars = JSString::Cast(
-      reinterpret_cast<Object*>(fetcher->FetchNextWordOperand()));
-  INVALIDATE(chars->shape()->IsJSString());
-  auto p = exec->current_thread()->position();
-  auto subject = exec->input();
-  if (subject->length() > p) {
-    auto code = subject->at(p);
-    for (auto &ch : *chars) {
-      if (ch == code) {
+  do {
+    auto p = exec->current_thread()->position();
+    auto subject = exec->input();
+    if (subject->length() > p) {
+      auto matched = ch == subject->at(p).code();
+      if (matched) {
         exec->current_thread()->Matched();
         exec->Advance();
         return exec->store_flag(Smi::FromInt(1));
       }
+      if (exec->is_search_enabled()) {
+        exec->current_thread()->Advance();
+        exec->ResetCurrentCapturedStartPosition();
+        continue;
+      }
+      return exec->store_flag(Smi::FromInt(0));
     }
-    return exec->store_flag(Smi::FromInt(0));
-  }
+  } while(exec->is_advanceable()
+          && exec->is_search_enabled());
 
-  exec->store_flag(Smi::FromInt(1));
+  exec->store_flag(Smi::FromInt(0));
+}
+
+REGEX_HANDLER(RegexSome) {
+  LUX_SCOPED([exec]() mutable { exec->disable_search(); });
+
+  auto chars = JSString::Cast(
+      reinterpret_cast<Object*>(fetcher->FetchNextWordOperand()));
+  INVALIDATE(chars->shape()->IsJSString());
+
+  do {
+    auto p = exec->current_thread()->position();
+    auto subject = exec->input();
+    if (subject->length() > p) {
+      auto code = subject->at(p);
+      for (auto &ch : *chars) {
+        if (ch == code) {
+          exec->current_thread()->Matched();
+          exec->Advance();
+          return exec->store_flag(Smi::FromInt(1));
+        }
+      }
+
+      if (exec->is_search_enabled()) {
+        exec->current_thread()->Advance();
+        exec->ResetCurrentCapturedStartPosition();
+        continue;
+      }
+
+      return exec->store_flag(Smi::FromInt(0));
+    }
+
+    return exec->store_flag(Smi::FromInt(1));
+  } while (exec->is_advanceable()
+           && exec->is_search_enabled());
+
+  exec->store_flag(Smi::FromInt(0));
 }
 
 REGEX_HANDLER(RegexEvery) {
+  LUX_SCOPED([exec]() mutable { exec->disable_search(); });
+
   auto chars = JSString::Cast(
       reinterpret_cast<Object*>(fetcher->FetchNextWordOperand()));
   INVALIDATE(chars->shape()->IsJSString());
   auto subject = exec->input();
-  auto p = exec->current_thread()->position();
-  for (auto &ch : *chars) {
-    if (subject->length() == p) {
-      return exec->store_flag(Smi::FromInt(1));
+  auto subject_length = (subject->length() - 1);
+
+  int matched = 0;
+  do {
+    auto p = exec->current_thread()->position();
+    for (auto &ch : *chars) {
+      if (subject_length < p) {
+        return exec->store_flag(Smi::FromInt(0));
+      }
+      auto code = subject->at(p);
+      if (ch == code) {
+        matched++;
+        exec->Advance();
+        p++;
+      } else {
+        if (exec->is_search_enabled()) {
+          exec->ResetCurrentCapturedStartPosition();
+          if (matched == 0) {
+            exec->Advance();
+          } else {
+            matched = 0;
+          }
+          goto NEXT;
+        }
+        exec->current_thread()->set_matched_count(matched);
+        return exec->store_flag(Smi::FromInt(0));
+      }
     }
-    auto code = subject->at(p);
-    if (ch == code) {
-      exec->current_thread()->Matched();
-      exec->Advance();
-      ++p;
-    } else {
-      return exec->store_flag(Smi::FromInt(0));
-    }
-  }
+ NEXT:
+    USE(0);
+  } while(exec->is_advanceable()
+          && exec->is_search_enabled());
+
   exec->store_flag(Smi::FromInt(1));
 }
 
@@ -514,6 +590,14 @@ void VirtualMachine::Executor::Execute() {
 
 Handle<JSArray> VirtualMachine::RegexExecutor::FixCaptured() {
   auto arr = JSArray::NewEmptyArray(isolate_, 0);
+  auto end = current_thread()->position();
+
+  if (end == input()->length()) {
+    arr->Push(isolate_, input());
+  } else {
+    arr->Push(isolate_, *input()->Slice(isolate_, 0, end));
+  }
+
   for (auto &c : captured_stack_) {
     std::cout << c->start() << c->end() << std::endl;
     auto str = input_->Slice(isolate_, c->start(), c->end());
@@ -575,7 +659,8 @@ Label_Retry:
 #undef VM_EXECUTE
   Label_Failed: {
     unset_matched();
-    if (input_->length() > current_thread()->position()) {
+    if (is_retryable() &&
+        input_->length() > current_thread()->position()) {
       auto next = current_thread()->position() + 1;
       ClearAllThread();
       ClearCapture();

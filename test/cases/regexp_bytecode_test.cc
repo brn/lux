@@ -46,6 +46,6 @@ class RegExpBytecodeTest: public lux::IsolateSetup {
 
 namespace {
 TEST_F(RegExpBytecodeTest, Simple) {
-  RunTest("(abcde)(f)", "abcdegabcdef");
+  RunTest("<.*?>", "<<<foo>>>");
 }
 }

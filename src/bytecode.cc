@@ -463,6 +463,34 @@ BytecodeNode* BytecodeBuilder::RegexUpdateCapture() {
   return n;
 }
 
+BytecodeNode* BytecodeBuilder::RegexEnableSearch() {
+  auto n = new(zone()) BytecodeNode(
+      Bytecode::kRegexEnableSearch);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexDisableRetry() {
+  auto n = new(zone()) BytecodeNode(
+      Bytecode::kRegexDisableRetry);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexCheckEnd() {
+  auto n = new(zone()) BytecodeNode(
+      Bytecode::kRegexCheckEnd);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexMatchAny() {
+  auto n = new(zone()) BytecodeNode(
+      Bytecode::kRegexMatchAny);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
 BytecodeNode* BytecodeBuilder::RegexResetMatchedCount() {
   auto n = new(zone()) BytecodeNode(
       Bytecode::kRegexResetMatchedCount);

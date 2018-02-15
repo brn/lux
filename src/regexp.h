@@ -49,6 +49,7 @@ namespace regexp {
   A(REPEAT_RANGE, RepeatRange)                  \
   A(CHAR_SEQUENCE, CharSequence)                \
   A(CHAR, Char)                                 \
+  A(ANY, Any)                                   \
   A(CONJUNCTION, Conjunction)                   \
   A(ROOT, Root)
 
@@ -64,7 +65,7 @@ REGEXP_AST_TYPES(RE_AST_FORWARD_DECL)
   }
 
 class Visitor {
- public:
+ public:  
   explicit Visitor(uint16_t captured_count,
                    BytecodeBuilder* bytecode_builder,
                    ZoneAllocator* zone_allocator);
@@ -78,12 +79,30 @@ class Visitor {
 #undef REGEXP_VISIT_DECL
 
  private:
+  enum {
+    kFirstOp = 0,
+    kDisableRetry
+  };
+  void set_first_op() {
+    flags_.set(kFirstOp);
+  }
+  bool first_op() const {
+    return !flags_.get(kFirstOp);
+  }
+  void disable_retry() {
+    flags_.set(kDisableRetry);
+  }
+  bool is_retryable() {
+    return !flags_.get(kDisableRetry);
+  }
+  void EnableSearchIf();
   void EmitCompare(u16 code);
   void CollectMatchedChar(Var* char_register);
   void Return(Var* ret = nullptr);
   LUX_CONST_GETTER(uint16_t, captured_count, captured_count_)
 
   uint16_t captured_count_;
+  Bitset<uint8_t> flags_;
   BytecodeLabel matched_;
   BytecodeLabel failed_;
   BytecodeBuilder* bytecode_builder_;
@@ -352,14 +371,18 @@ class Alternate final: public Ast {
 
 class Repeat: public Ast {
  public:
-  Repeat()
-      : Ast(Ast::REPEAT) {}
-  explicit Repeat(int32_t more_than, Ast* node)
+  enum Type {
+    GREEDY,
+    SHORTEST
+  };
+
+  Repeat(Type type, int32_t more_than, Ast* node)
       : Ast(Ast::REPEAT),
-        more_than_(more_than), target_(node) {}
+        type_(type), more_than_(more_than), target_(node) {}
 
   LUX_CONST_PROPERTY(Ast*, target, target_)
   LUX_CONST_PROPERTY(int32_t, more_than, more_than_)
+  LUX_CONST_PROPERTY(Type, type, type_)
 
   REGEXP_VISIT_INTERNAL_METHOD_DECL(Repeat);
 
@@ -382,6 +405,7 @@ class Repeat: public Ast {
 #endif
 
  private:
+  Type type_;
   int32_t more_than_;
   Ast* target_;
 };
@@ -476,6 +500,41 @@ class Char: public Ast {
   REGEXP_VISIT_INTERNAL_METHOD_DECL(Char);
 
   Utf16CodePoint value_;
+};
+
+class Any: public Ast {
+ public:
+  enum Type {
+    EAT_ANY,
+    EAT_GREEDY,
+    EAT_MINIMUM,
+    EAT_GREEDY_L1,
+    EAT_MINIMUM_L1,
+  };
+
+  Any(Type type = EAT_ANY)
+      : Ast(Ast::ANY),
+        type_(type) {}
+
+  LUX_CONST_GETTER(Any::Type, type, type_);
+
+  bool Is(Type type) const {
+    return type_ == type;
+  }
+
+#ifdef DEBUG
+  std::string ToString(std::string* indent = nullptr) const {
+    std::stringstream st;
+    st << (indent == nullptr? "": *indent)
+       << "[Any]\n";
+    return st.str();
+  }
+#endif
+
+ private:
+  REGEXP_VISIT_INTERNAL_METHOD_DECL(Any);
+
+  Type type_;
 };
 
 class Parser {
