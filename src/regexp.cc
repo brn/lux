@@ -649,7 +649,7 @@ bool Parser::IsSpecialChar(Utf16CodePoint cp) const {
     || cp == ')';
 }
 
-Handle<JSRegExp> Compiler::Compile(const char* source) {
+Handle<JSRegExp> Compiler::Compile(const char* source, uint8_t flag) {
   HandleScope scope;
   auto regexp = JSString::New(isolate_, source);
   Parser parser(isolate_, error_reporter_, sp_, regexp);
@@ -660,7 +660,7 @@ Handle<JSRegExp> Compiler::Compile(const char* source) {
                   &bytecode_builder, &zone_allocator);
   parser.node()->Visit(&visitor);
   auto executable = bytecode_builder.flush();
-  return JSRegExp::New(isolate_, *scope.Return(executable));
+  return JSRegExp::New(isolate_, *scope.Return(executable), flag);
 }
 }  // namespace regexp
 }  // namespace lux

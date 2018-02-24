@@ -15,6 +15,7 @@
  * @author Taketoshi Aono
  */
 
+#include "./alloc.h"
 #include "./heap.h"
 #include "./isolate.h"
 #include "./objects/shape.h"
@@ -30,8 +31,8 @@ Isolate* Isolate::GetPerThreadInstance() {
 
 void Isolate::InitOnce() {
   if (!once_flag_.test_and_set()) {
-    heap_ = new Heap();
-    root_maps_ = new RootMaps(this);
+    heap_ = Alloc<Heap>();
+    root_maps_ = Alloc<RootMaps>(this);
     jsval_nan_ = JSNumber::NewWithoutHandle(this, Double::kNaN);
     jsval_true_ = JSSpecials::NewWithoutHandle(this, JSSpecials::kTrue);
     jsval_false_ = JSSpecials::NewWithoutHandle(this, JSSpecials::kFalse);

@@ -109,14 +109,18 @@ Object* JSFunction::Call(
 }
 
 Handle<JSRegExp> JSRegExp::New(Isolate* isolate,
-                               BytecodeExecutable* executable) {
-  return make_handle(NewWithoutHandle(isolate, executable));
+                               BytecodeExecutable* executable,
+                               uint8_t flag) {
+  return make_handle(NewWithoutHandle(isolate, executable, flag));
 }
 
 JSRegExp* JSRegExp::NewWithoutHandle(Isolate* isolate,
-                                     BytecodeExecutable* be) {
+                                     BytecodeExecutable* be,
+                                     uint8_t flag) {
   auto heap_obj = HeapObject::New(isolate,
                                   isolate->regexp_shape());
+  auto flag_ptr = FIELD_PROPERTY(uint8_t*, heap_obj, kFlagOffset);
+  *flag_ptr = flag;
   auto be_ptr = FIELD_PROPERTY(BytecodeExecutable**, heap_obj, kCodeOffset);
   *be_ptr = be;
   return reinterpret_cast<JSRegExp*>(heap_obj);
@@ -124,12 +128,13 @@ JSRegExp* JSRegExp::NewWithoutHandle(Isolate* isolate,
 
 JSSpecials* JSRegExp::Test(Isolate* isolate, JSString* input) {
   lux::VirtualMachine vm(isolate);
-  return reinterpret_cast<JSSpecials*>(vm.ExecuteRegex(code(), input, false));
+  return reinterpret_cast<JSSpecials*>(vm.ExecuteRegex(
+      code(), input, flag(), false));
 }
 
 JSArray* JSRegExp::Match(Isolate* isolate, JSString* input) {
   lux::VirtualMachine vm(isolate);
-  return JSArray::Cast(vm.ExecuteRegex(code(), input, true));
+  return JSArray::Cast(vm.ExecuteRegex(code(), input, flag(), true));
 }
 
 Handle<JSArray> JSArray::NewEmptyArray(Isolate* isolate,

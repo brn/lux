@@ -15,6 +15,7 @@
  * @author Taketoshi Aono
  */
 
+#include "./alloc.h"
 #include "./heap.h"
 #include "./isolate.h"
 #include "./unicode.h"
@@ -27,7 +28,8 @@ inline CharT Mask(CharT ch) {
 }
 
 std::string Utf16CodePoint::ToUtf8String() const {
-  return std::string(Unicode::ConvertUC32ToUC8(u_).data());
+  auto buf = Unicode::ConvertUC32ToUC8(u_);
+  return std::string(buf.data());
 }
 
 class Utf8CodePoint {
@@ -179,14 +181,15 @@ const Utf16CodePoint* Utf16StringIterator::operator->() const {
   return &utf16_codepoint_[index_];
 }
 
-bool Utf16String::IsAsciiEqual(const char* ascii) const {
+bool Utf16String::IsAsciiEqual(const char* ascii, int start, int end) const {
   auto ascii_len = strlen(ascii);
   if (size_ != ascii_len) {
     return false;
   }
 
   auto ptr = utf16_codepoint_.get();
-  for (int i = 0; i < size_; i++) {
+  auto len = size_ > end? (end == -1? size_: end): size_;
+  for (int i = start; i < len; i++) {
     if (ptr[i] != ascii[i]) {
       return false;
     }
@@ -221,15 +224,34 @@ Utf16String::ParseIntResult Utf16String::ParseInt() const {
 
 Utf16String Utf16String::FromVector(const std::vector<Utf16CodePoint>& v) {
   Utf16String ret;
-  auto arr = new Utf16CodePoint[v.size()];
+  auto arr = AllocSharedArray<Utf16CodePoint>(v.size());
   ret.size_ = v.size();
   for (int i = 0; i < v.size(); i++) {
-    arr[i] = v[i];
+    arr.get()[i] = v[i];
   }
-  ret.utf16_codepoint_ = std::shared_ptr<Utf16CodePoint>(arr,
-                                         [](Utf16CodePoint* p) {
-                                           delete[] p;
-                                         });
+  ret.utf16_codepoint_ = arr;
+  return ret;
+}
+
+Utf16String Utf16String::FromVectorNonCopy(
+    const std::vector<Utf16CodePoint>* c) {
+  auto v = reinterpret_cast<std::vector<Utf16CodePoint>*>(
+      reinterpret_cast<uintptr_t>(c));
+  Utf16String ret;
+  ret.size_ = v->size();
+  ret.utf16_codepoint_ = std::shared_ptr<Utf16CodePoint>(
+      v->data(), [](Utf16CodePoint* p) {});
+  return ret;
+}
+
+Utf16String Utf16String::Clone() {
+  Utf16String ret;
+  auto arr = AllocSharedArray<Utf16CodePoint>(size_);
+  ret.size_ = size_;
+  for (int i = 0; i < size_; i++) {
+    arr.get()[i] = utf16_codepoint_.get()[i];
+  }
+  ret.utf16_codepoint_ = arr;
   return ret;
 }
 
@@ -243,7 +265,7 @@ std::string Utf16String::ToUtf8String() const {
 }
 
 const Utf16String Unicode::ConvertUtf8StringToUtf16String(const char* str) {
-  auto buf = new Utf16CodePoint[strlen(str) + 4];
+  auto buf = AllocArray<Utf16CodePoint>(strlen(str) + 4);
   Utf8Iterator it(str);
   int index = 0;
   while (it.HasMore()) {

@@ -25,8 +25,10 @@
 
 #include <stack>
 #include <string>
+#include <sstream>
 #include <vector>
 
+#include "./maybe.h"
 #include "./source_position.h"
 #include "./unicode.h"
 #include "./zone.h"
@@ -153,6 +155,7 @@
 #define GROUP_DUMMY_(v)
 #define TOKEN_LIST(V)                           \
   V(INVALID, "Invalid")                         \
+  V(END, "End")                                 \
   KEYWORD_TOKEN_LIST(V, GROUP_DUMMY_)           \
   FUTURE_RESERVED_KEYWORD_LIST(V)               \
   SYMBOL_TOKEN_LIST(V)                          \
@@ -182,7 +185,13 @@ class Utf16CodePoint;
     PropertyAccessExpression, 19)                       \
   A(STRUCTUAL_LITERAL, StructuralLiteral, 21)           \
   A(UNARY_EXPRESSION, UnaryExpression, 23)              \
-  A(STATEMENTS, Statements, 0)
+  A(IMPORT_SPECIFIER, ImportSpecifier, 25)              \
+  A(IMPORT_BINDING, ImportBinding, 27)                  \
+  A(NAMED_IMPORT_LIST, NamedImportList, 29)             \
+  A(STATEMENTS, Statements, 0)                          \
+  A(IMPORT_DECLARATION, ImportDeclaration, 2)           \
+  A(EXPORT_DECLARATION, ExportDeclaration, 4)           \
+  A(EXPRESSION_STATEMENT, ExpressionStatement, 6)
 
 #define AST_TYPES(A)                            \
   BASE_AST_TYPES(A)                             \
@@ -197,6 +206,7 @@ struct Token {
 #define DEFINE(TOKEN, _) TOKEN,
     TOKEN_LIST(DEFINE)
 #undef DEFINE
+    LAST__
   };
 
   inline static bool OneOf(
@@ -208,15 +218,40 @@ struct Token {
     }
     return false;
   }
+
+  static const char* ToString(Type token) {
+    static const std::array<const char*, Token::LAST__> kTokenNameArray = {{
+#define DEF_TOKEN(T, _) #T,
+        TOKEN_LIST(DEF_TOKEN)
+#undef DEF_TOKEN
+          }};
+    return kTokenNameArray[token];
+  }
 };
+
+
+#define RECEIVER_TYPE_LIST(A)                        \
+  A(EXPRESSION, 0)                              \
+  A(NEW, 0x4)                                   \
+  A(SUPER, 0x8)                                 \
+  A(TEMPLATE, 0xa)
 
 struct Receiver {
   enum Type {
-    EXPRESSION = 0,
-    NEW = 0x4,
-    SUPER = 0x8,
-    TEMPLATE = 0xa,
+#define DEFINE_RECIEVER(R, v) R = v,
+    RECEIVER_TYPE_LIST(DEFINE_RECIEVER)
+#undef DEFINE_RECIEVER
   };
+
+  static const char* ToString(Type type) {
+    switch (type) {
+#define DEFINE_RECIEVER(R, v) case R: return #R;
+    RECEIVER_TYPE_LIST(DEFINE_RECIEVER)
+#undef DEFINE_RECIEVER
+    default:
+      UNREACHABLE();
+    }
+  }
 };
 
 struct Scope {
@@ -230,24 +265,42 @@ template <typename T>
 class AstListTraits {
  public:
   using iterator = typename std::vector<T*>::iterator;
+  using const_iterator = typename std::vector<T*>::const_iterator;
   void Push(T* el) {
-    statements_.push_back(el);
+    node_list_.push_back(el);
   }
 
   T* at(size_t n) const {
-    return statements_[n];
+    return node_list_[n];
   }
 
   iterator begin() {
-    return statements_.begin();
+    return node_list_.begin();
   }
 
   iterator end() {
-    return statements_.end();
+    return node_list_.end();
+  }
+
+  const_iterator begin() const {
+    return node_list_.cbegin();
+  }
+
+  const_iterator end() const {
+    return node_list_.cend();
+  }
+
+ protected:
+  void ToStringList(
+      std::string* indent, std::stringstream* ss) const {
+    auto ni = "  " + (*indent);
+    for (auto &n : *this) {
+      n->ToStringTree(&ni, ss);
+    }
   }
 
  private:
-  std::vector<T*> statements_;
+  std::vector<T*> node_list_;
 };
 
 class Ast: public Zone {
@@ -256,6 +309,7 @@ class Ast: public Zone {
 #define D(V, _ , v) V = v,
     AST_TYPES(D)
 #undef D
+    LAST__
   };
   static const uint8_t kStatementFlag = 0x0;
   static const uint8_t kExpressionFlag = 0x1;
@@ -266,6 +320,14 @@ class Ast: public Zone {
   CONCRETE_AST_TYPES(IS_TYPE)
 #undef IS_TYPE
 
+  inline const char* GetName() const {
+    switch (type_) {
+#define DEF_AST_VALUE(Type, name, _) case Type: return #name;
+        CONCRETE_AST_TYPES(DEF_AST_VALUE)
+#undef DEF_AST_VALUE
+    }
+  }
+
   inline bool IsStatement() const {
     return (type() & kStatementFlag) == kStatementFlag;
   }
@@ -273,6 +335,24 @@ class Ast: public Zone {
   inline bool IsExpression() const {
     return (type() & kExpressionFlag) == kExpressionFlag;
   }
+
+  std::string ToString() const {
+    std::string indent = "";
+    std::stringstream ss;
+    ToStringSelf(this, &indent, &ss);
+    return ss.str();
+  }
+  std::string ToStringTree() const {
+    std::string indent = "";
+    std::stringstream ss;
+    ToStringTree(&indent, &ss);
+    return ss.str();
+  }
+
+  virtual void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const = 0;
+  virtual void ToStringTree(
+      std::string* indent, std::stringstream* ss) const = 0;
 
 #define CAST(TYPE, Type, _)                     \
   Type* To##Type() {                        \
@@ -316,6 +396,16 @@ class Expressions: public Expression, public AstListTraits<Expression> {
       Push(it);
     }
   }
+
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+  }
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    ToStringList(indent, ss);
+  }
 };
 
 class BinaryExpression: public Expression {
@@ -331,6 +421,19 @@ class BinaryExpression: public Expression {
   LUX_CONST_PROPERTY(Expression*, lhs, lhs_);
   LUX_CONST_PROPERTY(Expression*, rhs, rhs_);
   LUX_CONST_PROPERTY(Token::Type, operand, operand_);
+
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << " operand = "
+          << Token::ToString(operand_) << ']' << '\n';
+  }
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    auto ni = "  " + (*indent);
+    lhs_->ToStringTree(&ni, ss);
+    rhs_->ToStringTree(&ni, ss);
+  }
 
  private:
   Token::Type operand_;
@@ -355,6 +458,18 @@ class UnaryExpression: public Expression {
   LUX_CONST_PROPERTY(Token::Type, operand, operand_)
   LUX_CONST_PROPERTY(Expression*, expression, expression_)
   LUX_CONST_PROPERTY(OperandPosition, operand_position, operand_position_)
+
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << " operand = "
+          << Token::ToString(operand_) << ']' << '\n';
+  }
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    auto ni = "  " + (*indent);
+    expression_->ToStringTree(&ni, ss);
+  }
 
  private:
   OperandPosition operand_position_;
@@ -399,6 +514,19 @@ class ConditionalExpression: public Expression {
     return else_expression_;
   }
 
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << '\n';
+  }
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    auto ni = "  " + (*indent);
+    condition_->ToStringTree(&ni, ss);
+    then_expression_->ToStringTree(&ni, ss);
+    else_expression_->ToStringTree(&ni, ss);
+  }
+
  private:
   Expression* condition_;
   Expression* then_expression_;
@@ -420,6 +548,19 @@ class CallExpression: public Expression {
   LUX_CONST_PROPERTY(Receiver::Type, receiver_type, receiver_type_)
   LUX_CONST_PROPERTY(Expression*, callee, callee_)
   LUX_CONST_PROPERTY(Expression*, arguments, arguments_)
+
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << " receiver = "
+          << Receiver::ToString(receiver_type_) << ']' << '\n';
+  }
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    auto ni = "  " + (*indent);
+    callee_->ToStringTree(&ni, ss);
+    arguments_->ToStringTree(&ni, ss);
+  }
 
  private:
   Receiver::Type receiver_type_;
@@ -479,6 +620,29 @@ class PropertyAccessExpression: public Expression {
   LUX_CONST_PROPERTY(Expression*, receiver, receiver_);
   LUX_CONST_PROPERTY(Expression*, property, property_);
 
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << " property_access = ";
+    if (is_dot_access()) {
+      (*ss) << " dot";
+    } else if (is_element_access()) {
+      (*ss) << " element";
+    } else if (is_meta_property()) {
+      (*ss) << " meta";
+    } else {
+      INVALIDATE(is_super_property());
+      (*ss) << " super";
+    }
+    (*ss) << "]\n";
+  }
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    auto ni = "  " + (*indent);
+    receiver_->ToStringTree(&ni, ss);
+    property_->ToStringTree(&ni, ss);
+  }
+
  private:
   Bitset<uint8_t> type_flag_;
   Expression* receiver_;
@@ -505,9 +669,11 @@ class BaseFunction {
   BaseFunction() {}
 
   BaseFunction(Function::Type fn_type,
-                 Scope::Type scope_type,
-                 Expression* formal_parameters)
-      : formal_parameters_(formal_parameters) {
+               Scope::Type scope_type,
+               Expression* formal_parameters,
+               Ast* body)
+      : formal_parameters_(formal_parameters),
+        body_(body) {
     flags_.assign(fn_type | scope_type);
   }
 
@@ -534,6 +700,7 @@ class BaseFunction {
  protected:
   Bitset<uint8_t> flags_;
   Expression* formal_parameters_;
+  Ast* body_;
 };
 
 template <bool allow_statements>
@@ -545,15 +712,14 @@ class FunctionTraits<true>: public BaseFunction {
   FunctionTraits(Function::Type fn_type,
                  Scope::Type scope_type,
                  Expression* formal_parameters,
-                 Statement* body)
+                 Ast* body)
       : BaseFunction(fn_type,
                      scope_type,
-                     formal_parameters),
-        body_(body) {}
+                     formal_parameters,
+                     body) {}
 
-  LUX_CONST_PROPERTY(Statement*, body, body_)
- protected:
-  Statement* body_;
+  LUX_CONST_GETTER(Statement*, body, reinterpret_cast<Statement*>(body_))
+  LUX_SETTER(Ast*, body, body_)
 };
 
 template <>
@@ -565,32 +731,56 @@ class FunctionTraits<false>: public BaseFunction {
                  Ast* body)
       : BaseFunction(fn_type,
                      scope_type,
-                     formal_parameters),
-        body_(body) {}
+                     formal_parameters,
+                     body) {}
   LUX_CONST_PROPERTY(Ast*, body, body_)
- protected:
-  Ast* body_;
 };
 
-class FunctionExpression: public Expression,
-                          public FunctionTraits<true> {
+template <bool allow_statements>
+class FunctionExpressionBase: public Expression,
+                              public FunctionTraits<allow_statements> {
+ public:
+  FunctionExpressionBase(Ast::Type type,
+                         Function::Type fn_type,
+                         Scope::Type scope_type,
+                         Expression* formal_parameters,
+                         Ast* body)
+      : Expression(type),
+        FunctionTraits<allow_statements>(
+            fn_type, scope_type, formal_parameters, body) {}
+
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+  }
+
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    auto ni = "  " + (*indent);
+    BaseFunction::formal_parameters_->ToStringTree(&ni, ss);
+    BaseFunction::body_->ToStringTree(&ni, ss);
+  }
+};
+
+class FunctionExpression: public FunctionExpressionBase<true> {
  public:
   FunctionExpression(Function::Type fn_type,
                      Expression* formal_parameters,
                      Statement* body)
-      : Expression(Ast::FUNCTION_EXPRESSION),
-        FunctionTraits(
-            fn_type, Scope::OPAQUE, formal_parameters, body) {}
+      : FunctionExpressionBase<true>(
+            Ast::FUNCTION_EXPRESSION,
+            fn_type, Scope::OPAQUE, formal_parameters,
+            reinterpret_cast<Ast*>(body)) {}
 };
 
-class ArrowFunctionExpression: public Expression,
-                               public FunctionTraits<false> {
+class ArrowFunctionExpression: public FunctionExpressionBase<false> {
  public:
   ArrowFunctionExpression(Function::Type fn_type,
                           Expression* formal_parameters,
                           Ast* body)
-      : Expression(Ast::ARROW_FUNCTION_EXPRESSION),
-        FunctionTraits(
+      : FunctionExpressionBase<false>(
+            Ast::ARROW_FUNCTION_EXPRESSION,
             fn_type, Scope::TRANSPARENT, formal_parameters, body) {}
 };
 
@@ -607,6 +797,24 @@ class ObjectPropertyExpression: public Expression {
   LUX_CONST_PROPERTY(Expression*, key, key_);
   LUX_CONST_PROPERTY(Expression*, value, value_);
   LUX_CONST_PROPERTY(Expression*, initializer, initializer_);
+
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+  }
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    auto ni = "  " + (*indent);
+    key_->ToStringTree(&ni, ss);
+    if (value_) {
+      value_->ToStringTree(&ni, ss);
+    }
+    if (initializer_) {
+      initializer_->ToStringTree(&ni, ss);
+    }
+  }
+
  private:
   Expression* key_;
   Expression* value_;
@@ -617,6 +825,16 @@ class Elision: public Expression {
  public:
   Elision()
       : Expression(Ast::ELISION) {}
+
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+  }
+
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+  }
 };
 
 class StructuralLiteral: public Expression, public AstListTraits<Expression> {
@@ -681,6 +899,32 @@ class StructuralLiteral: public Expression, public AstListTraits<Expression> {
     return flag_.get(HAS_SPREAD);
   }
 
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << " type = ";
+    if (is_array_literal()) {
+      (*ss) << "ArrayLiteral";
+    } else {
+      INVALIDATE(is_object_literal());
+      (*ss) << "ObjectLiteral";
+    }
+    if (has_accessor()) {
+      (*ss) << " accessor = true";
+    }
+    if (has_generator()) {
+      (*ss) << " generator = true";
+    }
+    if (has_spread()) {
+      (*ss) << " spread = true";
+    }
+    (*ss) << "]\n";
+  }
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    ToStringList(indent, ss);
+  }
+
  private:
   Bitset<uint8_t> flag_;
 };
@@ -719,6 +963,17 @@ class Literal: public Expression {
     value_ = n;
   }
 
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName()
+          << " type = " << Token::ToString(literal_type_)
+          << " value = " << value().ToUtf8String() << "]\n";
+  }
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+  }
+
  private:
   Token::Type literal_type_;
   Utf16String value_;
@@ -735,6 +990,210 @@ class Statements: public Statement, public AstListTraits<Statement> {
   Statements()
       : Statement(Ast::STATEMENTS),
         AstListTraits<Statement>() {}
+
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+  }
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    ToStringList(indent, ss);
+  }
+};
+
+class ImportSpecifier: public Expression {
+ public:
+  ImportSpecifier(Maybe<Expression*> name, Maybe<Expression*> as,
+                  bool is_namespace)
+      : Expression(Ast::IMPORT_SPECIFIER),
+        is_namespace_(is_namespace),
+        name_(name), as_(as) {}
+
+  LUX_CONST_GETTER(Maybe<Expression*>, name, name_)
+  LUX_CONST_GETTER(Maybe<Expression*>, as, as_)
+  LUX_CONST_GETTER(bool, is_namespace, is_namespace_)
+
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+  }
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    auto n = *indent + "  ";
+    name_ >>= [&](auto name) { name->ToStringTree(&n, ss); };
+    as_ >>= [&](auto as) { as->ToStringTree(&n, ss); };
+  }
+
+ private:
+  bool is_namespace_;
+  Maybe<Expression*> name_;
+  Maybe<Expression*> as_;
+};
+
+class NamedImportList:
+      public Expression, public AstListTraits<ImportSpecifier> {
+ public:
+  NamedImportList()
+      : Expression(Ast::NAMED_IMPORT_LIST),
+        AstListTraits<ImportSpecifier>() {}
+
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+  }
+
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    ToStringList(indent, ss);
+  }
+};
+
+class ImportBinding: public Expression {
+ public:
+  explicit ImportBinding(Maybe<Expression*> default_binding)
+      : Expression(Ast::IMPORT_BINDING),
+        default_binding_(default_binding) {}
+
+  LUX_CONST_GETTER(
+      Maybe<Expression*>, default_binding, default_binding_)
+
+  LUX_CONST_GETTER(Maybe<Expression*>,
+                   namespace_import,
+                   namespace_import_)
+  LUX_CONST_GETTER(Maybe<Expression*>,
+                   named_import_list,
+                   named_import_list_)
+  void set_namespace_import(Maybe<Expression*> exp) {
+    namespace_import_ = exp;
+  }
+
+  void set_named_import_list(Maybe<Expression*> exp) {
+    named_import_list_ = exp;
+  }
+
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+  }
+
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    default_binding_ >>= [&](auto db) {
+      auto ni = *indent + "  ";
+      db->ToStringTree(&ni, ss);
+    };
+    namespace_import_ >>= [&](auto i) {
+      auto ni = *indent + "  ";
+      i->ToStringTree(&ni, ss);
+    };
+    named_import_list_ >>= [&](auto list) {
+      auto ni = *indent + "  ";
+      list->ToStringTree(&ni, ss); 
+    };
+  }
+
+ private:
+  Maybe<Expression*> default_binding_;
+  Maybe<Expression*> namespace_import_;
+  Maybe<Expression*> named_import_list_;
+};
+
+class ImportDeclaration: public Statement {
+ public:
+  ImportDeclaration(Maybe<Expression*> import_binding,
+                    Expression* module_specifier)
+      : Statement(Ast::IMPORT_DECLARATION),
+        import_binding_(import_binding),
+        module_specifier_(module_specifier) {}
+
+  LUX_CONST_GETTER(
+      Maybe<Expression*>, import_binding, import_binding_)
+  LUX_CONST_GETTER(Expression*, module_specifier, module_specifier_)
+
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+  }
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    auto n = *indent + "  ";
+    import_binding_ >>= [&](auto ib) {
+      ib->ToStringTree(&n, ss);
+    };
+    module_specifier_->ToStringTree(&n, ss);
+  }
+
+ private:
+  Maybe<Expression*> import_binding_;
+  Expression* module_specifier_;
+};
+
+class ExportDeclaration: public Statement {
+ public:
+  enum {
+    NAMESPACE_EXPORT,
+    DEFAULT_EXPORT
+  };
+
+  ExportDeclaration()
+      : Statement(Ast::EXPORT_DECLARATION) {}
+
+  LUX_CONST_GETTER(
+      bool, namespace_export, flags_.get(NAMESPACE_EXPORT))
+  LUX_CONST_GETTER(
+      bool, default_export, flags_.get(DEFAULT_EXPORT))
+  void set_namespace_export() { flags_.set(NAMESPACE_EXPORT); }
+  void set_default_export() { flags_.set(DEFAULT_EXPORT); }
+
+  LUX_CONST_PROPERTY(Maybe<Ast*>, export_clause, export_clause_)
+  LUX_CONST_PROPERTY(Maybe<Ast*>, from_clause, from_clause_)
+
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName()
+          << " type = " << (namespace_export()? "namespace" : "default")
+          << ']' << '\n';
+  }
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    auto n = *indent + "  ";
+    export_clause_ >>= [&](auto ast) { ast->ToStringTree(&n, ss); };
+    from_clause_ >>= [&](auto ast) { ast->ToStringTree(&n, ss); };
+  }
+
+ private:
+  Bitset<uint8_t> flags_;
+  Maybe<Ast*> export_clause_;
+  Maybe<Ast*> from_clause_;
+};
+
+class ExpressionStatement: public Statement {
+ public:
+  explicit ExpressionStatement(Expression* expr)
+      : Statement(Ast::EXPRESSION_STATEMENT),
+        expr_(expr) {}
+
+  LUX_CONST_GETTER(Expression*, expr, expr_)
+
+  void ToStringSelf(
+      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+  }
+  void ToStringTree(
+      std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    auto n = *indent + "  ";
+    expr_->ToStringTree(&n, ss);
+  }
+
+ private:
+  Expression* expr_;
 };
 
 class Parser {
@@ -792,8 +1251,6 @@ class Parser {
 
   Parser(Utf16String* sources, ErrorReporter* reporter);
 
-  void Parse(ParseType parse_type);
-
  private:
   class ParserState {
    public:
@@ -811,11 +1268,32 @@ class Parser {
     }
 
     bool Is(State state) const {
-      return state == state_stack_.top();
+      return state_stack_.size() > 0? state == state_stack_.top(): false;
+    }
+
+    bool is_strict_mode() const {
+      return flags_.get(0);
+    }
+
+    void set_strict_mode() {
+      flags_.set(0);
+    }
+
+    void set_implicit_octal() {
+      flags_.set(1);
+    }
+
+    void unset_implicit_octal() {
+      flags_.unset(1);
+    }
+
+    bool is_implicit_octal() {
+      return flags_.get(1);
     }
 
    private:
     std::stack<State> state_stack_;
+    Bitset<uint8_t> flags_;
   };
 
   struct TokenizerRecord {
@@ -827,24 +1305,31 @@ class Parser {
  public:
   class Tokenizer {
    public:
-    enum Flag: uint8_t {
-      HAS_LINE_BREAK_BEFORE = 0x1,
-      HAS_LINE_BREAK_AFTER = 0x2,
+    enum Flag {
+      HAS_LINE_BREAK_BEFORE,
+      HAS_LINE_BREAK_AFTER
     };
-    explicit Tokenizer(Utf16String* sources, const ParserState& parser_state)
-        : token_(Token::INVALID),
+    explicit Tokenizer(Utf16String* sources,
+                       ParserState* parser_state,
+                       ErrorReporter* reporter)
+        : current_position_(nullptr),
+          skipped_(0),
+          token_(Token::INVALID),
+          lookahead_(Token::INVALID),
           it_(sources->begin()),
           end_(sources->end()),
           sources_(sources),
-          parser_state_(parser_state) {
+          parser_state_(parser_state),
+          reporter_(reporter) {
       USE(sources_);
+      Next();
     }
 
     Token::Type Next();
 
     Token::Type Peek();
 
-    Token::Type Current();
+    Token::Type Current() const { return token_; };
 
     SourcePosition position() const {
       return position_;
@@ -855,11 +1340,11 @@ class Parser {
     }
 
     inline Utf16String Value() const {
-      return Utf16String(buffer_.data(), buffer_.size());
+      return Utf16String::FromVectorNonCopy(&buffer_);
     }
 
     inline Utf16String PeekValue() const {
-      return Utf16String(lookahead_buffer_.data(), lookahead_buffer_.size());
+      return Utf16String::FromVectorNonCopy(&lookahead_buffer_);
     }
 
     TokenizerRecord Record();
@@ -881,20 +1366,31 @@ class Parser {
 
     Token::Type TokenizeIdentifier();
 
+    Token::Type TokenizeNumericLiteral(bool period_seen);
+
     Token::Type TokenizeTemplateCharacters();
 
     Token::Type TokenizeRegExp();
 
     Token::Type GetIdentifierType();
 
+    bool SkipLineBreak();
+    bool SkipWhiteSpace();
+
     void SkipSingleLineComment();
     void SkipMultiLineComment();
 
+    void Prologue();
+    void Epilogue();
+
     Utf16CodePoint Advance(bool beginning = false);
+
+    void AdvanceAndPushBuffer();
 
     SourcePosition position_;
     SourcePosition lookahead_position_;
     SourcePosition* current_position_;
+    uint32_t skipped_;
     Token::Type token_;
     Token::Type lookahead_;
     std::vector<Utf16CodePoint> buffer_;
@@ -904,8 +1400,13 @@ class Parser {
     Utf16String::iterator end_;
     Utf16String* sources_;
     Bitset<uint8_t> flag_;
-    const ParserState& parser_state_;
+    ParserState* parser_state_;
+    ErrorReporter* reporter_;
   };
+
+  Maybe<Ast*> Parse(ParseType parse_type);
+
+  void ParseDirectivePrologue();
 
  private:
   LUX_INLINE Token::Type advance() {
@@ -916,7 +1417,7 @@ class Parser {
     return tokenizer_->Peek();
   }
 
-  LUX_INLINE Token::Type cur() {
+  LUX_INLINE Token::Type cur() const {
     return tokenizer_->Current();
   }
 
@@ -944,6 +1445,10 @@ class Parser {
     return parser_state_->Is(s);
   }
 
+  inline bool has_more() const {
+    return cur() != Token::END;
+  }
+
   void Record() {
     record_ = tokenizer_->Record();
   }
@@ -954,166 +1459,168 @@ class Parser {
 
   bool MatchStates(std::initializer_list<State> s);
 
-  Expression* ParseIdentifierReference();
-  Expression* ParseIdentifier();
-  Expression* ParseAsyncArrowBindingIdentifier();
-  Expression* ParseLabelIdentifier();
-  Expression* ParsePrimaryExpression();
-  Expression* ParseLiteral();
-  Expression* ParseCoverParenthesizedExpressionAndArrowParameterList();
-  Expression* ParseParenthesizedExpression();
-  Expression* ParseRegularExpression();
-  Expression* ParseArrayLiteral(
+ VISIBLE_FOR_TESTING:
+  Maybe<Expression*> ParseIdentifierReference();
+  Maybe<Expression*> ParseIdentifier();
+  Maybe<Expression*> ParseAsyncArrowBindingIdentifier();
+  Maybe<Expression*> ParseLabelIdentifier();
+  Maybe<Expression*> ParsePrimaryExpression();
+  Maybe<Expression*> ParseLiteral();
+  Maybe<Expression*> ParseCoverParenthesizedExpressionAndArrowParameterList();
+  Maybe<Expression*> ParseParenthesizedExpression();
+  Maybe<Expression*> ParseRegularExpression();
+  Maybe<Expression*> ParseArrayLiteral(
       Parser::Allowance a = Parser::Allowance());
-  Expression* ParseElementList();
-  Expression* ParseSpreadElement();
-  Expression* ParseObjectLiteralProperty(Parser::Allowance);
-  Expression* ParseObjectLiteral(
+  Maybe<Expression*> ParseElementList();
+  Maybe<Expression*> ParseSpreadElement();
+  Maybe<Expression*> ParseObjectLiteralProperty(Parser::Allowance);
+  Maybe<Expression*> ParseObjectLiteral(
       Parser::Allowance a = Parser::Allowance());
-  Expression* ParsePropertyDefinitionList();
-  Expression* ParsePropertyDefinition();
-  Expression* ParsePropertyName();
-  Expression* ParseCoverInitializedName();
-  Expression* ParseInitializer();
-  Expression* ParseTemplateLiteral();
-  Expression* ParseTemplateSpans();
-  Expression* ParseTemplateMiddleList();
-  Expression* ParseMemberExpression();
-  Expression* ParsePostMemberExpression(Expression* pre);
-  Expression* ParsePropertyAccessPostExpression(
+  Maybe<Expression*> ParsePropertyDefinitionList();
+  Maybe<Expression*> ParsePropertyDefinition();
+  Maybe<Expression*> ParsePropertyName();
+  Maybe<Expression*> ParseCoverInitializedName();
+  Maybe<Expression*> ParseInitializer();
+  Maybe<Expression*> ParseTemplateLiteral();
+  Maybe<Expression*> ParseTemplateSpans();
+  Maybe<Expression*> ParseTemplateMiddleList();
+  Maybe<Expression*> ParseMemberExpression();
+  Maybe<Expression*> ParsePostMemberExpression(Expression* pre);
+  Maybe<Expression*> ParsePropertyAccessPostExpression(
       Expression*, Receiver::Type, Allowance,
       bool error_if_default = false);
-  Expression* ParseSuperProperty();
-  Expression* ParseNewTarget();
-  Expression* ParseNewExpression();
-  Expression* ParseCallExpression();
-  Expression* ParseCoverCallExpressionAndAsyncArrowHead();
-  Expression* ParseCallMemberExpression();
-  Expression* ParseSuperCall();
-  Expression* ParseArguments();
-  Expression* ParseArgumentList();
-  Expression* ParseLeftHandSideExpression();
-  Expression* ParseUpdateExpression();
-  Expression* ParseUnaryExpression();
-  Expression* ParseExponentiationExpression();
-  Expression* ParseMultiplicativeExpression();
-  Expression* ParseMultiplicativeOperator();
-  Expression* ParseAdditiveExpression();
-  Expression* ParseShiftExpression();
-  Expression* ParseRelationalExpression();
-  Expression* ParseEqualityExpression();
-  Expression* ParseBitwiseANDExpression();
-  Expression* ParseBitwiseXORExpression();
-  Expression* ParseBitwiseORExpression();
-  Expression* ParseLogicalANDExpression();
-  Expression* ParseLogicalORExpression();
-  Expression* ParseConditionalExpression();
-  Expression* ParseAssignmentExpression();
-  Expression* ParseAssignmentExpressionLhs();
-  Expression* ParseAssignmentPattern();
-  Expression* ParseObjectAssignmentPattern();
-  Expression* ParseArrayAssignmentPattern();
-  Expression* ParseAssignmentPropertyList();
-  Expression* ParseAssignmentElementList();
-  Expression* ParseAssignmentElisionElement();
-  Expression* ParseAssignmentProperty();
-  Expression* ParseAssignmentElement();
-  Expression* ParseAssignmentRestElement();
-  Expression* ParseDestructuringAssignmentTarget();
-  Expression* ParseExpression();
-  Ast* ParseStatement();
-  Ast* ParseDeclaration();
-  Ast* ParseHoistableDeclaration();
-  Ast* ParseBreakableStatement();
-  Ast* ParseBlockStatement();
-  Ast* ParseBlock();
-  Ast* ParseStatementList();
-  Ast* ParseStatementListItem();
-  Ast* ParseLexicalDeclaration();
-  Ast* ParseLexicalBinding();
-  Ast* ParseVariableStatement();
-  Ast* ParseVariableDeclarationList();
-  Ast* ParseVariableDeclaration();
-  Expression* ParseBindingPattern();
-  Expression* ParseBindingElement();
-  Expression* ParseSingleNameBinding(
+  Maybe<Expression*> ParseSuperProperty();
+  Maybe<Expression*> ParseNewTarget();
+  Maybe<Expression*> ParseNewExpression();
+  Maybe<Expression*> ParseCallExpression();
+  Maybe<Expression*> ParseCoverCallExpressionAndAsyncArrowHead();
+  Maybe<Expression*> ParseCallMemberExpression();
+  Maybe<Expression*> ParseSuperCall();
+  Maybe<Expression*> ParseArguments();
+  Maybe<Expression*> ParseArgumentList();
+  Maybe<Expression*> ParseLeftHandSideExpression();
+  Maybe<Expression*> ParseUpdateExpression();
+  Maybe<Expression*> ParseUnaryExpression();
+  Maybe<Expression*> ParseExponentiationExpression();
+  Maybe<Expression*> ParseMultiplicativeExpression();
+  Maybe<Expression*> ParseMultiplicativeOperator();
+  Maybe<Expression*> ParseAdditiveExpression();
+  Maybe<Expression*> ParseShiftExpression();
+  Maybe<Expression*> ParseRelationalExpression();
+  Maybe<Expression*> ParseEqualityExpression();
+  Maybe<Expression*> ParseBitwiseANDExpression();
+  Maybe<Expression*> ParseBitwiseXORExpression();
+  Maybe<Expression*> ParseBitwiseORExpression();
+  Maybe<Expression*> ParseLogicalANDExpression();
+  Maybe<Expression*> ParseLogicalORExpression();
+  Maybe<Expression*> ParseConditionalExpression();
+  Maybe<Expression*> ParseAssignmentExpression();
+  Maybe<Expression*> ParseAssignmentExpressionLhs();
+  Maybe<Expression*> ParseAssignmentPattern();
+  Maybe<Expression*> ParseObjectAssignmentPattern();
+  Maybe<Expression*> ParseArrayAssignmentPattern();
+  Maybe<Expression*> ParseAssignmentPropertyList();
+  Maybe<Expression*> ParseAssignmentElementList();
+  Maybe<Expression*> ParseAssignmentElisionElement();
+  Maybe<Expression*> ParseAssignmentProperty();
+  Maybe<Expression*> ParseAssignmentElement();
+  Maybe<Expression*> ParseAssignmentRestElement();
+  Maybe<Expression*> ParseDestructuringAssignmentTarget();
+  Maybe<Expression*> ParseExpression();
+  Maybe<Statement*> ParseStatement();
+  Maybe<Statement*> ParseDeclaration();
+  Maybe<Statement*> ParseHoistableDeclaration();
+  Maybe<Statement*> ParseBreakableStatement();
+  Maybe<Statement*> ParseBlockStatement();
+  Maybe<Statement*> ParseBlock();
+  Maybe<Statement*> ParseStatementList();
+  Maybe<Statement*> ParseStatementListItem();
+  Maybe<Statement*> ParseLexicalDeclaration();
+  Maybe<Statement*> ParseLexicalBinding();
+  Maybe<Statement*> ParseVariableStatement();
+  Maybe<Statement*> ParseVariableDeclarationList();
+  Maybe<Statement*> ParseVariableDeclaration();
+  Maybe<Expression*> ParseBindingPattern();
+  Maybe<Expression*> ParseBindingElement();
+  Maybe<Expression*> ParseSingleNameBinding(
       Parser::Allowance a = Parser::Allowance());
-  Expression* ParseBindingRestElement();
-  Ast* ParseExpressionStatement();
-  Ast* ParseIfStatement();
-  Ast* ParseIterationStatement();
-  Ast* ParseForDeclaration();
-  Ast* ParseForBinding();
-  Ast* ParseContinueStatement();
-  Ast* ParseBreakStatement();
-  Ast* ParseReturnStatement();
-  Ast* ParseWithStatement();
-  Ast* ParseSwitchStatement();
-  Ast* ParseCaseBlock();
-  Ast* ParseCaseClauses();
-  Ast* ParseCaseClause();
-  Ast* ParseDefaultClause();
-  Ast* ParseLabelledStatement();
-  Ast* ParseLabelledItem();
-  Ast* ParseThrowStatement();
-  Ast* ParseTryStatement();
-  Ast* ParseCatch();
-  Ast* ParseFinally();
-  Ast* ParseCatchParameter();
-  Ast* ParseDebuggerStatement();
-  Ast* ParseFunctionDeclaration();
-  Expression* ParseFunctionExpression();
-  Expression* ParseFormalParameters();
-  Expression* ParseFormalParameterList();
-  Expression* ParseFunctionRestParameter();
-  Statement* ParseFunctionBody();
-  Ast* ParseFunctionStatementList();
-  Expression* ParseArrowFunction();
-  Expression* ParseArrowParameters();
-  Ast* ParseConciseBody();
-  Expression* ParseArrowFormalParameters();
-  Expression* ParseAsyncArrowFunction();
-  Ast* ParseAsyncConciseBody();
-  Ast* ParseAsyncArrowHead();
-  Expression* ParseMethodDefinition();
-  Expression* ParsePropertySetParameterList();
-  Expression* ParseGeneratorMethod();
-  Ast* ParseGeneratorDeclaration();
-  Expression* ParseGeneratorExpression();
-  Ast* ParseGeneratorBody();
-  Expression* ParseYieldExpression();
-  Expression* ParseAsyncMethod();
-  Ast* ParseAsyncFunctionDeclaration();
-  Expression* ParseAsyncFunctionExpression();
-  Ast* ParseAsyncFunctionBody();
-  Expression* ParseAwaitExpression();
-  Ast* ParseClassDeclaration();
-  Expression* ParseClassExpression();
-  Ast* ParseClassTail();
-  Ast* ParseClassHeritage();
-  Ast* ParseClassBody();
-  Ast* ParseClassElementList();
-  Ast* ParseClassElement();
-  Ast* ParseScript();
-  Ast* ParseScriptBody();
-  Ast* ParseModule();
-  Ast* ParseModuleBody();
-  Ast* ParseModuleItemList();
-  Ast* ParseModuleItem();
-  Ast* ParseImportDeclaration();
-  Ast* ParseImportClause();
-  Ast* ParseImportedDefaultBinding();
-  Ast* ParseNameSpaceImport();
-  Ast* ParseNamedImports();
-  Ast* ParseFromClause();
-  Ast* ParseImportsList();
-  Ast* ParseImportSpecifier();
-  Ast* ParseModuleSpecifier();
-  Ast* ParseImportedBinding();
-  Ast* ParseExportDeclaration();
-  Ast* ParseExportClause();
-  Ast* ParseExportsList();
-  Ast* ParseExportSpecifier();
+  Maybe<Expression*> ParseBindingRestElement();
+  Maybe<Statement*> ParseExpressionStatement();
+  Maybe<Statement*> ParseIfStatement();
+  Maybe<Statement*> ParseIterationStatement();
+  Maybe<Statement*> ParseForDeclaration();
+  Maybe<Statement*> ParseForBinding();
+  Maybe<Statement*> ParseContinueStatement();
+  Maybe<Statement*> ParseBreakStatement();
+  Maybe<Statement*> ParseReturnStatement();
+  Maybe<Statement*> ParseWithStatement();
+  Maybe<Statement*> ParseSwitchStatement();
+  Maybe<Statement*> ParseCaseBlock();
+  Maybe<Statement*> ParseCaseClauses();
+  Maybe<Statement*> ParseCaseClause();
+  Maybe<Statement*> ParseDefaultClause();
+  Maybe<Statement*> ParseLabelledStatement();
+  Maybe<Statement*> ParseLabelledItem();
+  Maybe<Statement*> ParseThrowStatement();
+  Maybe<Statement*> ParseTryStatement();
+  Maybe<Statement*> ParseCatch();
+  Maybe<Statement*> ParseFinally();
+  Maybe<Statement*> ParseCatchParameter();
+  Maybe<Statement*> ParseDebuggerStatement();
+  Maybe<Statement*> ParseFunctionDeclaration();
+  Maybe<Expression*> ParseFunctionExpression();
+  Maybe<Expression*> ParseFormalParameters();
+  Maybe<Expression*> ParseFormalParameterList();
+  Maybe<Expression*> ParseFunctionRestParameter();
+  Maybe<Statement*> ParseFunctionBody();
+  Maybe<Ast*> ParseFunctionStatementList();
+  Maybe<Expression*> ParseArrowFunction();
+  Maybe<Expression*> ParseArrowParameters();
+  Maybe<Ast*> ParseConciseBody();
+  Maybe<Expression*> ParseArrowFormalParameters();
+  Maybe<Expression*> ParseAsyncArrowFunction();
+  Maybe<Ast*> ParseAsyncConciseBody();
+  Maybe<Ast*> ParseAsyncArrowHead();
+  Maybe<Expression*> ParseMethodDefinition();
+  Maybe<Expression*> ParsePropertySetParameterList();
+  Maybe<Expression*> ParseGeneratorMethod();
+  Maybe<Ast*> ParseGeneratorDeclaration();
+  Maybe<Expression*> ParseGeneratorExpression();
+  Maybe<Ast*> ParseGeneratorBody();
+  Maybe<Expression*> ParseYieldExpression();
+  Maybe<Expression*> ParseAsyncMethod();
+  Maybe<Ast*> ParseAsyncFunctionDeclaration();
+  Maybe<Expression*> ParseAsyncFunctionExpression();
+  Maybe<Ast*> ParseAsyncFunctionBody();
+  Maybe<Expression*> ParseAwaitExpression();
+  Maybe<Ast*> ParseClassDeclaration();
+  Maybe<Expression*> ParseClassExpression();
+  Maybe<Ast*> ParseClassTail();
+  Maybe<Ast*> ParseClassHeritage();
+  Maybe<Ast*> ParseClassBody();
+  Maybe<Ast*> ParseClassElementList();
+  Maybe<Ast*> ParseClassElement();
+  Maybe<Ast*> ParseScript();
+  Maybe<Statement*> ParseModule();
+  Maybe<Statement*> ParseModuleBody();
+  Maybe<Statement*> ParseModuleItem();
+  Maybe<Statement*> ParseImportDeclaration();
+  Maybe<Expression*> ParseNameSpaceImport();
+  Maybe<Expression*> ParseNamedImports();
+  Maybe<Statement*> ParseExportDeclaration();
+  Maybe<Expression*> ParseExportClause();
+  Maybe<Expression*> ParseNamedList();
+
+ private:
+  template <typename T, typename ...Args>
+  Expression* NewExpression(Args... args) {
+    return new(zone()) T(args...);
+  }
+
+  template <typename T, typename ...Args>
+  Statement* NewStatement(Args... args) {
+    return new(zone()) T(args...);
+  }
 
   LUX_INLINE bool IsAssignmentOperator(Token::Type token) {
     return Token::OneOf(token, {
@@ -1150,10 +1657,16 @@ class Parser {
       SYMBOL_TOKEN_LIST(CASE)
       KEYWORD_TOKEN_LIST(CASE, GROUP_DUMMY_)
 #undef CASE
-#define LITERAL_CASE(T, v) case Token::T :
+#define LITERAL_CASE(T, v)                                          \
+        case Token::T : {                                           \
+          std::stringstream st;                                     \
+          st << #T << "[value = " << value().ToUtf8String() << "]"; \
+          return st.str();                                          \
+        }
       LITERAL_TOKEN_LIST(LITERAL_CASE)
-        return value().ToUtf8String();
 #undef LITERAL_CASE
+      case Token::END:
+        return "End";
       default:
         return std::string("Invalid");
     }
@@ -1183,6 +1696,7 @@ class Parser {
   std::string indent_;
 #endif
 
+  Maybe<Ast*> result_;
   TokenizerRecord record_;
   LazyInitializer<ParserState> parser_state_;
   LazyInitializer<Tokenizer> tokenizer_;

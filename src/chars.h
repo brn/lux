@@ -20,33 +20,42 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <gtest/gtest.h>
-#include "../utils/compare_node.h"
-#include "../../src/heap.h"
-#include "../utils/isolate_setup.h"
-#include "../../src/regexp.h"
-#include "../../src/unicode.h"
-#include "../../src/vm.h"
+#ifndef SRC_CHARS_H_
+#define SRC_CHARS_H_
 
-class RegExpBytecodeTest: public lux::IsolateSetup {
- protected:
-  template <bool error = false, bool show_error = false>
-  void RunTest(const char* regexp, const char* input, uint8_t flag) {
-    lux::HandleScope scope;
-    lux::ErrorReporter er;
-    lux::SourcePosition sp;
-    lux::regexp::Compiler compiler(isolate_, &er, &sp);
-    auto jsregexp = compiler.Compile(regexp, flag);
-    printf("%s\n", jsregexp->code()->ToString().c_str());
-    auto ret = jsregexp->Match(isolate_, *lux::JSString::New(isolate_, input));
-    printf("%s\n", ret->ToString().c_str());
+#include "./utils.h"
+
+namespace lux {
+
+class Chars {
+ public:
+  LUX_INLINE static bool IsAscii(u32 c) {
+    return c > 0 && c < 127;
+  }
+
+  LUX_INLINE static bool IsWhiteSpace(u32 c) {
+    return IsAscii(c) &&
+    (c == u32(0x09) ||
+     c == u32(0x0b) ||
+     c == u32(0x0c) ||
+     c == u32(0x20) ||
+     c == u32(255) ||
+     c == u32(0x2028) ||
+     c == u32(0x1680) ||
+     c == u32(0x180E) ||
+     (c >= u32(0x2000) && c <= u32(0x200A)) ||
+     c == u32(0x2028) ||
+     c == u32(0x2029) ||
+     c == u32(0x202F) ||
+     c == u32(0x205F) ||
+     c == u32(0x3000));
+  }
+
+  LUX_INLINE static bool IsUtfSignature(u32 c) {
+    return c == u32(0xFEFF);
   }
 };
 
+}  // namespace lux
 
-namespace {
-TEST_F(RegExpBytecodeTest, Simple) {
-  RunTest("abc(abc)", "abcabcabc", lux::regexp::Flag::kNone);
-  //  RunTest("<.*?>", "<<<foo>>>", lux::regexp::Flag::kNone);
-}
-}
+#endif  // SRC_CHARS_H_

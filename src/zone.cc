@@ -23,6 +23,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <utility>
+#include "./alloc.h"
 #include "./zone.h"
 
 namespace lux {
@@ -50,18 +51,17 @@ Address ZoneAllocator::Chunk::Allocate(size_t size) {
 }
 
 void ZoneAllocator::Chunk::AllocateInternal() {
-  top_ = addr_ = new byte[kDefaultSize];
+  top_ = addr_ = AllocArray<byte>(kDefaultSize);
 #ifdef DEBUG
   memset(addr_, 0xCE, size_);
 #endif
 }
 
 Address ZoneAllocator::Allocate(size_t size) {
-  size_t allocate_size = kDefaultSize;
   if (size > kDefaultSize) {
     Grow(size);
   }
-  auto target_size = LUX_ALIGN_OFFSET(allocate_size, kAlignment);
+  auto target_size = LUX_ALIGN_OFFSET(size, kAlignment);
   if (chunk_->HasEnoughCapacity(target_size)) {
     return chunk_->Allocate(target_size);
   }

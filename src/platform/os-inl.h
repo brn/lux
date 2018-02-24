@@ -32,6 +32,8 @@
 #include <utime.h>
 #endif
 
+#include "../alloc.h"
+
 namespace lux {
 
 #ifdef _WIN32
@@ -93,7 +95,7 @@ void GetEnv(std::basic_string<T, std::char_traits<Traits>, Allocator> *buf,
   size_t size = 0;
   char buffer[1];
   getenv_s(&size, buffer, 1, env);
-  char* tmp = new char[size + 1];
+  char* tmp = AllocArray<char>(size + 1);
   getenv_s(&size, tmp, size, env);
   buf->assign(tmp);
   delete[] tmp;

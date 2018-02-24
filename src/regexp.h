@@ -615,6 +615,28 @@ class Parser {
   ZoneAllocator zone_allocator_;
 };
 
+#define REGEXP_FLAG_LIST(A)                     \
+  A(Multiline, 0x1)                             \
+  A(Global, 0x2)                                \
+  A(IgnoreCase, 0x4)                            \
+  A(Sticky, 0x8)
+
+struct Flag {
+  enum Type: uint8_t {
+    kNone,
+#define REGEXP_DEF_FLAG(Flag, v) k##Flag = v,
+      REGEXP_FLAG_LIST(REGEXP_DEF_FLAG)
+#undef REGEXP_DEF_FLAG
+  };
+
+#define FLAG_CHECK(Name, _)                     \
+  inline static bool Is##Name(uint8_t flag) {   \
+    return (flag & k##Name) == k##Name;         \
+  }
+  REGEXP_FLAG_LIST(FLAG_CHECK)
+#undef FLAG_CHECK
+};
+
 class Compiler {
  public:
   Compiler(Isolate* isolate,
@@ -624,7 +646,7 @@ class Compiler {
         error_reporter_(error_reporter),
         sp_(sp) {}
 
-  Handle<JSRegExp> Compile(const char* source);
+  Handle<JSRegExp> Compile(const char* source, uint8_t flag);
 
  private:
   Isolate* isolate_;

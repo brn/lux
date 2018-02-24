@@ -359,6 +359,7 @@ class Utf16String {
             std::shared_ptr<const Utf16CodePoint>(utf16_codepoint)) {}
 
   static Utf16String FromVector(const std::vector<Utf16CodePoint>& v);
+  static Utf16String FromVectorNonCopy(const std::vector<Utf16CodePoint>* v);
 
   LUX_INLINE const Utf16CodePoint* data() const {
     return utf16_codepoint_.get();
@@ -388,7 +389,9 @@ class Utf16String {
     return end();
   }
 
-  bool IsAsciiEqual(const char* ascii) const;
+  Utf16String Clone();
+
+  bool IsAsciiEqual(const char* ascii, int start = 0, int end = -1) const;
 
   LUX_INLINE int32_t size() const {return size_;}
 

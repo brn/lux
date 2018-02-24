@@ -62,6 +62,7 @@ class ErrorDescriptor {
   bool ignore_;
   SourcePosition source_position_;
   std::stringstream error_message_;
+  std::string cached_error_message_;
 };
 
 class ErrorReporter {

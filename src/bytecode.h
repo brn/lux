@@ -684,7 +684,7 @@ class BytecodeBuilder {
  public:
   explicit BytecodeBuilder(Isolate* isolate,
                            ZoneAllocator* zone_allocator)
-      : isolate_(isolate), zone_allocator_(zone_allocator) {
+      : zone_allocator_(zone_allocator) {
     bytecode_array_writer_(isolate, zone_allocator);
   }
 
@@ -722,7 +722,6 @@ class BytecodeBuilder {
     return zone_allocator_;
   }
 
-  Isolate* isolate_;
   ZoneAllocator* zone_allocator_;
   LazyInitializer<BytecodeArrayWriter> bytecode_array_writer_;
   RegisterAllocator register_allocator_;

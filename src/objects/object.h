@@ -23,6 +23,7 @@
 #ifndef SRC_OBJECTS_OBJECT_H_
 #define SRC_OBJECTS_OBJECT_H_
 
+#include <string>
 #include <stdint.h>
 #include "../utils.h"
 

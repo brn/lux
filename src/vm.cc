@@ -24,6 +24,7 @@
 #include "./vm.h"
 #include "./objects/object.h"
 #include "./isolate.h"
+#include "./regexp.h"
 #include "./utils.h"
 
 namespace lux {
@@ -170,8 +171,8 @@ REGEX_HANDLER(RegexRune) {
       }
       return exec->store_flag(Smi::FromInt(0));
     }
-  } while(exec->is_advanceable()
-          && exec->is_search_enabled());
+  } while (exec->is_advanceable()
+           && exec->is_search_enabled());
 
   exec->store_flag(Smi::FromInt(0));
 }
@@ -247,11 +248,13 @@ REGEX_HANDLER(RegexEvery) {
         return exec->store_flag(Smi::FromInt(0));
       }
     }
+    goto RET;
  NEXT:
     USE(0);
-  } while(exec->is_advanceable()
+  } while (exec->is_advanceable()
           && exec->is_search_enabled());
 
+RET:
   exec->store_flag(Smi::FromInt(1));
 }
 
@@ -391,6 +394,8 @@ HANDLER(CallFastPropertyA) {
     case FastProperty::kLength:
       exec->store_register_value_at(output,
                                     JSObject::GetLength(isolate, obj));
+    default:
+      return;
   }
 }
 
@@ -437,7 +442,7 @@ HANDLER(LoadIx) {
       case InstanceType::JS_STRING: {
         auto ret = JSString::Cast(v)->at(index);
         Object* v = nullptr;
-        if (ret < Smi::kMaxValue) {
+        if (Smi::IsFit(ret)) {
           v = Smi::FromInt(ret);
         } else {
           v = JSNumber::NewWithoutHandle(isolate, ret);
@@ -588,35 +593,92 @@ void VirtualMachine::Executor::Execute() {
   }
 }
 
+JSString* VirtualMachine::RegexExecutor::SliceMatchedInput(uint32_t start) {
+  auto end = current_thread()->position();
+  if (start == 0 && end == input()->length()) {
+    return input();
+  }
+  return *input()->Slice(isolate_, start, end);
+}
+
+void VirtualMachine::RegexExecutor::FixInterCaptured() {
+  if (is_global()) {
+    matched_words_.push_back(
+        SliceMatchedInput(current_thread()->start_position()));
+  } else {
+    for (auto &c : captured_stack_) {
+      auto str = input_->Slice(isolate_, c->start(), c->end());
+      matched_words_.push_back(*str);
+    }
+  }
+}
+
 Handle<JSArray> VirtualMachine::RegexExecutor::FixCaptured() {
   auto arr = JSArray::NewEmptyArray(isolate_, 0);
-  auto end = current_thread()->position();
-
-  if (end == input()->length()) {
-    arr->Push(isolate_, input());
-  } else {
-    arr->Push(isolate_, *input()->Slice(isolate_, 0, end));
+  if (!is_global()) {
+    arr->Push(isolate_, SliceMatchedInput());
   }
-
-  for (auto &c : captured_stack_) {
-    std::cout << c->start() << c->end() << std::endl;
-    auto str = input_->Slice(isolate_, c->start(), c->end());
-    arr->Push(isolate_, *str);
+  if (matched_words_.size() == 0) {
+    for (auto &c : captured_stack_) {
+      auto str = input_->Slice(isolate_, c->start(), c->end());
+      arr->Push(isolate_, *str);
+    }
+  } else {
+    for (auto &str : matched_words_) {
+      arr->Push(isolate_, str);
+    }
   }
   return arr;
 }
 
 Object* VirtualMachine::ExecuteRegex(BytecodeExecutable* executable,
                                      JSString* input,
+                                     uint8_t flag,
                                      bool collect_matched_word) {
   RegexExecutor exec(
       isolate_, input, collect_matched_word, executable);
+  if (regexp::Flag::IsMultiline(flag)) {
+    exec.set_multiline();
+  }
+  if (regexp::Flag::IsGlobal(flag)) {
+    exec.set_global();
+  }
+  if (regexp::Flag::IsIgnoreCase(flag)) {
+    exec.set_ignore_case();
+  }
+  if (regexp::Flag::IsSticky(flag)) {
+    exec.set_sticky();
+  }
   exec.Execute();
   exec.PrintLog();
   return !collect_matched_word?
     reinterpret_cast<Object*>(
         exec.is_matched()? isolate_->jsval_true(): isolate_->jsval_false())
-    : reinterpret_cast<Object*>(exec.captured_array());
+    : exec.captured_array();
+}
+
+bool VirtualMachine::RegexExecutor::PrepareNextMatch() {
+  auto is_advanceable
+    = input_->length() > (current_thread()->position() - 1);
+  if (is_global() && is_advanceable) {
+    if (load_flag()->value() && collect_matched_word()) {
+      FixInterCaptured();
+    }
+    current_thread()->set_position(
+        current_thread()->position() + 1);
+    Reset();
+    return true;
+  } else if (!is_matched()
+             && (is_retryable() || is_multiline())
+             && is_advanceable) {
+    auto next = FindNextPosition();
+    if (next == -1) {
+      return false;
+    }
+    Reset();
+    current_thread()->set_position(next);
+  }
+  return false;
 }
 
 void VirtualMachine::RegexExecutor::Execute() {
@@ -658,25 +720,17 @@ Label_Retry:
   REGEX_BYTECODE_LIST_WITOUT_MATCHED(VM_EXECUTE)
 #undef VM_EXECUTE
   Label_Failed: {
-    unset_matched();
-    if (is_retryable() &&
-        input_->length() > current_thread()->position()) {
-      auto next = current_thread()->position() + 1;
-      ClearAllThread();
-      ClearCapture();
-      fetcher_->UpdatePC(0);
-      NewThread(0);
-      PopThread();
-      current_thread()->set_position(next);
+    if (PrepareNextMatch()) {
       goto Label_Retry;
     }
     return;
   }
   Label_Matched: {
     set_matched();
-    if (collect_matched_word()) {
-      captured_array_ = *FixCaptured();
+    if (PrepareNextMatch()) {
+      goto Label_Retry;
     }
+    captured_array_ = *FixCaptured();
     //  DO NOTHING
   }
 }

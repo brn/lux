@@ -63,12 +63,12 @@ Address Heap::Allocate(size_t size) {
 //     }
 //     Grow();
 //   }
-  return reinterpret_cast<Address>(malloc(size));
+  return AllocArray<byte>(size);
 }
 
 Heap* Heap::GetHeap() {
   if (heap_ == nullptr) {
-    heap_ = new Heap(kDefaultSize);
+    heap_ = Alloc<Heap>(kDefaultSize);
   }
   return heap_;
 }

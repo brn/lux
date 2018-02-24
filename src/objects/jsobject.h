@@ -311,19 +311,27 @@ class JSRegExp: public HeapObject {
  public:
   enum {
     kOffset = HeapObject::kHeapObjectOffset,
-    kCodeOffset = kOffset,
+    kFlagOffset = kOffset,
+    kFlagSize = sizeof(uint8_t),
+    kCodeOffset = kFlagOffset + kFlagSize,
     kCodeSize = kPointerSize,
     kSize = kCodeOffset + kCodeSize,
   };
-  static Handle<JSRegExp> New(Isolate* isolate, BytecodeExecutable* executable);
+  static Handle<JSRegExp> New(
+      Isolate* isolate, BytecodeExecutable* executable, uint8_t flag);
   static JSRegExp* NewWithoutHandle(
-      Isolate* isolate, BytecodeExecutable* executable);
+      Isolate* isolate, BytecodeExecutable* executable, uint8_t flag);
 
   JSSpecials* Test(Isolate* isolate, JSString*);
   JSArray* Match(Isolate* isolate, JSString*);
 
   BytecodeExecutable* code() const {
     return *FIELD_PROPERTY(BytecodeExecutable**, this, kCodeOffset);
+  }
+
+ private:
+  inline uint8_t flag() const {
+    return *FIELD_PROPERTY(uint8_t*, this, kFlagOffset);
   }
 };
 
