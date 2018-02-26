@@ -27,7 +27,6 @@
 #include "./alloc.h"
 #include "./chars.h"
 #include "./parser.h"
-#include "./reporter.h"
 
 namespace lux {
 #define BASE_REPORT_SYNTAX_ERROR_(parser)                               \
@@ -35,12 +34,14 @@ namespace lux {
   (reporter_->ReportSyntaxError(e))
 
 #ifdef DEBUG
-#define REPORT_TOKENIZER_ERROR(parser, message) { \
-    BASE_REPORT_SYNTAX_ERROR_(parser)             \
-      << "\n [Debug] line:" << __LINE__           \
-      << ' ' << __FUNCTION__ << "\n" << message;  \
-    return Token::INVALID;                        \
+#define REPORT_TOKENIZER_ERROR_NO_RETURN(parser, message) { \
+    BASE_REPORT_SYNTAX_ERROR_(parser)                       \
+      << "\n [Debug] line:" << __LINE__                     \
+      << ' ' << __FUNCTION__ << "\n" << message;            \
   }
+#define REPORT_TOKENIZER_ERROR(parser, message) \
+  BASE_REPORT_SYNTAX_ERROR_(parser);            \
+  return Token::INVALID;
 #define REPORT_SYNTAX_ERROR_NO_RETURN(parser, message) {  \
     BASE_REPORT_SYNTAX_ERROR_(parser)                     \
       << "\n [Debug] line:" << __LINE__                   \
@@ -89,6 +90,8 @@ static Elision kElision;
 void Parser::Tokenizer::Prologue() {
   current_position_->set_start_col(
       current_position_->end_col());
+  current_position_->set_end_col(
+      current_position_->end_col());
   unset_linebreak_before();
   parser_state_->unset_implicit_octal();
   while (1) {
@@ -122,16 +125,18 @@ void Parser::Tokenizer::Epilogue() {
 Token::Type Parser::Tokenizer::Next() {
   current_buffer_ = &buffer_;
   current_position_ = &position_;
-  if (end_ == it_) {
+  if (!HasMore()) {
     return token_ = Token::END;
   }
   if (lookahead_ != Token::INVALID) {
     token_ = lookahead_;
     lookahead_ = Token::INVALID;
+    buffer_ = lookahead_buffer_;
+    position_ = lookahead_position_;
     return token_;
   }
   Prologue();
-  token_ = Tokenize(Advance(true));
+  token_ = Tokenize();
   Epilogue();
   return token_;
 }
@@ -139,22 +144,20 @@ Token::Type Parser::Tokenizer::Next() {
 Token::Type Parser::Tokenizer::Peek() {
   current_buffer_ = &lookahead_buffer_;
   current_position_ = &lookahead_position_;
-  if (end_ == it_) {
+  if (!HasMore()) {
     return lookahead_ = Token::END;
   }
   if (lookahead_ != Token::INVALID) {
     return lookahead_;
   }
   Prologue();
-  lookahead_ = Tokenize(Advance(true));
+  lookahead_ = Tokenize();
   Epilogue();
   return lookahead_;
 }
 
-Utf16CodePoint Parser::Tokenizer::Advance(bool beginning) {
-  if (!beginning) {
-    ++it_;
-  }
+Utf16CodePoint Parser::Tokenizer::Advance() {
+  ++it_;
   current_position_->set_end_col(position_.end_col() + 1);
   return *it_;
 }
@@ -218,30 +221,37 @@ u32 ToHexValue(Utf16CodePoint uchar) {
   return ret;
 }
 
-Utf16CodePoint DecodeHexEscape(
-    Utf16String::iterator* it, bool* ok, int len = 4) {
-  auto unicode_hex_start = **it;
+Utf16CodePoint Parser::Tokenizer::DecodeHexEscape(bool* ok, int len) {
+  auto unicode_hex_start = *it_;
   u32 ret = 0;
   if (unicode_hex_start == '{') {
-    while (**it != '}' && **it != Unicode::InvalidCodePoint()) {
-      ret = ret * 16 + ToHexValue(**it);
+    Advance();
+    while (*it_ != '}' && *it_ != Unicode::InvalidCodePoint()) {
+      ret = ret * 16 + ToHexValue(*it_);
+      Advance();
+    }
+    if (*it_ != '}') {
+      REPORT_TOKENIZER_ERROR_NO_RETURN(this, "'}' expected.");
+    } else {
+      Advance();
     }
   } else {
     for (int i = 0; i < len; i++) {
-      if (IsHexDigit(**it)) {
-        ret = ret * 16 + ToHexValue(**it);
+      if (IsHexDigit(*it_)) {
+        ret = ret * 16 + ToHexValue(*it_);
       } else {
         *ok = false;
         return Utf16CodePoint(0);
       }
+      Advance();
     }
   }
 
   return Utf16CodePoint(ret);
 }
 
-Utf16CodePoint DecodeAsciiEscapeSequence(Utf16String::iterator* it, bool* ok) {
-  auto u = DecodeHexEscape(it, ok, 2);
+Utf16CodePoint Parser::Tokenizer::DecodeAsciiEscapeSequence(bool* ok) {
+  auto u = DecodeHexEscape(ok, 2);
   if (u > 127) {
     *ok = false;
   }
@@ -249,17 +259,13 @@ Utf16CodePoint DecodeAsciiEscapeSequence(Utf16String::iterator* it, bool* ok) {
   return u;
 }
 
-Token::Type Parser::Tokenizer::Tokenize(Utf16CodePoint start_value) {
+Token::Type Parser::Tokenizer::Tokenize() {
   INVALIDATE(current_position_);
-  current_position_->set_start_col(current_position_->end_col() + 1);
-  current_position_->set_start_line_number(
-      current_position_->end_line_number());
-
   if (parser_state_->Is(State::IN_TEMPLATE_LITERAL)) {
     return TokenizeTemplateCharacters();
   }
 
-  switch (start_value.code()) {
+  switch (*it_) {
     case '(':
       return Token::LEFT_PAREN;
     case ')':
@@ -284,12 +290,12 @@ Token::Type Parser::Tokenizer::Tokenize(Utf16CodePoint start_value) {
       if (*it_ == '/') {
         Advance();
         SkipSingleLineComment();
-        return Tokenize(Advance(true));
+        return Tokenize();
       }
       if (*it_ == '*') {
         Advance();
         SkipMultiLineComment();
-        return Tokenize(Advance(true));
+        return Tokenize();
       }
       if (parser_state_->Is(State::EXPECTED_BINARY_OPERATOR)) {
         if (*it_ == '=') {
@@ -387,6 +393,7 @@ Token::Type Parser::Tokenizer::Tokenize(Utf16CodePoint start_value) {
     case '!':
       return Token::OP_NOT;
     case ';':
+      Advance();
       return Token::TERMINATE;
     case ':':
       return Token::COLON;
@@ -405,10 +412,10 @@ Token::Type Parser::Tokenizer::Tokenize(Utf16CodePoint start_value) {
         }
       }
     default:
-      if (IsDecimalDigit(start_value)) {
+      if (IsDecimalDigit(*it_)) {
         return TokenizeNumericLiteral(false);
       }
-      if (IsIdentifierStart(start_value)) {
+      if (IsIdentifierStart(*it_)) {
         return TokenizeIdentifier();
       }
   }
@@ -428,58 +435,72 @@ bool IsStartEscapeSequence(Utf16String::iterator* it) {
   return IsStartUnicodeEscapeSequence(**it) || IsStartAsciiEscapeSequence(**it);
 }
 
-Utf16CodePoint DecodeEscapeSequence(Utf16String::iterator* it, bool* ok) {
-  INVALIDATE(**it == '\\');
-  (*it)++;  // Consume u or x
-  auto lookahead = (*it) + 1;
-  if (IsStartUnicodeEscapeSequence(*lookahead)) {
-    (*it)++;
-    (*it)++;
-    return DecodeHexEscape(it, ok);
-  } else if (IsStartAsciiEscapeSequence(*lookahead)) {
-    (*it)++;
-    return DecodeAsciiEscapeSequence(it, ok);
+Utf16CodePoint Parser::Tokenizer::DecodeEscapeSequence(bool* ok) {
+  INVALIDATE(*it_ == '\\');
+  ++it_;  // Consume backslash
+
+  Utf16CodePoint result = Unicode::InvalidCodePoint();
+  if (IsStartUnicodeEscapeSequence(*it_)) {
+    it_++;
+    result = DecodeHexEscape(ok);
+  } else if (IsStartAsciiEscapeSequence(*it_)) {
+    it_++;
+    result = DecodeAsciiEscapeSequence(ok);
+  } else {
+    *ok = false;
   }
 
-  return Unicode::InvalidCodePoint();
+  return result;
 }
 
 Token::Type Parser::Tokenizer::TokenizeStringLiteral() {
   current_buffer_->clear();
   auto value = *it_;
-  current_buffer_->push_back(value);
   u8 start = value.code();
+  Advance();
+
   bool escaped = false;
-  while (1) {
-    Advance(false);
+  while (HasMore()) {
     value = *it_;
-    current_buffer_->push_back(value);
     switch (value.code()) {
       case '\\':
         if (!escaped) {
           auto lookahead = it_ + 1;
           if (IsStartEscapeSequence(&lookahead)) {
             bool ok = true;
-            value = DecodeEscapeSequence(&it_, &ok);
+            value = DecodeEscapeSequence(&ok);
             if (!ok) {
               return Token::INVALID;
             }
+          } else {
+            escaped = true;
+            Advance();
+            break;
           }
+        } else {
+          Advance();
         }
-        escaped = !escaped;
+        escaped = false;
+        current_buffer_->push_back(value);
         break;
       case 0:
         return Token::INVALID;
       default:
         if (value == start) {
           if (!escaped) {
+            Advance();
             return Token::STRING_LITERAL;
           }
         }
-        // Nothing to do.
+        if (escaped) {
+          escaped = false;
+        }
+        current_buffer_->push_back(value);
+        Advance();
     }
   }
-  Advance();
+
+  return Token::INVALID;
 }
 
 Token::Type Parser::Tokenizer::TokenizeIdentifier() {
@@ -495,7 +516,7 @@ Token::Type Parser::Tokenizer::TokenizeIdentifier() {
       if (unicode_keyword == 'u') {
         Advance();
         bool ok = true;
-        value = DecodeHexEscape(&it_, &ok);
+        value = DecodeHexEscape(&ok);
         if (!ok) {
           return Token::INVALID;
         }
@@ -621,7 +642,6 @@ Token::Type Parser::Tokenizer::TokenizeNumericLiteral(bool period_seen) {
     }
   }
 
-  Advance();
   return Token::NUMERIC_LITERAL;
 }
 
@@ -681,7 +701,7 @@ Token::Type Parser::Tokenizer::TokenizeTemplateCharacters() {
           auto lookahead = it_ + 1;
           if (IsStartEscapeSequence(&lookahead)) {
             bool ok = true;
-            value = DecodeEscapeSequence(&it_, &ok);
+            value = DecodeEscapeSequence(&ok);
             if (!ok) {
               return Token::INVALID;
             }
@@ -700,7 +720,7 @@ Token::Type Parser::Tokenizer::TokenizeTemplateCharacters() {
         return Token::TEMPLATE_CHARACTERS;
     }
     current_buffer_->push_back(value);
-    Advance(false);
+    Advance();
     value = *it_;
   }
 }
@@ -720,7 +740,7 @@ Token::Type Parser::Tokenizer::TokenizeRegExp() {
         }
         continue;
     }
-    Advance(false);
+    Advance();
     value = *it_;
   }
 }
@@ -825,14 +845,20 @@ bool Parser::MatchStates(std::initializer_list<State> states) {
 
 Maybe<Ast*> Parser::Parse(ParseType parse_type) {
   ParseDirectivePrologue();
+  Maybe<Ast*> result;
   if (reporter_->HasPendingError()) {
     return Nothing<Ast*>();
   }
   if (parse_type == ParseType::SCRIPT) {
-    return ParseScript();
+    result = ParseScript();
+  } else {
+    INVALIDATE(parse_type == ParseType::MODULE);
+    result = ParseModule();
   }
-  INVALIDATE(parse_type == ParseType::MODULE);
-  return ParseModule();
+  if (reporter_->HasPendingError()) {
+    return Nothing<Ast*>();
+  }
+  return result;
 }
 
 #ifdef DEBUG
@@ -893,6 +919,20 @@ Maybe<Ast*> Parser::Parse(ParseType parse_type) {
 #define EXIT_PARSING
 #endif
 
+template <typename T>
+Maybe<T*> Parser::ParseTerminator(T* expr) {
+  ENTER_PARSING
+  if (cur() == Token::TERMINATE) {
+    advance();
+    return Just(expr);
+  } else if (cur() != Token::END && !has_linebreak_after()) {
+    REPORT_SYNTAX_ERROR(T*, this, "';' expected.");
+  }
+
+  return Just(expr);
+  EXIT_PARSING;
+}
+
 Maybe<Ast*> Parser::ParseScript() {
   ENTER_PARSING
   return ParseStatementList();
@@ -900,10 +940,9 @@ Maybe<Ast*> Parser::ParseScript() {
 }
 
 void Parser::ParseDirectivePrologue() {
-  static const char* kUseStrict = " use strict ";
-  static const size_t kUseStrictLength = strlen(kUseStrict);
+  static const char* kUseStrict = "use strict";
   if (cur() == Token::STRING_LITERAL
-      && value().IsAsciiEqual(kUseStrict, 1, kUseStrictLength - 1)) {
+      && value().IsAsciiEqual(kUseStrict)) {
     parser_state_->set_strict_mode();
     advance();
     if (cur() == Token::TERMINATE) {
@@ -916,12 +955,21 @@ void Parser::ParseDirectivePrologue() {
 
 Maybe<Statement*> Parser::ParseStatementList() {
   ENTER_PARSING
-  auto statements = new(zone()) Statements();
+  auto statements = NewNode<Statements>();
+  Statement* last = nullptr;
   while (has_more()) {
     ParseStatementListItem() >>= [&](auto maybe_statement) {
       INVALIDATE(maybe_statement->IsStatement());
       statements->Push(maybe_statement->ToStatement());
+      last = maybe_statement;
     };
+  }
+  if (last != nullptr) {
+    auto pos = statements->source_position();
+    auto lpos = last->source_position();
+    statements->set_source_position({
+        pos.start_col(), lpos.end_col(),
+          pos.start_line_number(), lpos.end_line_number()});
   }
   return Just(statements);
   EXIT_PARSING;
@@ -981,13 +1029,9 @@ Maybe<Statement*> Parser::ParseStatement() {
 Maybe<Statement*> Parser::ParseExpressionStatement() {
   ENTER_PARSING
   return ParseExpression().bind<Statement*>([&, this](auto expr) {
-    if (cur() == Token::TERMINATE) {
-      advance();
-    } else if (cur() != Token::END && !has_linebreak_after()) {
-      REPORT_SYNTAX_ERROR(Statement*, this, "';' expected.");
-    }
-
-    return Just(NewStatement<ExpressionStatement>(expr));
+    auto exprs = NewStatement<ExpressionStatement>(expr);
+    advance();
+    return ParseTerminator(exprs);
   });
   EXIT_PARSING;
 }
@@ -997,7 +1041,7 @@ Maybe<Expression*> Parser::ParseExpression() {
   return ParseAssignmentExpression() >>= [&](auto expr) -> Expression* {
     if (cur() == Token::COMMA) {
       advance();
-      auto expressions = new(zone()) Expressions();
+      auto expressions = NewNode<Expressions>();
       expressions->Push(expr->ToExpression());
       while (cur() == Token::COMMA) {
         auto assignment_expr_ret = ParseAssignmentExpression();
@@ -1178,10 +1222,11 @@ Maybe<Expression*> Parser::ParseUnaryExpression() {
     case Token::OP_MINUS:  // FALL_THROUGH
     case Token::OP_TILDE:  // FALL_THROUGH
     case Token::OP_NOT: {  // FALL_THROUGH
+      auto op = cur();
       advance();
       return ParseUnaryExpression() >>= [&, this](auto rhs_exp) {
         return Just(NewExpression<UnaryExpression>(
-            UnaryExpression::PRE, cur(), rhs_exp));
+            UnaryExpression::PRE, op, rhs_exp));
       };
     }
     case Token::AWAIT:
@@ -1272,7 +1317,7 @@ Maybe<Expression*> Parser::ParseCallExpression() {
         >>= [&, this](auto expr) {
         if (expr->IsExpressions()) {
           auto exprs = expr->ToExpressions();
-          expr = new(zone()) CallExpression(
+          expr = NewNode<CallExpression>(
               Receiver::EXPRESSION,
               exprs->at(0), exprs->at(1));
         }
@@ -1343,7 +1388,7 @@ Maybe<Expression*> Parser::ParseCoverCallExpressionAndAsyncArrowHead() {
       return ParseArguments() >>= [&, this](auto a) {
         return Just(
             reinterpret_cast<Expression*>(
-                new(zone()) Expressions(
+                NewNode<Expressions>(
                     {n->ToExpression(), a->ToExpression()})));
       };
     }
@@ -1453,13 +1498,11 @@ Maybe<Expression*> Parser::ParseLiteral() {
     case Token::TRUE:
     case Token::FALSE: {
       auto t = cur();
-      advance();
       return Just(NewExpression<Literal>(t));
     }
     case Token::NUMERIC_LITERAL:
     case Token::STRING_LITERAL: {
       auto t = cur();
-      advance();
       return Just(NewExpression<Literal>(t, value().Clone()));
     }
     default:
@@ -1490,7 +1533,7 @@ Maybe<Expression*> Parser::ParseArrayLiteral(Parser::Allowance allowance) {
   ENTER_PARSING;
   INVALIDATE(cur() == Token::LEFT_BRACKET);
   advance();
-  auto array = new(zone()) StructuralLiteral(
+  auto array = NewNode<StructuralLiteral>(
       StructuralLiteral::ARRAY);
   while (!Token::OneOf(cur(), { Token::RIGHT_BRACKET, Token::INVALID })) {
     if (cur() == Token::COMMA) {
@@ -1517,7 +1560,7 @@ Maybe<Expression*> Parser::ParseSpreadElement() {
   INVALIDATE(cur() == Token::SPREAD);
   advance();
   return ParseAssignmentExpression() >>= [&, this](auto expr) {
-    return Just(new(zone()) UnaryExpression(
+    return Just(NewNode<UnaryExpression>(
         UnaryExpression::PRE, Token::SPREAD, expr));
   };
   EXIT_PARSING;
@@ -1527,7 +1570,7 @@ Maybe<Expression*> Parser::ParseObjectLiteral(Parser::Allowance allowance) {
   ENTER_PARSING;
   INVALIDATE(cur() == Token::LEFT_BRACE);
   advance();
-  auto object = new(zone()) StructuralLiteral(
+  auto object = NewNode<StructuralLiteral>(
       StructuralLiteral::OBJECT);
   if (cur() == Token::RIGHT_BRACE) {
     return Just(object);
@@ -1655,7 +1698,7 @@ Maybe<Expression*> Parser::ParseMethodDefinition() {
               this, "Getter must not have any formal parameters.");
         }
         advance();
-        formal_parameters = Just(new(zone()) Expressions());
+        formal_parameters = Just(NewNode<Expressions>());
       } else if (is_setter) {
         if (cur() == Token::RIGHT_PAREN) {
           REPORT_SYNTAX_ERROR(
@@ -1684,7 +1727,7 @@ Maybe<Expression*> Parser::ParseMethodDefinition() {
           EXPECT(Expression*, this, cur(), Token::RIGHT_BRACE, '}');
           auto type = is_getter? Function::GETTER: Function::SETTER;
 
-          auto fn = new(zone()) FunctionExpression(
+          auto fn = NewNode<FunctionExpression>(
               type, formal_parameters, body);
           return Just(NewExpression<ObjectPropertyExpression>(name, fn));
         };
@@ -1739,7 +1782,7 @@ Maybe<Expression*> Parser::ParseFormalParameters() {
 
 Maybe<Expression*> Parser::ParseFormalParameterList() {
   ENTER_PARSING;
-  auto exprs = new(zone()) Expressions();
+  auto exprs = NewNode<Expressions>();
   while (1) {
     switch (cur()) {
       case Token::IDENTIFIER:
@@ -1794,7 +1837,7 @@ Maybe<Expression*> Parser::ParseSingleNameBinding(Allowance allowance) {
     case Token::IDENTIFIER:
     case Token::YIELD:
     case Token::AWAIT:
-      identifier = new(zone()) Literal(Token::IDENTIFIER, value().Clone());
+      identifier = NewNode<Literal>(Token::IDENTIFIER, value().Clone());
     default:
       REPORT_SYNTAX_ERROR(Expression*, this, "Identifier expected.");
   }
@@ -1804,7 +1847,7 @@ Maybe<Expression*> Parser::ParseSingleNameBinding(Allowance allowance) {
       cur() == Token::OP_ASSIGN) {
     advance();
     return ParseAssignmentExpression() >>= [&, this](auto i) -> Expression* {
-      return new(zone()) BinaryExpression(
+      return NewNode<BinaryExpression>(
           Token::OP_ASSIGN, identifier, i);
     };
   }
@@ -1829,12 +1872,12 @@ Maybe<Expression*> Parser::ParseBindingPattern() {
 Maybe<Expression*> Parser::ParseArguments() {
   ENTER_PARSING;
   EXPECT(Expression*, this, cur(), Token::LEFT_PAREN, '(');
-  auto exprs = new(zone()) Expressions();
+  auto exprs = NewNode<Expressions>();
   while (1) {
     if (cur() == Token::SPREAD) {
       advance();
       ParseAssignmentExpression() >>= [&, this](auto expr) {
-        auto u = new(zone()) UnaryExpression(
+        auto u = NewNode<UnaryExpression>(
             UnaryExpression::PRE, Token::SPREAD, expr);
         exprs->Push(u);
       };
@@ -1892,7 +1935,7 @@ Maybe<Expression*> Parser::ParseArrowParameters() {
     case Token::LEFT_PAREN:
       return ParseCoverParenthesizedExpressionAndArrowParameterList();
     default: {
-      auto exprs = new(zone()) Expressions();
+      auto exprs = NewNode<Expressions>();
       ParseSingleNameBinding() >>= [&](auto p) {
         exprs->Push(p);
       };
@@ -1906,7 +1949,7 @@ Maybe<Expression*>
 Parser::ParseCoverParenthesizedExpressionAndArrowParameterList() {
   ENTER_PARSING;
   EXPECT(Expression*, this, cur(), Token::LEFT_PAREN, '(');
-  auto exprs = new(zone()) Expressions();
+  auto exprs = NewNode<Expressions>();
   if (cur() == Token::RIGHT_PAREN) {
     advance();
     return Just(exprs->ToExpression());
@@ -1922,7 +1965,7 @@ Parser::ParseCoverParenthesizedExpressionAndArrowParameterList() {
         e = ParseSingleNameBinding();
       }
       e >>= [&, this](auto e) {
-        auto u = new(zone()) UnaryExpression(
+        auto u = NewNode<UnaryExpression>(
             UnaryExpression::PRE, Token::SPREAD, e);
         exprs->Push(u);
       };
@@ -1974,7 +2017,7 @@ Maybe<Statement*> Parser::ParseModule() {
 }
 
 Maybe<Statement*> Parser::ParseModuleBody() {
-  auto statements = new(zone()) Statements();
+  auto statements = NewNode<Statements>();
   while (has_more()) {
     ParseModuleItem() >>= [&](auto i) {
       statements->Push(i);
@@ -2009,7 +2052,7 @@ Maybe<Statement*> Parser::ParseImportDeclaration() {
     default_binding_result = ParseIdentifier();
     advance();
   }
-  auto ib = new(zone()) ImportBinding(
+  auto ib = NewNode<ImportBinding>(
       default_binding_result);
 
   switch (cur()) {
@@ -2059,7 +2102,7 @@ Maybe<Expression*> Parser::ParseNameSpaceImport() {
 
 Maybe<Statement*> Parser::ParseExportDeclaration() {
   EXPECT(Statement*, this, cur(), Token::EXPORT, "export");
-  auto exp = new(zone()) ExportDeclaration();
+  auto exp = NewNode<ExportDeclaration>();
   if (cur() == Token::DEFAULT) {
     exp->set_default_export();
     advance();
@@ -2121,17 +2164,17 @@ Maybe<Expression*> Parser::ParseExportClause() {
 Maybe<Expression*> Parser::ParseNamedList() {
   EXPECT(Expression*, this, cur(), Token::LEFT_BRACE, '{');
 
-  auto list = new(zone()) NamedImportList();
+  auto list = NewNode<NamedImportList>();
 
   while (has_more() && cur() != Token::RIGHT_BRACE) {
     auto maybe_identifier = ParseIdentifierReference();
     if (cur() == Token::IDENTIFIER && value().IsAsciiEqual("as")) {
       advance();
       auto maybe_ref = ParseIdentifier();
-      list->Push(new(zone()) ImportSpecifier(
+      list->Push(NewNode<ImportSpecifier>(
           maybe_identifier, maybe_ref, false));
     } else {
-      list->Push(new(zone()) ImportSpecifier(
+      list->Push(NewNode<ImportSpecifier>(
           maybe_identifier, Nothing<Expression*>(), false));
     }
 

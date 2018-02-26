@@ -29,6 +29,7 @@
 #include <vector>
 
 #include "./maybe.h"
+#include "./reporter.h"
 #include "./source_position.h"
 #include "./unicode.h"
 #include "./zone.h"
@@ -336,6 +337,9 @@ class Ast: public Zone {
     return (type() & kExpressionFlag) == kExpressionFlag;
   }
 
+  LUX_CONST_PROPERTY(
+      SourcePosition, source_position, source_position_)
+
   std::string ToString() const {
     std::string indent = "";
     std::stringstream ss;
@@ -375,6 +379,7 @@ class Ast: public Zone {
     return static_cast<uint8_t>(type_);
   }
 
+  SourcePosition source_position_;
   Ast::Type type_;
 };
 
@@ -399,7 +404,8 @@ class Expressions: public Expression, public AstListTraits<Expression> {
 
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+    (*ss) << *indent << '[' << ast->GetName()
+          << ' ' << source_position().ToString() << ']' << '\n';
   }
   void ToStringTree(
       std::string* indent, std::stringstream* ss) const {
@@ -425,7 +431,8 @@ class BinaryExpression: public Expression {
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
     (*ss) << *indent << '[' << ast->GetName() << " operand = "
-          << Token::ToString(operand_) << ']' << '\n';
+          << Token::ToString(operand_)
+          << ' ' << source_position().ToString() << ']' << '\n';
   }
   void ToStringTree(
       std::string* indent, std::stringstream* ss) const {
@@ -462,7 +469,9 @@ class UnaryExpression: public Expression {
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
     (*ss) << *indent << '[' << ast->GetName() << " operand = "
-          << Token::ToString(operand_) << ']' << '\n';
+          << Token::ToString(operand_)
+          << " position = " << (operand_position_ == PRE? "PRE": "POST")
+          << ' ' << source_position().ToString() << ']' << '\n';
   }
   void ToStringTree(
       std::string* indent, std::stringstream* ss) const {
@@ -516,7 +525,8 @@ class ConditionalExpression: public Expression {
 
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName() << '\n';
+    (*ss) << *indent << '[' << ast->GetName()
+          << ' ' << source_position().ToString() << ']' << '\n';
   }
   void ToStringTree(
       std::string* indent, std::stringstream* ss) const {
@@ -552,7 +562,8 @@ class CallExpression: public Expression {
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
     (*ss) << *indent << '[' << ast->GetName() << " receiver = "
-          << Receiver::ToString(receiver_type_) << ']' << '\n';
+          << Receiver::ToString(receiver_type_)
+          << ' ' << source_position().ToString() << ']' << '\n';
   }
   void ToStringTree(
       std::string* indent, std::stringstream* ss) const {
@@ -633,7 +644,7 @@ class PropertyAccessExpression: public Expression {
       INVALIDATE(is_super_property());
       (*ss) << " super";
     }
-    (*ss) << "]\n";
+    (*ss) << ' ' << source_position().ToString() << "]\n";
   }
   void ToStringTree(
       std::string* indent, std::stringstream* ss) const {
@@ -751,7 +762,8 @@ class FunctionExpressionBase: public Expression,
 
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+    (*ss) << *indent << '[' << ast->GetName()
+          << ' ' << source_position().ToString() << ']' << '\n';
   }
 
   void ToStringTree(
@@ -800,7 +812,8 @@ class ObjectPropertyExpression: public Expression {
 
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+    (*ss) << *indent << '[' << ast->GetName()
+          << ' ' << source_position().ToString() << ']' << '\n';
   }
   void ToStringTree(
       std::string* indent, std::stringstream* ss) const {
@@ -828,7 +841,8 @@ class Elision: public Expression {
 
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+    (*ss) << *indent << '[' << ast->GetName()
+          << ' ' << source_position().ToString() << ']' << '\n';
   }
 
   void ToStringTree(
@@ -917,7 +931,7 @@ class StructuralLiteral: public Expression, public AstListTraits<Expression> {
     if (has_spread()) {
       (*ss) << " spread = true";
     }
-    (*ss) << "]\n";
+    (*ss) << ' ' << source_position().ToString() << "]\n";
   }
   void ToStringTree(
       std::string* indent, std::stringstream* ss) const {
@@ -967,7 +981,8 @@ class Literal: public Expression {
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
     (*ss) << *indent << '[' << ast->GetName()
           << " type = " << Token::ToString(literal_type_)
-          << " value = " << value().ToUtf8String() << "]\n";
+          << " value = " << value().ToUtf8String()
+          << ' ' << source_position().ToString() << "]\n";
   }
   void ToStringTree(
       std::string* indent, std::stringstream* ss) const {
@@ -993,7 +1008,8 @@ class Statements: public Statement, public AstListTraits<Statement> {
 
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+    (*ss) << *indent << '[' << ast->GetName()
+          << ' ' << source_position().ToString() << ']' << '\n';
   }
   void ToStringTree(
       std::string* indent, std::stringstream* ss) const {
@@ -1016,7 +1032,8 @@ class ImportSpecifier: public Expression {
 
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+    (*ss) << *indent << '[' << ast->GetName()
+          << ' ' << source_position().ToString() << ']' << '\n';
   }
   void ToStringTree(
       std::string* indent, std::stringstream* ss) const {
@@ -1041,7 +1058,8 @@ class NamedImportList:
 
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+    (*ss) << *indent << '[' << ast->GetName()
+          << ' ' << source_position().ToString() << ']' << '\n';
   }
 
   void ToStringTree(
@@ -1076,7 +1094,8 @@ class ImportBinding: public Expression {
 
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+    (*ss) << *indent << '[' << ast->GetName()
+          << ' ' << source_position().ToString() << ']' << '\n';
   }
 
   void ToStringTree(
@@ -1092,7 +1111,7 @@ class ImportBinding: public Expression {
     };
     named_import_list_ >>= [&](auto list) {
       auto ni = *indent + "  ";
-      list->ToStringTree(&ni, ss); 
+      list->ToStringTree(&ni, ss);
     };
   }
 
@@ -1116,7 +1135,8 @@ class ImportDeclaration: public Statement {
 
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+    (*ss) << *indent << '[' << ast->GetName()
+          << ' ' << source_position().ToString() << ']' << '\n';
   }
   void ToStringTree(
       std::string* indent, std::stringstream* ss) const {
@@ -1157,7 +1177,7 @@ class ExportDeclaration: public Statement {
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
     (*ss) << *indent << '[' << ast->GetName()
           << " type = " << (namespace_export()? "namespace" : "default")
-          << ']' << '\n';
+          << ' ' << source_position().ToString() << ']' << '\n';
   }
   void ToStringTree(
       std::string* indent, std::stringstream* ss) const {
@@ -1183,7 +1203,8 @@ class ExpressionStatement: public Statement {
 
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName() << ']' << '\n';
+    (*ss) << *indent << '[' << ast->GetName()
+          << ' ' << source_position().ToString() << ']' << '\n';
   }
   void ToStringTree(
       std::string* indent, std::stringstream* ss) const {
@@ -1329,14 +1350,14 @@ class Parser {
 
     Token::Type Peek();
 
-    Token::Type Current() const { return token_; };
+    Token::Type Current() const { return token_; }
 
     SourcePosition position() const {
       return position_;
     }
 
     inline bool HasMore() const {
-      return it_ != end_;
+      return it_ != end_ && !reporter_->HasPendingError();
     }
 
     inline Utf16String Value() const {
@@ -1360,7 +1381,7 @@ class Parser {
     void unset_linebreak_before();
 
    private:
-    Token::Type Tokenize(Utf16CodePoint);
+    Token::Type Tokenize();
 
     Token::Type TokenizeStringLiteral();
 
@@ -1383,9 +1404,12 @@ class Parser {
     void Prologue();
     void Epilogue();
 
-    Utf16CodePoint Advance(bool beginning = false);
+    Utf16CodePoint Advance();
 
     void AdvanceAndPushBuffer();
+    Utf16CodePoint DecodeEscapeSequence(bool* ok);
+    Utf16CodePoint DecodeHexEscape(bool* ok, int len = 4);
+    Utf16CodePoint DecodeAsciiEscapeSequence(bool* ok);
 
     SourcePosition position_;
     SourcePosition lookahead_position_;
@@ -1406,9 +1430,9 @@ class Parser {
 
   Maybe<Ast*> Parse(ParseType parse_type);
 
+ private:
   void ParseDirectivePrologue();
 
- private:
   LUX_INLINE Token::Type advance() {
     return tokenizer_->Next();
   }
@@ -1446,7 +1470,7 @@ class Parser {
   }
 
   inline bool has_more() const {
-    return cur() != Token::END;
+    return cur() != Token::END && !reporter_->HasPendingError();
   }
 
   void Record() {
@@ -1460,6 +1484,8 @@ class Parser {
   bool MatchStates(std::initializer_list<State> s);
 
  VISIBLE_FOR_TESTING:
+  template <typename T>
+  Maybe<T*> ParseTerminator(T* node);
   Maybe<Expression*> ParseIdentifierReference();
   Maybe<Expression*> ParseIdentifier();
   Maybe<Expression*> ParseAsyncArrowBindingIdentifier();
@@ -1613,13 +1639,31 @@ class Parser {
 
  private:
   template <typename T, typename ...Args>
+  T* NewNode(Args... args) {
+    auto ast = new(zone()) T(args...);
+    ast->set_source_position(position());
+    return ast;
+  }
+
+  template <typename T, typename E>
+  T* NewNode(std::initializer_list<E> args) {
+    auto ast = new(zone()) T(args);
+    ast->set_source_position(position());
+    return ast;
+  }
+
+  template <typename T, typename ...Args>
   Expression* NewExpression(Args... args) {
-    return new(zone()) T(args...);
+    auto expr = new(zone()) T(args...);
+    expr->set_source_position(position());
+    return expr;
   }
 
   template <typename T, typename ...Args>
   Statement* NewStatement(Args... args) {
-    return new(zone()) T(args...);
+    auto stmt = new(zone()) T(args...);
+    stmt->set_source_position(position());
+    return stmt;
   }
 
   LUX_INLINE bool IsAssignmentOperator(Token::Type token) {

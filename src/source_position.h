@@ -24,6 +24,7 @@
 #ifndef SRC_SOURCE_POSITION_H_
 #define SRC_SOURCE_POSITION_H_
 
+#include <string>
 #include "./utils.h"
 
 namespace lux {
@@ -45,6 +46,15 @@ class SourcePosition: private Unmovable {
         end_col_(end_col),
         start_line_number_(start_line_number),
         end_line_number_(end_line_number) {}
+
+  SourcePosition(std::initializer_list<size_t> list) {
+    auto begin = list.begin();
+    auto end = list.end();
+    start_col_ = begin != end? *(begin++): 0;
+    end_col_ = begin != end? *(begin++): 0;
+    start_line_number_ = begin != end? *(begin++): 0;
+    end_line_number_ = begin != end? *begin: 0;
+  }
 
 
   SourcePosition(const SourcePosition& source_position)
@@ -116,6 +126,15 @@ class SourcePosition: private Unmovable {
   LUX_CONST_PROPERTY(size_t, end_line_number, end_line_number_)
   LUX_INLINE void add_end_line_number(int index = 1) {
     end_line_number_ += index;
+  }
+
+  std::string ToString() {
+    std::stringstream ss;
+    ss << "[" << start_line_number() << ','
+       << end_line_number() << ','
+       << start_col() << ','
+       << end_col() << ']';
+    return ss.str();
   }
 
  private:
