@@ -29,7 +29,7 @@
 class RegExpTest: public lux::IsolateSetup {
  protected:
   template <bool error = false, bool show_error = false>
-  void RunTest(const char* regexp, int line, const char* expected,
+  void RunTest(const char* regexp, const char* expected,
                lux::SourcePosition source_position = lux::SourcePosition()) {
     lux::HandleScope scope;
     lux::ErrorReporter er;
@@ -47,7 +47,7 @@ class RegExpTest: public lux::IsolateSetup {
       }
     } else {
       auto a = p.node()->ToString();
-      lux::testing::CompareNode(line, a.c_str(), expected);
+      lux::testing::CompareNode(a.c_str(), expected);
     }
   }
 };
@@ -55,7 +55,7 @@ class RegExpTest: public lux::IsolateSetup {
 
 namespace {
 TEST_F(RegExpTest, Simple) {
-  RunTest("(aa*|bb*)+", 13,
+  RunTest("(aa*|bb*)+",
           "[Root]\n"
           "  [Conjunction]\n"
           "    [Repeat more than 1]\n"
@@ -72,7 +72,7 @@ TEST_F(RegExpTest, Simple) {
 }
 
 TEST_F(RegExpTest, Alternate) {
-  RunTest("(aa*|bb*|cc*|dd+)+", 23,
+  RunTest("(aa*|bb*|cc*|dd+)+",
           "[Root]\n"
           "  [Conjunction]\n"
           "    [Repeat more than 1]\n"
@@ -99,7 +99,7 @@ TEST_F(RegExpTest, Alternate) {
 }
 
 TEST_F(RegExpTest, Range) {
-  RunTest("(aa*|bb*){1,3}", 13,
+  RunTest("(aa*|bb*){1,3}",
           "[Root]\n"
           "  [Conjunction]\n"
           "    [RepeatRange more than 1, less than 3]\n"
@@ -116,21 +116,21 @@ TEST_F(RegExpTest, Range) {
 }
 
 TEST_F(RegExpTest, CharClass) {
-  RunTest("[abcdefg,{}()?]", 16,
+  RunTest("[abcdefg,{}()?]",
           "[Root]\n"
           "  [Conjunction]\n"
           "    [CharClass exclude = false <abcdefg,{}()?>]\n");
 }
 
 TEST_F(RegExpTest, CharClassExclude) {
-  RunTest("[^abcdefg,{}()?]", 16,
+  RunTest("[^abcdefg,{}()?]",
           "[Root]\n"
           "  [Conjunction]\n"
           "    [CharClass exclude = true <abcdefg,{}()?>]\n");
 }
 
 TEST_F(RegExpTest, Question) {
-  RunTest("(aa*|bb*)?", 13,
+  RunTest("(aa*|bb*)?",
           "[Root]\n"
           "  [Conjunction]\n"
           "    [RepeatRange more than 0, less than 1]\n"
@@ -147,7 +147,7 @@ TEST_F(RegExpTest, Question) {
 }
 
 TEST_F(RegExpTest, Uncapture) {
-  RunTest("(aa*|bb*)(?:aaa)", 17,
+  RunTest("(aa*|bb*)(?:aaa)",
           "[Root]\n"
           "  [Conjunction]\n"
           "    [Group type = CAPTURE]\n"
@@ -168,7 +168,7 @@ TEST_F(RegExpTest, Uncapture) {
 }
 
 TEST_F(RegExpTest, PositionLookahead) {
-  RunTest("(aa*|bb*)(?=aaa)", 17,
+  RunTest("(aa*|bb*)(?=aaa)",
           "[Root]\n"
           "  [Conjunction]\n"
           "    [Group type = CAPTURE]\n"
@@ -189,7 +189,7 @@ TEST_F(RegExpTest, PositionLookahead) {
 }
 
 TEST_F(RegExpTest, NegativeLookahead) {
-  RunTest("(aa*|bb*)(?!aaa)", 17,
+  RunTest("(aa*|bb*)(?!aaa)",
           "[Root]\n"
           "  [Conjunction]\n"
           "    [Group type = CAPTURE]\n"
@@ -210,38 +210,38 @@ TEST_F(RegExpTest, NegativeLookahead) {
 }
 
 TEST_F(RegExpTest, GroupParenError) {
-  RunTest<true>("(aa*|bb*", 0, nullptr, lux::SourcePosition(8, 8, 0, 0));
+  RunTest<true>("(aa*|bb*", nullptr, lux::SourcePosition(8, 8, 0, 0));
 }
 
 TEST_F(RegExpTest, CharClassBracketError) {
-  RunTest<true>("[aaa", 0, nullptr, lux::SourcePosition(4, 4, 0, 0));
+  RunTest<true>("[aaa", nullptr, lux::SourcePosition(4, 4, 0, 0));
 }
 
 TEST_F(RegExpTest, RangeRepeatBraceError) {
-  RunTest<true>("aaa{1", 0, nullptr, lux::SourcePosition(5, 5, 0, 0));
+  RunTest<true>("aaa{1", nullptr, lux::SourcePosition(5, 5, 0, 0));
 }
 
 TEST_F(RegExpTest, RangeRepeatFirstNaNError) {
-  RunTest<true>("aaa{x", 0, nullptr, lux::SourcePosition(3, 4, 0, 0));
+  RunTest<true>("aaa{x", nullptr, lux::SourcePosition(3, 4, 0, 0));
 }
 
 TEST_F(RegExpTest, RangeRepeatRequiredError) {
-  RunTest<true>("aaa{x,}", 0, nullptr, lux::SourcePosition(3, 4, 0, 0));
+  RunTest<true>("aaa{x,}", nullptr, lux::SourcePosition(3, 4, 0, 0));
 }
 
 TEST_F(RegExpTest, RangeRepeatSecondNaNError) {
-  RunTest<true>("aaa{1,x}", 0, nullptr, lux::SourcePosition(5, 6, 0, 0));
+  RunTest<true>("aaa{1,x}", nullptr, lux::SourcePosition(5, 6, 0, 0));
 }
 
 TEST_F(RegExpTest, NothingToRepeat) {
-  RunTest<true>("+", 0, nullptr, lux::SourcePosition(0, 1, 0, 0));
+  RunTest<true>("+", nullptr, lux::SourcePosition(0, 1, 0, 0));
 }
 
 TEST_F(RegExpTest, NothingToRepeat2) {
-  RunTest<true>("*", 0, nullptr, lux::SourcePosition(0, 1, 0, 0));
+  RunTest<true>("*", nullptr, lux::SourcePosition(0, 1, 0, 0));
 }
 
 TEST_F(RegExpTest, NothingToRepeat3) {
-  RunTest<true>("{", 0, nullptr, lux::SourcePosition(0, 1, 0, 0));
+  RunTest<true>("{", nullptr, lux::SourcePosition(0, 1, 0, 0));
 }
 }  // namespace

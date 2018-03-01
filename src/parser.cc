@@ -79,6 +79,14 @@ namespace lux {
   EXPECT_NOT_ADVANCE_ONE_OF(T, parser, n, token, expects) \
   advance();
 
+#define EXPECT_NO_RETURN(parser, n, token, expect)  \
+  if (n != token) {                                 \
+    REPORT_SYNTAX_ERROR_NO_RETURN(                  \
+        parser, "'" << expect << "' expected");     \
+    return;                                         \
+  }                                                 \
+  advance();                                        \
+
 const uint8_t Ast::kStatementFlag;
 const uint8_t Ast::kExpressionFlag;
 
@@ -267,16 +275,22 @@ Token::Type Parser::Tokenizer::Tokenize() {
 
   switch (*it_) {
     case '(':
+      Advance();
       return Token::LEFT_PAREN;
     case ')':
+      Advance();
       return Token::RIGHT_PAREN;
     case '{':
+      Advance();
       return Token::LEFT_BRACE;
     case '}':
+      Advance();
       return Token::RIGHT_BRACE;
     case '[':
+      Advance();
       return Token::LEFT_BRACKET;
     case ']':
+      Advance();
       return Token::RIGHT_BRACKET;
     case '*':
       Advance();
@@ -391,15 +405,19 @@ Token::Type Parser::Tokenizer::Tokenize() {
       }
       return Token::DOT;
     case '!':
+      Advance();
       return Token::OP_NOT;
     case ';':
       Advance();
       return Token::TERMINATE;
     case ':':
+      Advance();
       return Token::COLON;
     case '?':
+      Advance();
       return Token::QUESTION;
     case '`':
+      Advance();
       return Token::BACK_QUOTE;
     case '\'':
     case '\"':
@@ -526,7 +544,7 @@ Token::Type Parser::Tokenizer::TokenizeIdentifier() {
     Advance();
     value = *it_;
   }
-  Advance();
+
   return GetIdentifierType();
 }
 
@@ -651,6 +669,7 @@ Token::Type Parser::Tokenizer::GetIdentifierType() {
   const size_t input_length = maybe_keyword.size();
   const int min_length = 2;
   const int max_length = 10;
+
   if (input_length < min_length || input_length > max_length) {
     return Token::IDENTIFIER;
   }
@@ -925,7 +944,9 @@ Maybe<T*> Parser::ParseTerminator(T* expr) {
   if (cur() == Token::TERMINATE) {
     advance();
     return Just(expr);
-  } else if (cur() != Token::END && !has_linebreak_after()) {
+  } else if (cur() != Token::END
+             && cur() != Token::RIGHT_BRACE
+             && !has_linebreak_after()) {
     REPORT_SYNTAX_ERROR(T*, this, "';' expected.");
   }
 
@@ -933,9 +954,13 @@ Maybe<T*> Parser::ParseTerminator(T* expr) {
   EXIT_PARSING;
 }
 
+bool NoCondition(Token::Type token) {
+  return true;
+}
+
 Maybe<Ast*> Parser::ParseScript() {
   ENTER_PARSING
-  return ParseStatementList();
+  return ParseStatementList(&NoCondition);
   EXIT_PARSING;
 }
 
@@ -953,11 +978,11 @@ void Parser::ParseDirectivePrologue() {
   }
 }
 
-Maybe<Statement*> Parser::ParseStatementList() {
+Maybe<Statement*> Parser::ParseStatementList(bool (*condition)(Token::Type)) {
   ENTER_PARSING
   auto statements = NewNode<Statements>();
   Statement* last = nullptr;
-  while (has_more()) {
+  while (has_more() && condition(cur())) {
     ParseStatementListItem() >>= [&](auto maybe_statement) {
       INVALIDATE(maybe_statement->IsStatement());
       statements->Push(maybe_statement->ToStatement());
@@ -965,11 +990,7 @@ Maybe<Statement*> Parser::ParseStatementList() {
     };
   }
   if (last != nullptr) {
-    auto pos = statements->source_position();
-    auto lpos = last->source_position();
-    statements->set_source_position({
-        pos.start_col(), lpos.end_col(),
-          pos.start_line_number(), lpos.end_line_number()});
+    statements->set_end_positions(last->source_position());
   }
   return Just(statements);
   EXIT_PARSING;
@@ -985,7 +1006,8 @@ Maybe<Statement*> Parser::ParseStatementListItem() {
     default:
       if (cur() == Token::IDENTIFIER) {
         auto v = value();
-        if (v.IsAsciiEqual("async") && peek() == Token::FUNCTION) {
+        if (v.IsAsciiEqual("async") && peek() == Token::FUNCTION
+            && !has_linebreak_after()) {
           return ParseDeclaration();
         } else if (v.IsAsciiEqual("let")) {
           return ParseDeclaration();
@@ -996,9 +1018,34 @@ Maybe<Statement*> Parser::ParseStatementListItem() {
   EXIT_PARSING;
 }
 
+Maybe<Statement*> Parser::ParseDeclaration() {
+  ENTER_PARSING
+  bool async = false;
+  switch (cur()) {
+    case Token::IDENTIFIER: {
+      if (value().IsAsciiEqual("let")) {
+        return ParseLexicalDeclaration();
+      }
+      async = true;
+    }
+    case Token::FUNCTION:
+      return ParseFunctionDeclaration(async);
+    case Token::CLASS:
+    case Token::CONST:
+      return Nothing<Statement*>();
+    default:
+      UNREACHABLE();
+      return Nothing<Statement*>();
+  }
+  EXIT_PARSING
+}
+
 Maybe<Statement*> Parser::ParseStatement() {
   ENTER_PARSING
   switch (cur()) {
+    case Token::TERMINATE:
+      advance();
+      return ParseStatement();
     case Token::LEFT_BRACE:
       return ParseBlockStatement();
     case Token::VAR:
@@ -1680,14 +1727,14 @@ Maybe<Expression*> Parser::ParseMethodDefinition() {
     case Token::NUMERIC_LITERAL:
     case Token::LEFT_BRACKET:
     case Token::IDENTIFIER: {
-      auto name = Nothing<Expression*>();
+      auto maybe_name = Nothing<Expression*>();
       auto formal_parameters = Nothing<Expression*>();
 
       if (cur() == Token::IDENTIFIER
           && value().IsAsciiEqual("async")) {
         return ParseAsyncMethod();
       } else  {
-        name = ParsePropertyName();
+        maybe_name = ParsePropertyName();
       }
 
       EXPECT(Expression*, this, cur(), Token::LEFT_PAREN, '(');
@@ -1717,7 +1764,7 @@ Maybe<Expression*> Parser::ParseMethodDefinition() {
       }
 
       EXPECT(Expression*, this, cur(), Token::LEFT_BRACE, '{');
-      return name >>= [&, this](auto name) {
+      return maybe_name >>= [&, this](auto name) {
         return formal_parameters >>= [&, this](auto formal_parameters) {
           auto body_ret = ParseFunctionBody();
           if (!body_ret) {
@@ -1728,7 +1775,7 @@ Maybe<Expression*> Parser::ParseMethodDefinition() {
           auto type = is_getter? Function::GETTER: Function::SETTER;
 
           auto fn = NewNode<FunctionExpression>(
-              type, formal_parameters, body);
+              type, maybe_name, formal_parameters, body);
           return Just(NewExpression<ObjectPropertyExpression>(name, fn));
         };
       };
@@ -1921,7 +1968,7 @@ Maybe<Expression*> Parser::ParseArrowFunction() {
       if (body_ret) {
         auto body = body_ret.value();
         return Just(NewExpression<ArrowFunctionExpression>(
-            Function::NORMAL, p, body));
+            Function::NORMAL, Nothing<Expression*>(), p, body));
       }
     }
     return Just(p);
@@ -2110,7 +2157,7 @@ Maybe<Statement*> Parser::ParseExportDeclaration() {
       case Token::CLASS:
         exp->set_export_clause(ParseClassDeclaration());
       case Token::FUNCTION:
-        exp->set_export_clause(ParseFunctionDeclaration());
+        exp->set_export_clause(ParseFunctionDeclaration(false, true));
       case Token::IDENTIFIER:
         if (value().IsAsciiEqual("async")) {
           exp->set_export_clause(ParseAsyncArrowFunction());
@@ -2209,7 +2256,7 @@ Maybe<Expression*> Parser::ParseSuperCall() {
                                               args));
   };
 }
-Maybe<Statement*> Parser::ParseDeclaration() {return Nothing<Statement*>();}
+
 Maybe<Statement*> Parser::ParseHoistableDeclaration() {
   return Nothing<Statement*>();
 }
@@ -2270,17 +2317,63 @@ Maybe<Statement*> Parser::ParseCatchParameter() {return Nothing<Statement*>();}
 Maybe<Statement*> Parser::ParseDebuggerStatement() {
   return Nothing<Statement*>();
 }
-Maybe<Statement*> Parser::ParseFunctionDeclaration() {
-  return Nothing<Statement*>();
+
+Maybe<Statement*> Parser::ParseFunctionDeclaration(bool async,
+                                                   bool in_default) {
+  ENTER_PARSING
+  auto start = position();
+  if (async) {
+    advance();
+  }
+  EXPECT(Statement*, this, cur(), Token::FUNCTION, "function");
+  auto identifier = Nothing<Expression*>();
+
+  if (cur() == Token::IDENTIFIER) {
+    if (parser_state_->IsInState({
+          IN_ASYNC_FUNCTION,
+            IN_GENERATOR_FUNCTION,
+            IN_ASYNC_GENERATOR_FUNCTION})) {
+      identifier = ParseIdentifier();
+    } else {
+      identifier = ParseIdentifier();
+    }
+    advance();
+  } else if (!in_default) {
+    REPORT_SYNTAX_ERROR(Statement*, this, "Identifier expected");
+  }
+  EXPECT(Statement*, this, cur(), Token::LEFT_PAREN, '(');
+  return ParseFormalParameters() >>= [&, this](auto params) {
+    EXPECT(Statement*, this, cur(), Token::RIGHT_PAREN, ')');
+    EXPECT(Statement*, this, cur(), Token::LEFT_BRACE, '{');
+    return ParseFunctionBody() >>= [&, this](auto body) {
+      EXPECT(Statement*, this, cur(), Token::RIGHT_BRACE, '}');
+      auto function_type = async? Function::ASYNC:
+        parser_state_->IsInState({IN_GENERATOR_FUNCTION})? Function::GENERATOR:
+        parser_state_->IsInState({IN_ASYNC_GENERATOR_FUNCTION})?
+        Function::ASYNC_GENERATOR: Function::NORMAL;
+      auto fn = NewNode<FunctionExpression>(
+          function_type, identifier, params, body);
+      fn->set_start_positions(start);
+      auto expr = NewNode<ExpressionStatement>(fn);
+      expr->set_start_positions(start);
+      return Just(expr->ToStatement());
+    };
+  };
+  EXIT_PARSING
 }
+
+bool IsFunctionBodyContinue(Token::Type token) {
+  return token != Token::RIGHT_BRACE;
+}
+
+Maybe<Statement*> Parser::ParseFunctionBody() {
+  ENTER_PARSING
+  return ParseStatementList(&IsFunctionBodyContinue);
+  EXIT_PARSING
+}
+
 Maybe<Expression*> Parser::ParseFunctionExpression() {
   return Nothing<Expression*>();
-}
-Maybe<Statement*> Parser::ParseFunctionBody() {
-  return Nothing<Statement*>();
-}
-Maybe<Ast*> Parser::ParseFunctionStatementList() {
-  return Nothing<Ast*>();
 }
 Maybe<Expression*> Parser::ParseArrowFormalParameters() {
   return Nothing<Expression*>();

@@ -23,7 +23,6 @@
 #ifndef SRC_PARSER_H_
 #define SRC_PARSER_H_
 
-#include <stack>
 #include <string>
 #include <sstream>
 #include <vector>
@@ -335,6 +334,42 @@ class Ast: public Zone {
 
   inline bool IsExpression() const {
     return (type() & kExpressionFlag) == kExpressionFlag;
+  }
+
+  void set_start_positions(uint32_t col, uint32_t line) {
+    source_position_.set_start_col(col);
+    source_position_.set_start_line_number(line);
+  }
+
+  void set_end_positions(uint32_t col, uint32_t line) {
+    source_position_.set_end_col(col);
+    source_position_.set_end_line_number(line);
+  }
+
+  void set_start_positions(const SourcePosition& pos) {
+    source_position_.set_start_col(pos.start_col());
+    source_position_.set_start_line_number(pos.start_line_number());
+  }
+
+  void set_end_positions(const SourcePosition& pos) {
+    source_position_.set_end_col(pos.end_col());
+    source_position_.set_end_line_number(pos.end_line_number());
+  }
+
+  void set_start_pos(uint32_t start) {
+    source_position_.set_start_col(start);
+  }
+
+  void set_end_pos(uint32_t end) {
+    source_position_.set_end_col(end);
+  }
+
+  void set_start_line_number(uint32_t start_line) {
+    source_position_.set_start_line_number(start_line);
+  }
+
+  void set_end_line_number(uint32_t end_line) {
+    source_position_.set_end_line_number(end_line);
   }
 
   LUX_CONST_PROPERTY(
@@ -665,8 +700,9 @@ struct Function {
   A(NORMAL, normal, 0x4)                        \
   A(ASYNC, async, 0x8)                          \
   A(GENERATOR, generator, 0x10)                 \
-  A(GETTER, getter, 0x20)                       \
-  A(SETTER, setter, 0x40)
+  A(ASYNC_GENERATOR, async_generator, 0x20)     \
+  A(GETTER, getter, 0x40)                       \
+  A(SETTER, setter, 0x80)
 
   enum Type {
 #define FUNCTION_TYPE_DEF(A, n, v) A = v,
@@ -681,9 +717,11 @@ class BaseFunction {
 
   BaseFunction(Function::Type fn_type,
                Scope::Type scope_type,
+               Maybe<Expression*> name,
                Expression* formal_parameters,
                Ast* body)
-      : formal_parameters_(formal_parameters),
+      : name_(name),
+        formal_parameters_(formal_parameters),
         body_(body) {
     flags_.assign(fn_type | scope_type);
   }
@@ -706,10 +744,13 @@ class BaseFunction {
     return flags_.get(Scope::OPAQUE);
   }
 
+  LUX_CONST_PROPERTY(Maybe<Expression*>, name, name_)
+
   LUX_CONST_PROPERTY(Expression*, formal_parameters, formal_parameters_)
 
  protected:
   Bitset<uint8_t> flags_;
+  Maybe<Expression*> name_;
   Expression* formal_parameters_;
   Ast* body_;
 };
@@ -722,10 +763,12 @@ class FunctionTraits<true>: public BaseFunction {
  public:
   FunctionTraits(Function::Type fn_type,
                  Scope::Type scope_type,
+                 Maybe<Expression*> name,
                  Expression* formal_parameters,
                  Ast* body)
       : BaseFunction(fn_type,
                      scope_type,
+                     name,
                      formal_parameters,
                      body) {}
 
@@ -738,10 +781,12 @@ class FunctionTraits<false>: public BaseFunction {
  public:
   FunctionTraits(Function::Type fn_type,
                  Scope::Type scope_type,
+                 Maybe<Expression*> name,
                  Expression* formal_parameters,
                  Ast* body)
       : BaseFunction(fn_type,
                      scope_type,
+                     name,
                      formal_parameters,
                      body) {}
   LUX_CONST_PROPERTY(Ast*, body, body_)
@@ -754,11 +799,12 @@ class FunctionExpressionBase: public Expression,
   FunctionExpressionBase(Ast::Type type,
                          Function::Type fn_type,
                          Scope::Type scope_type,
+                         Maybe<Expression*> name,
                          Expression* formal_parameters,
                          Ast* body)
       : Expression(type),
         FunctionTraits<allow_statements>(
-            fn_type, scope_type, formal_parameters, body) {}
+            fn_type, scope_type, name, formal_parameters, body) {}
 
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
@@ -770,6 +816,7 @@ class FunctionExpressionBase: public Expression,
       std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     auto ni = "  " + (*indent);
+    BaseFunction::name_ >>= [&](auto n) { n->ToStringTree(&ni, ss); };
     BaseFunction::formal_parameters_->ToStringTree(&ni, ss);
     BaseFunction::body_->ToStringTree(&ni, ss);
   }
@@ -778,22 +825,24 @@ class FunctionExpressionBase: public Expression,
 class FunctionExpression: public FunctionExpressionBase<true> {
  public:
   FunctionExpression(Function::Type fn_type,
+                     Maybe<Expression*> name,
                      Expression* formal_parameters,
                      Statement* body)
       : FunctionExpressionBase<true>(
             Ast::FUNCTION_EXPRESSION,
-            fn_type, Scope::OPAQUE, formal_parameters,
+            fn_type, Scope::OPAQUE, name, formal_parameters,
             reinterpret_cast<Ast*>(body)) {}
 };
 
 class ArrowFunctionExpression: public FunctionExpressionBase<false> {
  public:
   ArrowFunctionExpression(Function::Type fn_type,
+                          Maybe<Expression*> name,
                           Expression* formal_parameters,
                           Ast* body)
       : FunctionExpressionBase<false>(
             Ast::ARROW_FUNCTION_EXPRESSION,
-            fn_type, Scope::TRANSPARENT, formal_parameters, body) {}
+            fn_type, Scope::TRANSPARENT, name, formal_parameters, body) {}
 };
 
 class ObjectPropertyExpression: public Expression {
@@ -1199,7 +1248,11 @@ class ExpressionStatement: public Statement {
       : Statement(Ast::EXPRESSION_STATEMENT),
         expr_(expr) {}
 
-  LUX_CONST_GETTER(Expression*, expr, expr_)
+  ExpressionStatement()
+      : Statement(Ast::EXPRESSION_STATEMENT),
+        expr_(nullptr) {}
+
+  LUX_CONST_PROPERTY(Expression*, expr, expr_)
 
   void ToStringSelf(
       const Ast* ast, std::string* indent, std::stringstream* ss) const {
@@ -1276,20 +1329,31 @@ class Parser {
   class ParserState {
    public:
     void PushState(State state) {
-      state_stack_.push(state);
+      state_stack_.push_back(state);
     }
 
     void PopState(State state) {
-      INVALIDATE(state_stack_.top() == state);
-      state_stack_.pop();
+      INVALIDATE(state_stack_.back() == state);
+      state_stack_.pop_back();
     }
 
     State CurrentState(State state) const {
-      return state_stack_.top();
+      return state_stack_.back();
     }
 
     bool Is(State state) const {
-      return state_stack_.size() > 0? state == state_stack_.top(): false;
+      return state_stack_.size() > 0? state == state_stack_.back(): false;
+    }
+
+    bool IsInState(std::initializer_list<State> states) const {
+      for (auto &s : state_stack_) {
+        for (auto &ms : states) {
+          if (s == ms) {
+            return true;
+          }
+        }
+      }
+      return false;
     }
 
     bool is_strict_mode() const {
@@ -1313,7 +1377,7 @@ class Parser {
     }
 
    private:
-    std::stack<State> state_stack_;
+    std::vector<State> state_stack_;
     Bitset<uint8_t> flags_;
   };
 
@@ -1469,6 +1533,10 @@ class Parser {
     return parser_state_->Is(s);
   }
 
+  inline bool IsInState(std::initializer_list<State> s) {
+    return parser_state_->IsInState(s);
+  }
+
   inline bool has_more() const {
     return cur() != Token::END && !reporter_->HasPendingError();
   }
@@ -1559,7 +1627,7 @@ class Parser {
   Maybe<Statement*> ParseBreakableStatement();
   Maybe<Statement*> ParseBlockStatement();
   Maybe<Statement*> ParseBlock();
-  Maybe<Statement*> ParseStatementList();
+  Maybe<Statement*> ParseStatementList(bool (*condition)(Token::Type));
   Maybe<Statement*> ParseStatementListItem();
   Maybe<Statement*> ParseLexicalDeclaration();
   Maybe<Statement*> ParseLexicalBinding();
@@ -1593,13 +1661,13 @@ class Parser {
   Maybe<Statement*> ParseFinally();
   Maybe<Statement*> ParseCatchParameter();
   Maybe<Statement*> ParseDebuggerStatement();
-  Maybe<Statement*> ParseFunctionDeclaration();
+  Maybe<Statement*> ParseFunctionDeclaration(
+      bool async, bool in_default = false);
   Maybe<Expression*> ParseFunctionExpression();
   Maybe<Expression*> ParseFormalParameters();
   Maybe<Expression*> ParseFormalParameterList();
   Maybe<Expression*> ParseFunctionRestParameter();
   Maybe<Statement*> ParseFunctionBody();
-  Maybe<Ast*> ParseFunctionStatementList();
   Maybe<Expression*> ParseArrowFunction();
   Maybe<Expression*> ParseArrowParameters();
   Maybe<Ast*> ParseConciseBody();
@@ -1697,7 +1765,7 @@ class Parser {
 #if defined(DEBUG)
   std::string ToStringCurrentToken() {
     switch (cur()) {
-#define CASE(T, v) case Token::T : return std::string(v);
+#define CASE(T, v) case Token::T : return #T;
       SYMBOL_TOKEN_LIST(CASE)
       KEYWORD_TOKEN_LIST(CASE, GROUP_DUMMY_)
 #undef CASE

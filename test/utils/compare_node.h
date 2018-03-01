@@ -87,10 +87,11 @@ inline std::string Join(int pos, std::vector<std::string> v) {
 
 
 inline ::testing::AssertionResult DoCompareNode(
-    int line_number, std::string value, std::string expected) {
+    std::string value, std::string expected) {
   typedef std::vector<std::string> Vector;
   auto v = Split(value, "\n");
   auto e = Split(expected, "\n");
+  auto line_number = e.size();
   Vector::iterator v_it = v.begin();
   Vector::iterator e_it = e.begin();
   Vector::iterator v_end = v.end();
@@ -134,9 +135,8 @@ inline ::testing::AssertionResult DoCompareNode(
 }
 
 
-inline void CompareNode(
-    int line_number, std::string value, std::string expected) {
-  ASSERT_TRUE((DoCompareNode(line_number, value, expected)));
+inline void CompareNode(std::string value, std::string expected) {
+  ASSERT_TRUE((DoCompareNode(value, expected)));
 }
 
 }  // namespace testing
