@@ -36,6 +36,8 @@ using Expectations = std::array<const char*, 3>;
 
 class TestableAst {
  public:
+  static const TestableAst kNull;
+
   TestableAst(const char* name, const char* attr, lux::SourcePosition pos,
               std::initializer_list<TestableAst> children = {})
       : name_(name), attr_(attr), pos_(pos), children_(children) {}
@@ -52,6 +54,9 @@ class TestableAst {
 
  private:
   std::string ToString(std::string* indent) const {
+    if (name_.size() == 0) {
+      return "";
+    }
     std::stringstream ss;
     int has_attr = attr_.size();
     ss << *indent << "[" << name_ << " ";
@@ -71,6 +76,8 @@ class TestableAst {
   lux::SourcePosition pos_;
   std::vector<TestableAst> children_;
 };
+
+const TestableAst TestableAst::kNull = TestableAst("", "", {});
 
 inline TestableAst Ast(const char* name, const char* attr,
                        lux::SourcePosition sp,
@@ -104,6 +111,19 @@ inline TestableAst Unary(const char* operand, const char* position,
   ss << "operand = " << operand << " position = " << position;
   auto s = ss.str();
   return Ast("UnaryExpression", s.c_str(), sp, {ast});
+}
+
+inline TestableAst CallExpr(const char* receiver, lux::SourcePosition sp,
+                            const TestableAst& callee,
+                            const TestableAst& args = TestableAst::kNull) {
+  std::stringstream ss;
+  ss << "receiver = " << receiver;
+  auto s = ss.str();
+  return Ast("CallExpression", s.c_str(), sp, {callee, args});
+}
+
+inline TestableAst NewExpr(lux::SourcePosition sp, const TestableAst& callee) {
+  return Ast("NewExpression", "", sp, {callee});
 }
 
 inline TestableAst Lit(const char* attr, lux::SourcePosition sp,
@@ -170,10 +190,11 @@ class ParserTest : public lux::IsolateSetup {
         auto exp = parser.Parse(lux::Parser::SCRIPT);
         if (exp) {
           exp >>= [&](auto expr) {
-            lux::testing::CompareNode(expr->ToStringTree().c_str(),
+            lux::testing::CompareNode(ret.c_str(), expr->ToStringTree().c_str(),
                                       expectations[i]);
           };
         } else {
+          parser.PrintStackTrace();
           FAIL() << "Parsing code '" << ret << "' failed.\n";
         }
       }
@@ -214,20 +235,28 @@ class ParserTest : public lux::IsolateSetup {
   std::unique_ptr<const char*> FunctionExprWrapper(uint32_t expr_size,
                                                    Fn ast_builder) {
     std::stringstream ss;
-    uint32_t exit = 29 + expr_size;
-    uint32_t exit_expr = 12 + expr_size;
+    uint32_t exit = 31 + expr_size;
+    uint32_t exit_expr = 13 + expr_size;
     uint32_t func_exit = exit_expr + 2;
+    uint32_t base_position = 9;
+
     auto ast = Stmts(
         {0, exit, 0, 0},
-        {ExprStmt({0, func_exit, 0, 0},
-                  {FnExpr({0, func_exit, 0, 0},
-                          {Ident("X", {9, 9, 0, 0}), Exprs({10, 11, 0, 0}),
-                           Stmts({12, exit_expr, 0, 0},
-                                 {ExprStmt({12, exit_expr, 0, 0},
-                                           {ast_builder(12, exit_expr)})})})}),
-         ExprStmt({func_exit, exit, 0, 0},
+        {ExprStmt(
+             {0, func_exit, 0, 0},
+             {FnExpr({0, func_exit, 0, 0},
+                     {Ident("X", {base_position, base_position + 1, 0, 0}),
+                      Exprs({base_position + 1, base_position + 3, 0, 0}),
+                      Stmts({base_position + 4, base_position + (7 + expr_size),
+                             0, 0},
+                            {ExprStmt({base_position + 5,
+                                       base_position + (5 + expr_size), 0, 0},
+                                      {ast_builder(base_position + 5,
+                                                   base_position +
+                                                       (5 + expr_size))})})})}),
+         ExprStmt({func_exit + 1, exit, 0, 0},
                   {Lit("type = IDENTIFIER value = PARSER_SENTINEL",
-                       {func_exit, exit, 0, 0})})});
+                       {func_exit + 1, exit, 0, 0})})});
     auto s = ast.ToString();
     auto m = new char[s.size() + 2]();
     snprintf(m, s.size() + 1, "%s", s.c_str());
@@ -351,19 +380,19 @@ TEST_F(ParserTest, NumericLiteralError) {
       {"", ""}, {"'use strict';", ""}, {"function X() {", "}"}};
   SyntaxErrorTest(
       env, "0x_",
-      SourcePositions({{0, 2, 0, 0}, {13, 15, 0, 0}, {12, 14, 0, 0}}));
+      SourcePositions({{0, 2, 0, 0}, {13, 15, 0, 0}, {14, 16, 0, 0}}));
   SyntaxErrorTest(
       env, "0b_",
-      SourcePositions({{0, 2, 0, 0}, {13, 15, 0, 0}, {12, 14, 0, 0}}));
+      SourcePositions({{0, 2, 0, 0}, {13, 15, 0, 0}, {14, 16, 0, 0}}));
   SyntaxErrorTest(
       env, "0o_",
-      SourcePositions({{0, 2, 0, 0}, {13, 15, 0, 0}, {12, 14, 0, 0}}));
+      SourcePositions({{0, 2, 0, 0}, {13, 15, 0, 0}, {14, 16, 0, 0}}));
   SyntaxErrorTest(
       env, "13e",
-      SourcePositions({{0, 3, 0, 0}, {13, 16, 0, 0}, {12, 15, 0, 0}}));
+      SourcePositions({{0, 3, 0, 0}, {13, 16, 0, 0}, {14, 17, 0, 0}}));
   SyntaxErrorTest(
       env, "13e+",
-      SourcePositions({{0, 4, 0, 0}, {13, 17, 0, 0}, {12, 16, 0, 0}}));
+      SourcePositions({{0, 4, 0, 0}, {13, 17, 0, 0}, {14, 18, 0, 0}}));
 }
 
 TEST_F(ParserTest, ImplicitOctalError) {
@@ -441,7 +470,7 @@ TEST_F(ParserTest, UnterminatedStringLiteralError) {
       {"", ""}, {"'use strict';", ""}, {"function X() {", "}"}};
   SyntaxErrorTest(
       env, "'test",
-      SourcePositions({{0, 21, 0, 0}, {13, 34, 0, 0}, {12, 34, 0, 0}}));
+      SourcePositions({{0, 21, 0, 0}, {13, 34, 0, 0}, {14, 36, 0, 0}}));
 }
 
 TEST_F(ParserTest, UnterminatedStringLiteralErrorWithLineBreak) {
@@ -449,7 +478,7 @@ TEST_F(ParserTest, UnterminatedStringLiteralErrorWithLineBreak) {
       {"", ""}, {"'use strict';", ""}, {"function X() {", "}"}};
   SyntaxErrorTest(
       env, "'test\\n",
-      SourcePositions({{0, 23, 0, 0}, {13, 36, 0, 0}, {12, 36, 0, 0}}));
+      SourcePositions({{0, 23, 0, 0}, {13, 36, 0, 0}, {14, 38, 0, 0}}));
 }
 
 TEST_F(ParserTest, InvalidUnicodeSequenceError) {
@@ -457,16 +486,135 @@ TEST_F(ParserTest, InvalidUnicodeSequenceError) {
       {"", ""}, {"'use strict';", ""}, {"function X() {", "}"}};
   SyntaxErrorTest(
       env, "'\\u0041_\\u0042_\\u043_\\u0044'",
-      SourcePositions({{0, 20, 0, 0}, {13, 33, 0, 0}, {12, 32, 0, 0}}));
+      SourcePositions({{0, 20, 0, 0}, {13, 33, 0, 0}, {14, 34, 0, 0}}));
 }
 
-TEST_F(ParserTest, UnaryExpression) {
+TEST_F(ParserTest, UnaryExpressionPlusPre) {
   SingleExpressionTest(
       [&](uint32_t start, uint32_t end) {
         return Unary("OP_PLUS", "PRE", {start, end, 0, 0},
                      {Number("1", {start + 1, end, 0, 0})});
       },
       "+1");
+}
+
+TEST_F(ParserTest, UnaryExpressionMinusPre) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Unary("OP_MINUS", "PRE", {start, end, 0, 0},
+                     {Number("1", {start + 1, end, 0, 0})});
+      },
+      "-1");
+}
+
+TEST_F(ParserTest, UnaryExpressionNotPre) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Unary("OP_NOT", "PRE", {start, end, 0, 0},
+                     {Number("1", {start + 1, end, 0, 0})});
+      },
+      "!1");
+}
+
+TEST_F(ParserTest, UnaryExpressionTildePre) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Unary("OP_TILDE", "PRE", {start, end, 0, 0},
+                     {Number("1", {start + 1, end, 0, 0})});
+      },
+      "~1");
+}
+
+TEST_F(ParserTest, UnaryExpressionDeletePre) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        auto next = start + 7;
+        return Unary("DELETE", "PRE", {start, end, 0, 0},
+                     {Number("1", {next, end, 0, 0})});
+      },
+      "delete 1");
+}
+
+TEST_F(ParserTest, UnaryExpressionTypeofPre) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        auto next = start + 7;
+        return Unary("TYPEOF", "PRE", {start, end, 0, 0},
+                     {Number("1", {next, end, 0, 0})});
+      },
+      "typeof 1");
+}
+
+TEST_F(ParserTest, UnaryExpressionVoidPre) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Unary("VOID", "PRE", {start, end, 0, 0},
+                     {Number("1", {start + 5, end, 0, 0})});
+      },
+      "void 1");
+}
+
+TEST_F(ParserTest, UpdateExpressionPreIncrement) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Unary("OP_INCREMENT", "PRE", {start, end, 0, 0},
+                     {Ident("X", {start + 2, end, 0, 0})});
+      },
+      "++X");
+}
+
+TEST_F(ParserTest, UpdateExpressionPreDecrement) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Unary("OP_DECREMENT", "PRE", {start, end, 0, 0},
+                     {Ident("X", {start + 2, end, 0, 0})});
+      },
+      "--X");
+}
+
+TEST_F(ParserTest, UpdateExpressionPostIncrement) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Unary("OP_INCREMENT", "POST", {start, end, 0, 0},
+                     {Ident("X", {start, end - 2, 0, 0})});
+      },
+      "X++");
+}
+
+TEST_F(ParserTest, UpdateExpressionPostDecrement) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Unary("OP_DECREMENT", "POST", {start, end, 0, 0},
+                     {Ident("X", {start, end - 2, 0, 0})});
+      },
+      "X--");
+}
+
+TEST_F(ParserTest, NewExpressionNoArgs) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return NewExpr({start, end, 0, 0}, Ident("X", {start + 4, end, 0, 0}));
+      },
+      "new X");
+}
+
+TEST_F(ParserTest, NewExpressionWithArgs) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return NewExpr(
+            {start, end, 0, 0},
+            CallExpr("EXPRESSION",
+                     {
+                         start + 4,
+                         end,
+                         0,
+                         0,
+                     },
+                     Ident("X", {start + 4, end - 3, 0, 0}),
+                     Exprs({start + 6, end - 1},
+                           {Number("1", {start + 6, end - 1, 0, 0})})));
+      },
+      "new X(1)");
 }
 
 }  // namespace

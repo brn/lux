@@ -184,6 +184,7 @@ class Utf16CodePoint;
   A(IMPORT_SPECIFIER, ImportSpecifier, 25)                    \
   A(IMPORT_BINDING, ImportBinding, 27)                        \
   A(NAMED_IMPORT_LIST, NamedImportList, 29)                   \
+  A(NEW_EXPRESSION, NewExpression, 31)                        \
   A(STATEMENTS, Statements, 0)                                \
   A(IMPORT_DECLARATION, ImportDeclaration, 2)                 \
   A(EXPORT_DECLARATION, ExportDeclaration, 4)                 \
@@ -526,6 +527,28 @@ class ConditionalExpression : public Expression {
   Expression* else_expression_;
 };
 
+class NewExpression : public Expression {
+ public:
+  explicit NewExpression(Expression* callee)
+      : Expression(Ast::NEW_EXPRESSION), callee_(callee) {}
+
+  LUX_CONST_PROPERTY(Expression*, callee, callee_)
+
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ' '
+          << source_position().ToString() << ']' << '\n';
+  }
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    auto ni = "  " + (*indent);
+    callee_->ToStringTree(&ni, ss);
+  }
+
+ private:
+  Expression* callee_;
+};
+
 class CallExpression : public Expression {
  public:
   CallExpression() : Expression(Ast::CALL_EXPRESSION) {}
@@ -538,7 +561,7 @@ class CallExpression : public Expression {
 
   LUX_CONST_PROPERTY(Receiver::Type, receiver_type, receiver_type_)
   LUX_CONST_PROPERTY(Expression*, callee, callee_)
-  LUX_CONST_PROPERTY(Expression*, arguments, arguments_)
+  LUX_CONST_PROPERTY(Maybe<Expression*>, arguments, arguments_)
 
   void ToStringSelf(const Ast* ast, std::string* indent,
                     std::stringstream* ss) const {
@@ -550,13 +573,13 @@ class CallExpression : public Expression {
     ToStringSelf(this, indent, ss);
     auto ni = "  " + (*indent);
     callee_->ToStringTree(&ni, ss);
-    arguments_->ToStringTree(&ni, ss);
+    arguments_ >>= [&](auto a) { a->ToStringTree(&ni, ss); };
   }
 
  private:
   Receiver::Type receiver_type_;
   Expression* callee_;
-  Expression* arguments_;
+  Maybe<Expression*> arguments_;
 };
 
 class PropertyAccessExpression : public Expression {
@@ -1113,13 +1136,13 @@ class Parser {
 
   class Allowance {
    public:
-#define ALLOWANCE_TYPE_LIST(A)             \
-  A(TEMPLATE, template, 0x1)               \
-  A(CALL, call, 0x2)                       \
-  A(BINDING_PATTERN, binding_pattern, 0x4) \
-  A(INITIALIZER, initializer, 0x8)
+#define ALLOWANCE_TYPE_LIST(A)                \
+  A(TEMPLATE, template, 0x1, 0)               \
+  A(CALL, call, 0x2, 1)                       \
+  A(BINDING_PATTERN, binding_pattern, 0x4, 2) \
+  A(INITIALIZER, initializer, 0x8, 3)
     enum Type {
-#define DEF_ALLOWANCE(V, _, v) V = v,
+#define DEF_ALLOWANCE(V, _, v, x) V = v,
       ALLOWANCE_TYPE_LIST(DEF_ALLOWANCE)
 #undef DEF_ALLOWANCE
     };
@@ -1128,9 +1151,9 @@ class Parser {
 
     Allowance() {}
 
-#define ALLOWANCE_PROPERTIES(V, name, _)         \
-  LUX_INLINE void set_##name() { flag_.set(V); } \
-  LUX_INLINE bool is_##name##_allowed() const { return flag_.get(V); }
+#define ALLOWANCE_PROPERTIES(V, name, _, x)        \
+  LUX_INLINE void allow_##name() { flag_.set(x); } \
+  LUX_INLINE bool is_##name##_allowed() const { return flag_.get(x); }
     ALLOWANCE_TYPE_LIST(ALLOWANCE_PROPERTIES)
 #undef ALLOWANCE_PROPERTIES
 
@@ -1224,6 +1247,10 @@ class Parser {
 
     const SourcePosition& position() const { return position_; }
 
+    const SourcePosition& previous_position() const {
+      return previous_position_;
+    }
+
     inline bool HasMore() const {
       return it_ != end_ && !reporter_->HasPendingError();
     }
@@ -1282,6 +1309,7 @@ class Parser {
     Utf16CodePoint DecodeHexEscape(bool* ok, int len = 4);
     Utf16CodePoint DecodeAsciiEscapeSequence(bool* ok);
 
+    SourcePosition previous_position_;
     SourcePosition position_;
     SourcePosition lookahead_position_;
     SourcePosition* current_position_;
@@ -1319,6 +1347,10 @@ class Parser {
 
   LUX_INLINE const SourcePosition& position() const {
     return tokenizer_->position();
+  }
+
+  LUX_INLINE const SourcePosition& previous_position() const {
+    return tokenizer_->previous_position();
   }
 
   inline void PushState(State s) { parser_state_->PushState(s); }
@@ -1609,6 +1641,11 @@ class Parser {
 
   DebugStream<false> phase_buffer_;
   std::string indent_;
+
+ public:
+  void PrintStackTrace() { phase_buffer_.PrintStackTrace(); }
+
+ private:
 #endif
 
   Maybe<Ast*> result_;

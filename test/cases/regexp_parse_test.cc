@@ -21,12 +21,12 @@
 // THE SOFTWARE.
 
 #include <gtest/gtest.h>
+#include "../../src/objects/jsobject.h"
+#include "../../src/regexp.h"
 #include "../utils/compare_node.h"
 #include "../utils/isolate_setup.h"
-#include "../../src/regexp.h"
-#include "../../src/objects/jsobject.h"
 
-class RegExpTest: public lux::IsolateSetup {
+class RegExpTest : public lux::IsolateSetup {
  protected:
   template <bool error = false, bool show_error = false>
   void RunTest(const char* regexp, const char* expected,
@@ -39,7 +39,7 @@ class RegExpTest: public lux::IsolateSetup {
     p.Parse();
     if (error) {
       ASSERT_TRUE(er.HasPendingError());
-      for (auto &e : er) {
+      for (auto& e : er) {
         EXPECT_TRUE(e->source_position() == source_position);
       }
       if (show_error) {
@@ -47,11 +47,10 @@ class RegExpTest: public lux::IsolateSetup {
       }
     } else {
       auto a = p.node()->ToString();
-      lux::testing::CompareNode(a.c_str(), expected);
+      lux::testing::CompareNode(regexp, a.c_str(), expected);
     }
   }
 };
-
 
 namespace {
 TEST_F(RegExpTest, Simple) {

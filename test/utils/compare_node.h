@@ -24,10 +24,10 @@
 #define TEST_UTILS_COMPARE_NODE_H_
 
 #include <gtest/gtest.h>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
-#include <sstream>
 
 namespace lux {
 namespace testing {
@@ -55,7 +55,6 @@ inline std::vector<std::string> Split(std::string buf, const char* delim) {
   return ret;
 }
 
-
 inline std::string Join(int pos, std::vector<std::string> v) {
   std::stringstream ss;
   int i = 0;
@@ -65,29 +64,27 @@ inline std::string Join(int pos, std::vector<std::string> v) {
     if (i == pos) {
       std::string::size_type found = str.find_first_not_of(" ");
       std::string::size_type found_end = str.find_last_not_of(" ");
-      found = found == std::string::npos? 0: found;
-      found_end = found_end == std::string::npos? str.size() - 1: found_end;
+      found = found == std::string::npos ? 0 : found;
+      found_end = found_end == std::string::npos ? str.size() - 1 : found_end;
       if (found != std::string::npos && found_end != std::string::npos) {
         ss << std::string(found, ' ')
-           << std::string((found_end - found) + 1, '^')
-           << "\n";
+           << std::string((found_end - found) + 1, '^') << "\n";
       }
     }
     i++;
   }
   if (i <= pos) {
-    ss << "\n" << std::string(0, ' ')
-       << std::string(v.back().size(), '^')
-       << "\n";
+    ss << "\n"
+       << std::string(0, ' ') << std::string(v.back().size(), '^') << "\n";
   }
   std::string ret = ss.str();
   ret.substr(0, ret.size() - 1);
   return ret;
 }
 
-
-inline ::testing::AssertionResult DoCompareNode(
-    std::string value, std::string expected) {
+inline ::testing::AssertionResult DoCompareNode(const char* code,
+                                                std::string value,
+                                                std::string expected) {
   typedef std::vector<std::string> Vector;
   auto v = Split(value, "\n");
   auto e = Split(expected, "\n");
@@ -101,10 +98,13 @@ inline ::testing::AssertionResult DoCompareNode(
   while (1) {
     if ((*v_it) != (*e_it)) {
       return ::testing::AssertionFailure()
-        << "\nExpectation is not match to the result.\n"
-        << "at line " << line_number << "\n"
-        << "value:  \n" << Join(index, v) << '\n'
-        << "expected:  \n" << Join(index, e) << '\n';
+             << "\nExpectation is not match to the result.\n"
+             << "at line " << line_number << "\n"
+             << "value:  \n"
+             << Join(index, v) << '\n'
+             << "expected:  \n"
+             << Join(index, e) << '\n'
+             << "Code: " << code << "\n\n";
     }
     ++v_it;
     ++e_it;
@@ -113,19 +113,25 @@ inline ::testing::AssertionResult DoCompareNode(
     if (v_it == v_end) {
       if (e_it != e_end) {
         return ::testing::AssertionFailure()
-          << "\nExpectation is longer than result.\n"
-          << "at line " << line_number << "\n"
-          << "value:  \n" << Join(index, v) << '\n'
-          << "expected:  \n" << Join(index, e) << '\n';
+               << "\nExpectation is longer than result.\n"
+               << "at line " << line_number << "\n"
+               << "value:  \n"
+               << Join(index, v) << '\n'
+               << "expected:  \n"
+               << Join(index, e) << '\n'
+               << "Code: " << code << "\n\n";
       }
       break;
     } else if (e_it == e_end) {
       if (v_it != v_end) {
         return ::testing::AssertionFailure()
-          << "\nExpectation is shorter than result.\n"
-          << "at line " << line_number << "\n"
-          << "value:  \n" << Join(index, v) << '\n'
-          << "expected:  \n" << Join(index, e) << '\n';
+               << "\nExpectation is shorter than result.\n"
+               << "at line " << line_number << "\n"
+               << "value:  \n"
+               << Join(index, v) << '\n'
+               << "expected:  \n"
+               << Join(index, e) << '\n'
+               << "Code: " << code << "\n\n";
       }
       break;
     }
@@ -134,9 +140,9 @@ inline ::testing::AssertionResult DoCompareNode(
   return ::testing::AssertionSuccess();
 }
 
-
-inline void CompareNode(std::string value, std::string expected) {
-  ASSERT_TRUE((DoCompareNode(value, expected)));
+inline void CompareNode(const char* code, std::string value,
+                        std::string expected) {
+  ASSERT_TRUE((DoCompareNode(code, value, expected)));
 }
 
 }  // namespace testing
