@@ -27,29 +27,30 @@
 
 namespace lux {
 namespace testing {
-::testing::AssertionResult CompareSourcePosition(const SourcePosition& actual,
-                                                 const SourcePosition& expected) {
+::testing::AssertionResult CompareSourcePosition(
+    const SourcePosition& actual, const SourcePosition& expected) {
   if (actual.start_col() != expected.start_col()) {
     return ::testing::AssertionFailure()
-      << "start_col => "
-      << "actual: " << actual.start_col() << " expected: " << expected.start_col();
+           << "start_col => "
+           << "actual: " << actual.start_col()
+           << " expected: " << expected.start_col();
   }
   if (actual.end_col() != expected.end_col()) {
-    return ::testing::AssertionFailure()
-      << "end_col => "
-      << "actual: " << actual.end_col() << " expected: " << expected.end_col();
+    return ::testing::AssertionFailure() << "end_col => "
+                                         << "actual: " << actual.end_col()
+                                         << " expected: " << expected.end_col();
   }
   if (actual.start_line_number() != expected.start_line_number()) {
     return ::testing::AssertionFailure()
-      << "start_line_number => "
-      << "actual: " << actual.start_line_number()
-      << " expected: " << expected.start_line_number();
+           << "start_line_number => "
+           << "actual: " << actual.start_line_number()
+           << " expected: " << expected.start_line_number();
   }
   if (actual.end_line_number() != expected.end_line_number()) {
     return ::testing::AssertionFailure()
-      << "end_line_number => "
-      << "actual: " << actual.end_line_number()
-      << " expected: " << expected.end_line_number();
+           << "end_line_number => "
+           << "actual: " << actual.end_line_number()
+           << " expected: " << expected.end_line_number();
   }
   return ::testing::AssertionSuccess();
 }

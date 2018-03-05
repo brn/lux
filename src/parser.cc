@@ -20,55 +20,54 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include "./parser.h"
 #include <iostream>
+#include <memory>
 #include <sstream>
 #include <type_traits>
-#include <memory>
 #include "./alloc.h"
 #include "./chars.h"
-#include "./parser.h"
 
 namespace lux {
-#define BASE_REPORT_SYNTAX_ERROR_(parser)                               \
-  auto e = AllocShared<lux::ErrorDescriptor>(parser->position());       \
+#define BASE_REPORT_SYNTAX_ERROR_(parser)                         \
+  auto e = AllocShared<lux::ErrorDescriptor>(parser->position()); \
   (reporter_->ReportSyntaxError(e))
 
 #ifdef DEBUG
-#define REPORT_TOKENIZER_ERROR_NO_RETURN(parser, message) { \
-    BASE_REPORT_SYNTAX_ERROR_(parser)                       \
-      << "\n [Debug] line:" << __LINE__                     \
-      << ' ' << __FUNCTION__ << "\n" << message;            \
+#define REPORT_TOKENIZER_ERROR_NO_RETURN(parser, message)                \
+  {                                                                      \
+    BASE_REPORT_SYNTAX_ERROR_(parser)                                    \
+        << "\n [Debug] line:" << __LINE__ << ' ' << __FUNCTION__ << "\n" \
+        << message;                                                      \
   }
 #define REPORT_TOKENIZER_ERROR(parser, message) \
   BASE_REPORT_SYNTAX_ERROR_(parser);            \
   return Token::INVALID;
-#define REPORT_SYNTAX_ERROR_NO_RETURN(parser, message) {  \
-    BASE_REPORT_SYNTAX_ERROR_(parser)                     \
-      << "\n [Debug] line:" << __LINE__                   \
-      << ' ' << __FUNCTION__ << "\n" << message;          \
+#define REPORT_SYNTAX_ERROR_NO_RETURN(parser, message)                   \
+  {                                                                      \
+    BASE_REPORT_SYNTAX_ERROR_(parser)                                    \
+        << "\n [Debug] line:" << __LINE__ << ' ' << __FUNCTION__ << "\n" \
+        << message;                                                      \
   }
-#define REPORT_SYNTAX_ERROR(T, parser, message);  \
-  REPORT_SYNTAX_ERROR_NO_RETURN(parser, message)  \
+#define REPORT_SYNTAX_ERROR(T, parser, message)  \
+  ;                                              \
+  REPORT_SYNTAX_ERROR_NO_RETURN(parser, message) \
   return Nothing<T>();
 #else
-#define REPORT_TOKENIZER_ERROR(parser, message)    \
-  BASE_REPORT_SYNTAX_ERROR_(parser) << message  \
-  return Token::INVALID;
+#define REPORT_TOKENIZER_ERROR(parser, message) \
+  BASE_REPORT_SYNTAX_ERROR_(parser) << message return Token::INVALID;
 #define REPORT_SYNTAX_ERROR(T, parser, message) \
-  BASE_REPORT_SYNTAX_ERROR_(parser) << message  \
-  return Nothing<T>;
+  BASE_REPORT_SYNTAX_ERROR_(parser) << message return Nothing<T>;
 #endif
 
-#define EXPECT_NOT_ADVANCE(T, parser, n, token, expect) \
-  if (n != token) {                                     \
-    REPORT_SYNTAX_ERROR(                                \
-        T, parser, "'" << expect << "' expected");      \
+#define EXPECT_NOT_ADVANCE(T, parser, n, token, expect)            \
+  if (n != token) {                                                \
+    REPORT_SYNTAX_ERROR(T, parser, "'" << expect << "' expected"); \
   }
 
-#define EXPECT_NOT_ADVANCE_ONE_OF(T, parser, n, token, expects) \
-  if (!Token::OneOf(n, token)) {                                \
-    REPORT_SYNTAX_ERROR(                                        \
-        T, parser, "'" << expect << "' expected");              \
+#define EXPECT_NOT_ADVANCE_ONE_OF(T, parser, n, token, expects)    \
+  if (!Token::OneOf(n, token)) {                                   \
+    REPORT_SYNTAX_ERROR(T, parser, "'" << expect << "' expected"); \
   }
 
 #define EXPECT(T, parser, n, token, expect)       \
@@ -79,13 +78,12 @@ namespace lux {
   EXPECT_NOT_ADVANCE_ONE_OF(T, parser, n, token, expects) \
   advance();
 
-#define EXPECT_NO_RETURN(parser, n, token, expect)  \
-  if (n != token) {                                 \
-    REPORT_SYNTAX_ERROR_NO_RETURN(                  \
-        parser, "'" << expect << "' expected");     \
-    return;                                         \
-  }                                                 \
-  advance();                                        \
+#define EXPECT_NO_RETURN(parser, n, token, expect)                        \
+  if (n != token) {                                                       \
+    REPORT_SYNTAX_ERROR_NO_RETURN(parser, "'" << expect << "' expected"); \
+    return;                                                               \
+  }                                                                       \
+  advance();
 
 const uint8_t Ast::kStatementFlag;
 const uint8_t Ast::kExpressionFlag;
@@ -96,12 +94,10 @@ const uint8_t PropertyAccessExpression::kReceiverTypeMask;
 static Elision kElision;
 
 void Parser::Tokenizer::Prologue() {
-  current_position_->set_start_col(
-      current_position_->end_col());
-  current_position_->set_end_col(
-      current_position_->end_col());
+  current_position_->set_start_col(current_position_->end_col());
+  current_position_->set_end_col(current_position_->end_col());
+  current_state_->Unset(TokenizerState::IMPLICIT_OCTAL);
   unset_linebreak_before();
-  parser_state_->unset_implicit_octal();
   while (1) {
     if (SkipLineBreak()) {
       current_position_->set_start_line_number(
@@ -111,8 +107,7 @@ void Parser::Tokenizer::Prologue() {
       current_position_->set_end_col(0);
       set_linebreak_before();
     } else if (SkipWhiteSpace()) {
-      current_position_->set_start_col(
-          current_position_->end_col() + skipped_);
+      current_position_->set_start_col(current_position_->end_col() + skipped_);
       unset_linebreak_before();
     } else {
       break;
@@ -133,6 +128,7 @@ void Parser::Tokenizer::Epilogue() {
 Token::Type Parser::Tokenizer::Next() {
   current_buffer_ = &buffer_;
   current_position_ = &position_;
+  current_state_ = &state_;
   if (!HasMore()) {
     return token_ = Token::END;
   }
@@ -141,6 +137,7 @@ Token::Type Parser::Tokenizer::Next() {
     lookahead_ = Token::INVALID;
     buffer_ = lookahead_buffer_;
     position_ = lookahead_position_;
+    state_ = lookahead_state_;
     return token_;
   }
   Prologue();
@@ -152,12 +149,15 @@ Token::Type Parser::Tokenizer::Next() {
 Token::Type Parser::Tokenizer::Peek() {
   current_buffer_ = &lookahead_buffer_;
   current_position_ = &lookahead_position_;
+  current_state_ = &lookahead_state_;
   if (!HasMore()) {
+    lookahead_position_ = position_;
     return lookahead_ = Token::END;
   }
   if (lookahead_ != Token::INVALID) {
     return lookahead_;
   }
+  lookahead_position_ = position_;
   Prologue();
   lookahead_ = Tokenize();
   Epilogue();
@@ -171,9 +171,7 @@ Utf16CodePoint Parser::Tokenizer::Advance() {
 }
 
 Parser::TokenizerRecord Parser::Tokenizer::Record() {
-  return {
-    it_, lookahead_, position_
-  };
+  return {it_, lookahead_, position_};
 }
 
 void Parser::Tokenizer::Restore(const Parser::TokenizerRecord& record) {
@@ -187,10 +185,8 @@ bool IsSucceeding(Utf16String::iterator* it, char ch) {
 }
 
 bool IsIdentifierStart(Utf16CodePoint value) {
-  return (value >= 97 && value <= 122)
-    || (value >= 65 && value <= 90)
-    || (value == '_' || value == '$')
-    || value == 92;
+  return (value >= 97 && value <= 122) || (value >= 65 && value <= 90) ||
+         (value == '_' || value == '$') || value == 92;
 }
 
 bool IsIdentifierChar(Utf16CodePoint value) {
@@ -202,9 +198,8 @@ bool IsDecimalDigit(Utf16CodePoint value) {
 }
 
 bool IsHexDigit(Utf16CodePoint value) {
-  return (value >= '0' && value <= '9')
-    || (value >= 'a' && value <= 'z')
-    || (value >= 'A' && value <= 'Z');
+  return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'z') ||
+         (value >= 'A' && value <= 'Z');
 }
 
 bool IsBinaryDigit(Utf16CodePoint value) {
@@ -441,13 +436,9 @@ Token::Type Parser::Tokenizer::Tokenize() {
   return Token::INVALID;
 }
 
-bool IsStartUnicodeEscapeSequence(Utf16CodePoint u) {
-  return u == 'u';
-}
+bool IsStartUnicodeEscapeSequence(Utf16CodePoint u) { return u == 'u'; }
 
-bool IsStartAsciiEscapeSequence(Utf16CodePoint u) {
-  return u == 'x';
-}
+bool IsStartAsciiEscapeSequence(Utf16CodePoint u) { return u == 'x'; }
 
 bool IsStartEscapeSequence(Utf16String::iterator* it) {
   return IsStartUnicodeEscapeSequence(**it) || IsStartAsciiEscapeSequence(**it);
@@ -455,14 +446,14 @@ bool IsStartEscapeSequence(Utf16String::iterator* it) {
 
 Utf16CodePoint Parser::Tokenizer::DecodeEscapeSequence(bool* ok) {
   INVALIDATE(*it_ == '\\');
-  ++it_;  // Consume backslash
+  Advance();  // Consume backslash
 
   Utf16CodePoint result = Unicode::InvalidCodePoint();
   if (IsStartUnicodeEscapeSequence(*it_)) {
-    it_++;
+    Advance();
     result = DecodeHexEscape(ok);
   } else if (IsStartAsciiEscapeSequence(*it_)) {
-    it_++;
+    Advance();
     result = DecodeAsciiEscapeSequence(ok);
   } else {
     *ok = false;
@@ -488,7 +479,8 @@ Token::Type Parser::Tokenizer::TokenizeStringLiteral() {
             bool ok = true;
             value = DecodeEscapeSequence(&ok);
             if (!ok) {
-              return Token::INVALID;
+              REPORT_TOKENIZER_ERROR(this,
+                                     "Invalid unicode escape sequence found");
             }
           } else {
             escaped = true;
@@ -504,6 +496,13 @@ Token::Type Parser::Tokenizer::TokenizeStringLiteral() {
       case 0:
         return Token::INVALID;
       default:
+        if (value == '\n' || value == '\r') {
+          if (!escaped) {
+            goto Label_Failed;
+          }
+          CollectLineBreak();
+          continue;
+        }
         if (value == start) {
           if (!escaped) {
             Advance();
@@ -518,7 +517,8 @@ Token::Type Parser::Tokenizer::TokenizeStringLiteral() {
     }
   }
 
-  return Token::INVALID;
+Label_Failed:
+  REPORT_TOKENIZER_ERROR(this, "Unterminated string literal");
 }
 
 Token::Type Parser::Tokenizer::TokenizeIdentifier() {
@@ -555,7 +555,7 @@ void Parser::Tokenizer::AdvanceAndPushBuffer() {
 
 Token::Type Parser::Tokenizer::TokenizeNumericLiteral(bool period_seen) {
   current_buffer_->clear();
-    auto value = *it_;
+  auto value = *it_;
   INVALIDATE(IsDecimalDigit(value));
   bool leading_zeros = false;
 
@@ -608,7 +608,7 @@ Token::Type Parser::Tokenizer::TokenizeNumericLiteral(bool period_seen) {
       return Token::NUMERIC_LITERAL;
     } else if (*it_ >= '0' && *it_ <= '7') {
       kind = IMPLICIT_OCTAL;
-      parser_state_->set_implicit_octal();
+      current_state_->Set(TokenizerState::IMPLICIT_OCTAL);
       while (IsOctalDigit(*it_)) {
         AdvanceAndPushBuffer();
       }
@@ -620,8 +620,8 @@ Token::Type Parser::Tokenizer::TokenizeNumericLiteral(bool period_seen) {
     }
 
     if (kind == IMPLICIT_OCTAL) {
-      if (IsDecimalDigit(*it_)) {
-        parser_state_->unset_implicit_octal();
+      if (IsDecimalDigit(*it_) && *it_ > '7') {
+        current_state_->Unset(TokenizerState::IMPLICIT_OCTAL);
         while (IsDecimalDigit(*it_)) {
           AdvanceAndPushBuffer();
         }
@@ -677,30 +677,29 @@ Token::Type Parser::Tokenizer::GetIdentifierType() {
   // Borrowed from v8 javascript engine.
   switch (maybe_keyword[0]) {
     default:
-#define KEYWORD_GROUP_CASE(ch)                  \
-      break;                                    \
-    case ch:
-#define KEYWORD(TOKEN, keyword)                                         \
-      {                                                                 \
-        const int keyword_length = sizeof(keyword) - 1;                 \
-        static_assert(keyword_length >= min_length,                     \
-                      "The length of the keyword must be greater than 2"); \
-        static_assert(keyword_length <= max_length,                     \
-                      "The length of the keyword mst be less than 10"); \
-        if (input_length == keyword_length &&                           \
-            maybe_keyword[1] == keyword[1] &&                           \
-            (keyword_length <= 2 || maybe_keyword[2] == keyword[2]) &&  \
-            (keyword_length <= 3 || maybe_keyword[3] == keyword[3]) &&  \
-            (keyword_length <= 4 || maybe_keyword[4] == keyword[4]) &&  \
-            (keyword_length <= 5 || maybe_keyword[5] == keyword[5]) &&  \
-            (keyword_length <= 6 || maybe_keyword[6] == keyword[6]) &&  \
-            (keyword_length <= 7 || maybe_keyword[7] == keyword[7]) &&  \
-            (keyword_length <= 8 || maybe_keyword[8] == keyword[8]) &&  \
-            (keyword_length <= 9 || maybe_keyword[9] == keyword[9])) {  \
-          return Token::TOKEN;                                          \
-        }                                                               \
-      }
-    KEYWORD_TOKEN_LIST(KEYWORD, KEYWORD_GROUP_CASE)
+#define KEYWORD_GROUP_CASE(ch) \
+  break;                       \
+  case ch:
+#define KEYWORD(TOKEN, keyword)                                             \
+  {                                                                         \
+    const int keyword_length = sizeof(keyword) - 1;                         \
+    static_assert(keyword_length >= min_length,                             \
+                  "The length of the keyword must be greater than 2");      \
+    static_assert(keyword_length <= max_length,                             \
+                  "The length of the keyword mst be less than 10");         \
+    if (input_length == keyword_length && maybe_keyword[1] == keyword[1] && \
+        (keyword_length <= 2 || maybe_keyword[2] == keyword[2]) &&          \
+        (keyword_length <= 3 || maybe_keyword[3] == keyword[3]) &&          \
+        (keyword_length <= 4 || maybe_keyword[4] == keyword[4]) &&          \
+        (keyword_length <= 5 || maybe_keyword[5] == keyword[5]) &&          \
+        (keyword_length <= 6 || maybe_keyword[6] == keyword[6]) &&          \
+        (keyword_length <= 7 || maybe_keyword[7] == keyword[7]) &&          \
+        (keyword_length <= 8 || maybe_keyword[8] == keyword[8]) &&          \
+        (keyword_length <= 9 || maybe_keyword[9] == keyword[9])) {          \
+      return Token::TOKEN;                                                  \
+    }                                                                       \
+  }
+      KEYWORD_TOKEN_LIST(KEYWORD, KEYWORD_GROUP_CASE)
 #undef KEYWORD
 #undef KEYWORD_GROUP_CASE
   }
@@ -761,6 +760,15 @@ Token::Type Parser::Tokenizer::TokenizeRegExp() {
     }
     Advance();
     value = *it_;
+  }
+}
+
+void Parser::Tokenizer::CollectLineBreak() {
+  if (*it_ == '\r') {
+    AdvanceAndPushBuffer();
+    if (*it_ == '\n') {
+      AdvanceAndPushBuffer();
+    }
   }
 }
 
@@ -846,14 +854,13 @@ void Parser::Tokenizer::unset_linebreak_after() {
 }
 
 Parser::Parser(Utf16String* sources, ErrorReporter* reporter)
-    : reporter_(reporter),
-      sources_(sources) {
+    : reporter_(reporter), sources_(sources) {
   parser_state_();
   tokenizer_(sources, parser_state_.Get(), reporter_);
 }
 
 bool Parser::MatchStates(std::initializer_list<State> states) {
-  for (auto &state : states) {
+  for (auto& state : states) {
     if (parser_state_->Is(state)) {
       return true;
     }
@@ -882,56 +889,44 @@ Maybe<Ast*> Parser::Parse(ParseType parse_type) {
 
 #ifdef DEBUG
 
-#define ENTER_PARSING                                                   \
-  auto debug_result_holder__ = Nothing<Ast*>();                         \
-  static const char* kPhaseName__ = __FUNCTION__;                       \
-  if (cur() != Token::INVALID) {                                        \
-    phase_buffer_                                                       \
-      << indent_                                                        \
-      << "Enter "                                                       \
-      << kPhaseName__                                                   \
-      << ": CurrentToken = "                                            \
-      << ToStringCurrentToken();                                        \
-  } else {                                                              \
-    phase_buffer_                                                       \
-      << indent_                                                        \
-      << "Enter "                                                       \
-      << kPhaseName__                                                   \
-      << ": CurrentToken = null";                                       \
-  }                                                                     \
-  phase_buffer_ << " pos = " << position().start_col();                 \
-  phase_buffer_ << " line = " << position().start_line_number() << '\n'; \
-  indent_ += "  ";                                                      \
-  auto err_size = reporter_->size();                                    \
-  LUX_SCOPED([&]{                                                       \
-    indent_ = indent_.substr(0, indent_.size() - 2);                    \
-    if (this->cur() != Token::INVALID) {                                \
-      phase_buffer_                                                     \
-        << indent_                                                      \
-        << "Exit "                                                      \
-        << kPhaseName__                                                 \
-        << ' ' << (debug_result_holder__.just()? "Success": "!!Failure") \
-        << " CurrentToken = "                                           \
-        << ToStringCurrentToken()                                       \
-        << (err_size != reporter_->size()?                              \
-            "[Error!]": "");                                            \
-    } else {                                                            \
-      phase_buffer_                                                     \
-        << indent_                                                      \
-        << "Exit "                                                      \
-        << kPhaseName__                                                 \
-        << ' ' << (debug_result_holder__.just()? "Success": "!!Failure") \
-        << ": CurrentToken = null"                                      \
-        << (err_size != reporter_->size()?                              \
-            "[Error!]": "");                                            \
-    }                                                                   \
-    phase_buffer_ << " pos = " << position().start_col();               \
-    phase_buffer_                                                       \
-      << " line = " <<  position().start_line_number() << '\n';         \
-  });                                                                   \
+#define ENTER_PARSING                                                      \
+  auto debug_result_holder__ = Nothing<Ast*>();                            \
+  static const char* kPhaseName__ = __FUNCTION__;                          \
+  if (cur() != Token::INVALID) {                                           \
+    phase_buffer_ << indent_ << "Enter " << kPhaseName__                   \
+                  << ": CurrentToken = " << ToStringCurrentToken();        \
+  } else {                                                                 \
+    phase_buffer_ << indent_ << "Enter " << kPhaseName__                   \
+                  << ": CurrentToken = null";                              \
+  }                                                                        \
+  phase_buffer_ << " pos = " << position().start_col();                    \
+  phase_buffer_ << " line = " << position().start_line_number() << '\n';   \
+  indent_ += "  ";                                                         \
+  auto err_size = reporter_->size();                                       \
+  LUX_SCOPED([&] {                                                         \
+    indent_ = indent_.substr(0, indent_.size() - 2);                       \
+    if (this->cur() != Token::INVALID) {                                   \
+      phase_buffer_ << indent_ << "Exit " << kPhaseName__ << ' '           \
+                    << (debug_result_holder__.just() ? "Success"           \
+                                                     : "!!Failure")        \
+                    << " CurrentToken = " << ToStringCurrentToken()        \
+                    << (err_size != reporter_->size() ? "[Error!]" : "");  \
+    } else {                                                               \
+      phase_buffer_ << indent_ << "Exit " << kPhaseName__ << ' '           \
+                    << (debug_result_holder__.just() ? "Success"           \
+                                                     : "!!Failure")        \
+                    << ": CurrentToken = null"                             \
+                    << (err_size != reporter_->size() ? "[Error!]" : "");  \
+    }                                                                      \
+    phase_buffer_ << " pos = " << position().start_col();                  \
+    phase_buffer_ << " line = " << position().start_line_number() << '\n'; \
+  });                                                                      \
   auto parsed_result__ = [&, this]() {USE(this);
-#define EXIT_PARSING                                                    \
-  }(); debug_result_holder__ = parsed_result__; return parsed_result__;
+#define EXIT_PARSING                       \
+  }                                        \
+  ();                                      \
+  debug_result_holder__ = parsed_result__; \
+  return parsed_result__;
 #else
 // Disabled.
 #define ENTER_PARSING
@@ -944,9 +939,8 @@ Maybe<T*> Parser::ParseTerminator(T* expr) {
   if (cur() == Token::TERMINATE) {
     advance();
     return Just(expr);
-  } else if (cur() != Token::END
-             && cur() != Token::RIGHT_BRACE
-             && !has_linebreak_after()) {
+  } else if (cur() != Token::END && cur() != Token::RIGHT_BRACE &&
+             !has_linebreak_after()) {
     REPORT_SYNTAX_ERROR(T*, this, "';' expected.");
   }
 
@@ -954,9 +948,7 @@ Maybe<T*> Parser::ParseTerminator(T* expr) {
   EXIT_PARSING;
 }
 
-bool NoCondition(Token::Type token) {
-  return true;
-}
+bool NoCondition(Token::Type token) { return true; }
 
 Maybe<Ast*> Parser::ParseScript() {
   ENTER_PARSING
@@ -966,8 +958,7 @@ Maybe<Ast*> Parser::ParseScript() {
 
 void Parser::ParseDirectivePrologue() {
   static const char* kUseStrict = "use strict";
-  if (cur() == Token::STRING_LITERAL
-      && value().IsAsciiEqual(kUseStrict)) {
+  if (cur() == Token::STRING_LITERAL && value().IsAsciiEqual(kUseStrict)) {
     parser_state_->set_strict_mode();
     advance();
     if (cur() == Token::TERMINATE) {
@@ -1006,8 +997,8 @@ Maybe<Statement*> Parser::ParseStatementListItem() {
     default:
       if (cur() == Token::IDENTIFIER) {
         auto v = value();
-        if (v.IsAsciiEqual("async") && peek() == Token::FUNCTION
-            && !has_linebreak_after()) {
+        if (v.IsAsciiEqual("async") && peek() == Token::FUNCTION &&
+            !has_linebreak_after()) {
           return ParseDeclaration();
         } else if (v.IsAsciiEqual("let")) {
           return ParseDeclaration();
@@ -1075,8 +1066,9 @@ Maybe<Statement*> Parser::ParseStatement() {
 
 Maybe<Statement*> Parser::ParseExpressionStatement() {
   ENTER_PARSING
+  auto start = position();
   return ParseExpression().bind<Statement*>([&, this](auto expr) {
-    auto exprs = NewStatement<ExpressionStatement>(expr);
+    auto exprs = NewStatementWithPosition<ExpressionStatement>(start, expr);
     advance();
     return ParseTerminator(exprs);
   });
@@ -1114,8 +1106,8 @@ Maybe<Expression*> Parser::ParseAssignmentExpression() {
     case Token::YIELD:
       if (!MatchStates({IN_GENERATOR_FUNCTION, IN_ASYNC_GENERATOR_FUNCTION})) {
         REPORT_SYNTAX_ERROR(
-            Expression*,
-            this, "yield only allowed in generator or async generator.");
+            Expression*, this,
+            "yield only allowed in generator or async generator.");
       }
       return ParseYieldExpression();
     case Token::NEW:
@@ -1184,8 +1176,7 @@ Maybe<Expression*> Parser::ParseAssignmentExpressionLhs() {
     if (cur() == Token::OP_ASSIGN || IsAssignmentOperator(cur())) {
       advance();
       return ParseAssignmentExpression() >>= [&, this](auto right) {
-        return NewExpression<BinaryExpression>(
-            Token::OP_ASSIGN, left, right);
+        return NewExpression<BinaryExpression>(Token::OP_ASSIGN, left, right);
       };
     }
     return Just(left);
@@ -1195,7 +1186,7 @@ Maybe<Expression*> Parser::ParseAssignmentExpressionLhs() {
 
 Maybe<Expression*> Parser::ParseConditionalExpression() {
   ENTER_PARSING
-    return ParseLogicalORExpression() >>= [this](auto logical_or_exp) {
+  return ParseLogicalORExpression() >>= [this](auto logical_or_exp) {
     if (cur() == Token::QUESTION) {
       return ParseAssignmentExpression() >>= [&, this](auto lhs) {
         if (advance() != Token::COLON) {
@@ -1203,8 +1194,7 @@ Maybe<Expression*> Parser::ParseConditionalExpression() {
         }
         return ParseAssignmentExpression() >>= [&, this](auto rhs) {
           return NewExpression<ConditionalExpression>(
-              logical_or_exp->ToExpression(),
-              lhs->ToExpression(),
+              logical_or_exp->ToExpression(), lhs->ToExpression(),
               rhs->ToExpression());
         };
       };
@@ -1214,21 +1204,20 @@ Maybe<Expression*> Parser::ParseConditionalExpression() {
   EXIT_PARSING;
 }
 
-#define SIMPLE_BINARY_EXPRESSION_PARSER(Name, ChildName, ...)           \
-  Maybe<Expression*> Parser::Parse##Name##Expression() {                \
-    ENTER_PARSING                                                       \
+#define SIMPLE_BINARY_EXPRESSION_PARSER(Name, ChildName, ...)             \
+  Maybe<Expression*> Parser::Parse##Name##Expression() {                  \
+    ENTER_PARSING                                                         \
     return Parse##ChildName##Expression() >>= [&, this](auto child_exp) { \
-      if (Token::OneOf(cur(), {__VA_ARGS__})) {                         \
-        auto t = cur();                                                 \
-        advance();                                                      \
-        return Parse##Name##Expression() >>= [&](auto rhs_exp) {        \
-          return NewExpression<BinaryExpression>(                       \
-              t, child_exp, rhs_exp);                                   \
-        };                                                              \
-      }                                                                 \
-      return Just(child_exp);                                           \
-    };                                                                  \
-    EXIT_PARSING;                                                       \
+      if (Token::OneOf(cur(), {__VA_ARGS__})) {                           \
+        auto t = cur();                                                   \
+        advance();                                                        \
+        return Parse##Name##Expression() >>= [&](auto rhs_exp) {          \
+          return NewExpression<BinaryExpression>(t, child_exp, rhs_exp);  \
+        };                                                                \
+      }                                                                   \
+      return Just(child_exp);                                             \
+    };                                                                    \
+    EXIT_PARSING;                                                         \
   }
 
 SIMPLE_BINARY_EXPRESSION_PARSER(LogicalOR, LogicalAND, Token::OP_LOGICAL_OR)
@@ -1236,44 +1225,38 @@ SIMPLE_BINARY_EXPRESSION_PARSER(LogicalAND, BitwiseOR, Token::OP_LOGICAL_AND)
 SIMPLE_BINARY_EXPRESSION_PARSER(BitwiseOR, BitwiseXOR, Token::OP_OR)
 SIMPLE_BINARY_EXPRESSION_PARSER(BitwiseXOR, BitwiseAND, Token::OP_OR)
 SIMPLE_BINARY_EXPRESSION_PARSER(BitwiseAND, Equality, Token::OP_AND)
-SIMPLE_BINARY_EXPRESSION_PARSER(
-    Equality, Relational,
-    Token::OP_EQ, Token::OP_STRICT_EQ,
-    Token::OP_NOT_EQ, Token::OP_STRICT_NOT_EQ)
-SIMPLE_BINARY_EXPRESSION_PARSER(
-    Relational, Shift,
-    Token::OP_GREATER_THAN,
-    Token::OP_GREATER_THAN_EQ,
-    Token::OP_LESS_THAN,
-    Token::OP_LESS_THAN_OR_EQ,
-    Token::INSTANCEOF,
-    Token::IN)
-SIMPLE_BINARY_EXPRESSION_PARSER(
-    Shift, Additive,
-    Token::OP_SHIFT_LEFT,
-    Token::OP_SHIFT_RIGHT,
-    Token::OP_U_SHIFT_RIGHT)
-SIMPLE_BINARY_EXPRESSION_PARSER(
-    Additive, Multiplicative, Token::OP_PLUS, Token::OP_MINUS)
-SIMPLE_BINARY_EXPRESSION_PARSER(
-    Multiplicative, Exponentiation, Token::OP_MUL, Token::OP_DIV, Token::OP_MOD)
+SIMPLE_BINARY_EXPRESSION_PARSER(Equality, Relational, Token::OP_EQ,
+                                Token::OP_STRICT_EQ, Token::OP_NOT_EQ,
+                                Token::OP_STRICT_NOT_EQ)
+SIMPLE_BINARY_EXPRESSION_PARSER(Relational, Shift, Token::OP_GREATER_THAN,
+                                Token::OP_GREATER_THAN_EQ, Token::OP_LESS_THAN,
+                                Token::OP_LESS_THAN_OR_EQ, Token::INSTANCEOF,
+                                Token::IN)
+SIMPLE_BINARY_EXPRESSION_PARSER(Shift, Additive, Token::OP_SHIFT_LEFT,
+                                Token::OP_SHIFT_RIGHT, Token::OP_U_SHIFT_RIGHT)
+SIMPLE_BINARY_EXPRESSION_PARSER(Additive, Multiplicative, Token::OP_PLUS,
+                                Token::OP_MINUS)
+SIMPLE_BINARY_EXPRESSION_PARSER(Multiplicative, Exponentiation, Token::OP_MUL,
+                                Token::OP_DIV, Token::OP_MOD)
 SIMPLE_BINARY_EXPRESSION_PARSER(Exponentiation, Unary, Token::OP_POW)
 
 Maybe<Expression*> Parser::ParseUnaryExpression() {
   ENTER_PARSING;
+  auto start = position();
   switch (cur()) {
-    case Token::DELETE:  // FALL_THROUGH
-    case Token::VOID:  // FALL_THROUGH
-    case Token::TYPEOF:  // FALL_THROUGH
-    case Token::OP_PLUS:  // FALL_THROUGH
+    case Token::DELETE:    // FALL_THROUGH
+    case Token::VOID:      // FALL_THROUGH
+    case Token::TYPEOF:    // FALL_THROUGH
+    case Token::OP_PLUS:   // FALL_THROUGH
     case Token::OP_MINUS:  // FALL_THROUGH
     case Token::OP_TILDE:  // FALL_THROUGH
     case Token::OP_NOT: {  // FALL_THROUGH
       auto op = cur();
       advance();
       return ParseUnaryExpression() >>= [&, this](auto rhs_exp) {
-        return Just(NewExpression<UnaryExpression>(
-            UnaryExpression::PRE, op, rhs_exp));
+        auto unary = NewExpressionWithPosition<UnaryExpression>(
+            start, UnaryExpression::PRE, op, rhs_exp);
+        return Just(unary);
       };
     }
     case Token::AWAIT:
@@ -1287,13 +1270,14 @@ Maybe<Expression*> Parser::ParseUnaryExpression() {
 
 Maybe<Expression*> Parser::ParseUpdateExpression() {
   ENTER_PARSING;
+  auto start = position();
   switch (cur()) {
     case Token::OP_INCREMENT:
     case Token::OP_DECREMENT: {
       advance();
       return ParseLeftHandSideExpression() >>= [&, this](auto n) {
-        return Just(NewExpression<UnaryExpression>(
-            UnaryExpression::PRE, cur(), n));
+        return Just(NewExpressionWithPosition<UnaryExpression>(
+            start, UnaryExpression::PRE, cur(), n));
       };
     }
     default: {
@@ -1302,8 +1286,8 @@ Maybe<Expression*> Parser::ParseUpdateExpression() {
           case Token::OP_INCREMENT:
           case Token::OP_DECREMENT:
             advance();
-            return Just(NewExpression<UnaryExpression>(
-                UnaryExpression::POST, cur(), n));
+            return Just(NewExpressionWithPosition<UnaryExpression>(
+                start, UnaryExpression::POST, cur(), n));
           default:
             return Just(n);
         }
@@ -1335,8 +1319,7 @@ Maybe<Expression*> Parser::ParseNewExpression() {
   ENTER_PARSING;
   if (cur() == Token::NEW) {
     return ParseNewExpression() >>= [&, this](auto callee) {
-      return Just(NewExpression<CallExpression>(
-          Receiver::NEW, callee));
+      return Just(NewExpression<CallExpression>(Receiver::NEW, callee));
     };
   }
   return ParseMemberExpression();
@@ -1360,26 +1343,25 @@ Maybe<Expression*> Parser::ParseCallExpression() {
       Restore();
     }
     default: {
-      return ParseCoverCallExpressionAndAsyncArrowHead()
-        >>= [&, this](auto expr) {
-        if (expr->IsExpressions()) {
-          auto exprs = expr->ToExpressions();
-          expr = NewNode<CallExpression>(
-              Receiver::EXPRESSION,
-              exprs->at(0), exprs->at(1));
-        }
-        return ParsePropertyAccessPostExpression(
-            expr, Receiver::EXPRESSION,
-            Allowance(Allowance::CALL | Allowance::TEMPLATE));
-      };
+      return ParseCoverCallExpressionAndAsyncArrowHead() >>=
+             [&, this](auto expr) {
+               if (expr->IsExpressions()) {
+                 auto exprs = expr->ToExpressions();
+                 expr = NewNode<CallExpression>(Receiver::EXPRESSION,
+                                                exprs->at(0), exprs->at(1));
+               }
+               return ParsePropertyAccessPostExpression(
+                   expr, Receiver::EXPRESSION,
+                   Allowance(Allowance::CALL | Allowance::TEMPLATE));
+             };
     }
   }
   EXIT_PARSING;
 }
 
 Maybe<Expression*> Parser::ParsePropertyAccessPostExpression(
-    Expression* pre, Receiver::Type receiver_type,
-    Parser::Allowance allowance, bool error_if_default) {
+    Expression* pre, Receiver::Type receiver_type, Parser::Allowance allowance,
+    bool error_if_default) {
   ENTER_PARSING;
   switch (cur()) {
     case Token::LEFT_PAREN: {
@@ -1387,8 +1369,7 @@ Maybe<Expression*> Parser::ParsePropertyAccessPostExpression(
         REPORT_SYNTAX_ERROR(Expression*, this, "Unexpected '(' found.");
       }
       return ParseArguments() >>= [&](auto a) {
-        return Just(NewExpression<CallExpression>(
-            Receiver::SUPER, pre, a));
+        return Just(NewExpression<CallExpression>(Receiver::SUPER, pre, a));
       };
     }
     case Token::LEFT_BRACKET: {
@@ -1396,16 +1377,15 @@ Maybe<Expression*> Parser::ParsePropertyAccessPostExpression(
       return ParseExpression() >>= [&, this](auto n) {
         EXPECT(Expression*, this, cur(), Token::RIGHT_BRACKET, ']');
         return Just(NewExpression<PropertyAccessExpression>(
-            PropertyAccessExpression::AccessType::ELEMENT,
-            receiver_type, pre, n));
+            PropertyAccessExpression::AccessType::ELEMENT, receiver_type, pre,
+            n));
       };
     }
     case Token::DOT: {
       advance();
       return ParseExpression() >>= [&](auto n) {
         return Just(NewExpression<PropertyAccessExpression>(
-            PropertyAccessExpression::DOT, receiver_type,
-            pre, n));
+            PropertyAccessExpression::DOT, receiver_type, pre, n));
       };
     }
     case Token::BACK_QUOTE: {
@@ -1413,15 +1393,14 @@ Maybe<Expression*> Parser::ParsePropertyAccessPostExpression(
         REPORT_SYNTAX_ERROR(Expression*, this, "Unexpected '`' found.");
       }
       return ParseTemplateLiteral() >>= [&](auto t) {
-        return Just(NewExpression<CallExpression>(
-            Receiver::TEMPLATE, pre, t));
+        return Just(NewExpression<CallExpression>(Receiver::TEMPLATE, pre, t));
       };
     }
     default:
       if (error_if_default) {
         REPORT_SYNTAX_ERROR(
-            Expression*,
-            this, "Unexpected " << ToStringCurrentToken() << " found.");
+            Expression*, this,
+            "Unexpected " << ToStringCurrentToken() << " found.");
       }
       return Just(pre);
   }
@@ -1433,10 +1412,8 @@ Maybe<Expression*> Parser::ParseCoverCallExpressionAndAsyncArrowHead() {
   return ParseMemberExpression() >>= [&, this](auto n) {
     if (cur() == Token::LEFT_PAREN) {
       return ParseArguments() >>= [&, this](auto a) {
-        return Just(
-            reinterpret_cast<Expression*>(
-                NewNode<Expressions>(
-                    {n->ToExpression(), a->ToExpression()})));
+        return Just(reinterpret_cast<Expression*>(
+            NewNode<Expressions>({n->ToExpression(), a->ToExpression()})));
       };
     }
     return Just(n);
@@ -1447,12 +1424,12 @@ Maybe<Expression*> Parser::ParseCoverCallExpressionAndAsyncArrowHead() {
 Maybe<Expression*> Parser::ParseMemberExpression() {
   ENTER_PARSING;
   if (cur() == Token::SUPER) {
-    return ParsePropertyAccessPostExpression(
-        nullptr, Receiver::SUPER, Allowance(), true) >>= [&, this](auto n) {
-      return ParsePropertyAccessPostExpression(
-          n, Receiver::EXPRESSION,
-          Allowance(Allowance::TEMPLATE));
-    };
+    return ParsePropertyAccessPostExpression(nullptr, Receiver::SUPER,
+                                             Allowance(), true) >>=
+           [&, this](auto n) {
+             return ParsePropertyAccessPostExpression(
+                 n, Receiver::EXPRESSION, Allowance(Allowance::TEMPLATE));
+           };
   }
 
   if (cur() == Token::NEW) {
@@ -1461,40 +1438,38 @@ Maybe<Expression*> Parser::ParseMemberExpression() {
       if (peek() == Token::IDENTIFIER) {
         if (peek_value().IsAsciiEqual("target")) {
           return Just(NewExpression<PropertyAccessExpression>(
-              PropertyAccessExpression::DOT, Receiver::NEW,
-              nullptr, nullptr));
+              PropertyAccessExpression::DOT, Receiver::NEW, nullptr, nullptr));
         }
         REPORT_SYNTAX_ERROR(
-            Expression*,
-            this, "new.target? but got " << peek_value().ToUtf8String());
+            Expression*, this,
+            "new.target? but got " << peek_value().ToUtf8String());
       }
-      REPORT_SYNTAX_ERROR(
-          Expression*,
-          this, "new.target? identifier 'target' expected.");
+      REPORT_SYNTAX_ERROR(Expression*, this,
+                          "new.target? identifier 'target' expected.");
     }
     return ParseMemberExpression() >>= [&, this](auto m) {
       EXPECT(Expression*, this, cur(), Token::LEFT_PAREN, '(');
       return ParseArguments() >>= [&, this](auto args) {
-        return Just(NewExpression<CallExpression>(
-            Receiver::NEW, m, args));
+        return Just(NewExpression<CallExpression>(Receiver::NEW, m, args));
       };
     };
   }
 
   return ParsePrimaryExpression() >>= [&, this](auto n) {
-    return ParsePropertyAccessPostExpression(
-        n, Receiver::EXPRESSION,
-        Allowance(Allowance::TEMPLATE));
+    return ParsePropertyAccessPostExpression(n, Receiver::EXPRESSION,
+                                             Allowance(Allowance::TEMPLATE));
   };
   EXIT_PARSING;
 }
 
 Maybe<Expression*> Parser::ParsePrimaryExpression() {
   ENTER_PARSING;
+  auto start = position();
   switch (cur()) {
     case Token::THIS: {
       advance();
-      return Just(NewExpression<Literal>(Token::THIS));
+      auto expr = NewExpressionWithPosition<Literal>(start, Token::THIS);
+      return Just(expr);
     }
     case Token::LEFT_BRACKET:
       return ParseArrayLiteral();
@@ -1515,8 +1490,8 @@ Maybe<Expression*> Parser::ParsePrimaryExpression() {
       }
       return ParseIdentifierReference();
     case Token::NUMERIC_LITERAL:
-      if (parser_state_->is_implicit_octal()
-          && parser_state_->is_strict_mode()) {
+      if (tokenizer_state().Is(TokenizerState::IMPLICIT_OCTAL) &&
+          parser_state_->is_strict_mode()) {
         REPORT_SYNTAX_ERROR(
             Expression*, this,
             "Implicit octal literal not allowed in strict mode.");
@@ -1561,18 +1536,18 @@ Maybe<Expression*> Parser::ParseLiteral() {
 
 Maybe<Expression*> Parser::ParseIdentifierReference() {
   ENTER_PARSING;
+  auto start = position();
   switch (cur()) {
     case Token::IDENTIFIER:
     case Token::YIELD:
     case Token::AWAIT:
       advance();
-      return Just(NewExpression<Literal>(Token::IDENTIFIER, value().Clone()));
+      return Just(NewExpressionWithPosition<Literal>(start, Token::IDENTIFIER,
+                                                     value().Clone()));
     default:
       UNREACHABLE();
   }
-  REPORT_SYNTAX_ERROR(Expression*,
-                      this,
-                      "Identifier expected.");
+  REPORT_SYNTAX_ERROR(Expression*, this, "Identifier expected.");
   EXIT_PARSING;
 }
 
@@ -1580,21 +1555,16 @@ Maybe<Expression*> Parser::ParseArrayLiteral(Parser::Allowance allowance) {
   ENTER_PARSING;
   INVALIDATE(cur() == Token::LEFT_BRACKET);
   advance();
-  auto array = NewNode<StructuralLiteral>(
-      StructuralLiteral::ARRAY);
-  while (!Token::OneOf(cur(), { Token::RIGHT_BRACKET, Token::INVALID })) {
+  auto array = NewNode<StructuralLiteral>(StructuralLiteral::ARRAY);
+  while (!Token::OneOf(cur(), {Token::RIGHT_BRACKET, Token::INVALID})) {
     if (cur() == Token::COMMA) {
       array->Push(&kElision);
       advance();
     }
     if (cur() == Token::SPREAD) {
-      ParseSpreadElement() >>= [&](auto a) {
-        array->Push(a);
-      };
+      ParseSpreadElement() >>= [&](auto a) { array->Push(a); };
     } else {
-      ParseAssignmentExpression() >>= [&](auto a) {
-        array->Push(a);
-      };
+      ParseAssignmentExpression() >>= [&](auto a) { array->Push(a); };
     }
   }
   EXPECT(Expression*, this, cur(), Token::RIGHT_BRACKET, ']');
@@ -1607,8 +1577,8 @@ Maybe<Expression*> Parser::ParseSpreadElement() {
   INVALIDATE(cur() == Token::SPREAD);
   advance();
   return ParseAssignmentExpression() >>= [&, this](auto expr) {
-    return Just(NewNode<UnaryExpression>(
-        UnaryExpression::PRE, Token::SPREAD, expr));
+    return Just(
+        NewNode<UnaryExpression>(UnaryExpression::PRE, Token::SPREAD, expr));
   };
   EXIT_PARSING;
 }
@@ -1617,16 +1587,13 @@ Maybe<Expression*> Parser::ParseObjectLiteral(Parser::Allowance allowance) {
   ENTER_PARSING;
   INVALIDATE(cur() == Token::LEFT_BRACE);
   advance();
-  auto object = NewNode<StructuralLiteral>(
-      StructuralLiteral::OBJECT);
+  auto object = NewNode<StructuralLiteral>(StructuralLiteral::OBJECT);
   if (cur() == Token::RIGHT_BRACE) {
     return Just(object);
   }
 
-  while (!Token::OneOf(cur(), { Token::RIGHT_BRACE, Token::INVALID })) {
-    ParseObjectLiteralProperty(allowance) >>= [&](auto o) {
-      object->Push(o);
-    };
+  while (!Token::OneOf(cur(), {Token::RIGHT_BRACE, Token::INVALID})) {
+    ParseObjectLiteralProperty(allowance) >>= [&](auto o) { object->Push(o); };
   }
 
   return Just(object);
@@ -1638,30 +1605,26 @@ Maybe<Expression*> Parser::ParseObjectLiteralProperty(
   ENTER_PARSING
   auto key = Nothing<Expression*>();
   bool is_computed_property_name = false;
-  if (Token::OneOf(cur(), {
-        Token::NUMERIC_LITERAL,
-        Token::IDENTIFIER,
-        Token::STRING_LITERAL,
-        Token::LEFT_BRACKET })) {
-    key = cur() == Token::IDENTIFIER? ParseIdentifierReference()
-      : ParsePropertyName();
+  if (Token::OneOf(cur(), {Token::NUMERIC_LITERAL, Token::IDENTIFIER,
+                           Token::STRING_LITERAL, Token::LEFT_BRACKET})) {
+    key = cur() == Token::IDENTIFIER ? ParseIdentifierReference()
+                                     : ParsePropertyName();
 
     if (cur() == Token::OP_ASSIGN) {
-      if (!allowance.is_binding_pattern_allowed()
-          || is_computed_property_name) {
+      if (!allowance.is_binding_pattern_allowed() ||
+          is_computed_property_name) {
         REPORT_SYNTAX_ERROR(Expression*, this, "Unexpected '=' detected.");
       }
       return ParseIdentifierReference() >>= [&, this](auto key) {
         advance();
         return ParseAssignmentExpression() >>= [&, this](auto value) {
-          return Just(NewExpression<ObjectPropertyExpression>(
-              key, nullptr, value));
+          return Just(
+              NewExpression<ObjectPropertyExpression>(key, nullptr, value));
         };
       };
-    } else if (Token::OneOf(
-        cur(), { Token::COMMA, Token::RIGHT_BRACE })) {
-      if (!allowance.is_binding_pattern_allowed()
-          || is_computed_property_name) {
+    } else if (Token::OneOf(cur(), {Token::COMMA, Token::RIGHT_BRACE})) {
+      if (!allowance.is_binding_pattern_allowed() ||
+          is_computed_property_name) {
         REPORT_SYNTAX_ERROR(Expression*, this, "':' expected.");
       }
       return ParseIdentifierReference();
@@ -1672,16 +1635,15 @@ Maybe<Expression*> Parser::ParseObjectLiteralProperty(
       return ParseMethodDefinition();
     }
   } else {
-    REPORT_SYNTAX_ERROR(
-        Expression*,
-        this, "Property name must be one of "
-        "'identifier', 'string literal', 'numeric literal', "
-        "or 'computed property' but got " << ToStringCurrentToken());
+    REPORT_SYNTAX_ERROR(Expression*, this,
+                        "Property name must be one of "
+                        "'identifier', 'string literal', 'numeric literal', "
+                        "or 'computed property' but got "
+                            << ToStringCurrentToken());
   }
 
   if (cur() != Token::COLON) {
-    if (!allowance.is_binding_pattern_allowed()
-        || is_computed_property_name) {
+    if (!allowance.is_binding_pattern_allowed() || is_computed_property_name) {
       REPORT_SYNTAX_ERROR(Expression*, this, "':' expected.");
     }
   }
@@ -1689,16 +1651,12 @@ Maybe<Expression*> Parser::ParseObjectLiteralProperty(
   advance();
   return ParseAssignmentExpression() >>= [&, this](auto value) {
     if (allowance.is_binding_pattern_allowed()) {
-      if (!value->IsStructuralLiteral() &&
-          value->IsLiteral()) {
-        REPORT_SYNTAX_ERROR(
-            Expression*,
-            this, "Identifier or binding pattern expected.");
+      if (!value->IsStructuralLiteral() && value->IsLiteral()) {
+        REPORT_SYNTAX_ERROR(Expression*, this,
+                            "Identifier or binding pattern expected.");
       } else if (value->IsLiteral() &&
                  !value->ToLiteral()->Is(Token::IDENTIFIER)) {
-        REPORT_SYNTAX_ERROR(
-            Expression*,
-            this, "Identifier expected.");
+        REPORT_SYNTAX_ERROR(Expression*, this, "Identifier expected.");
       }
     }
 
@@ -1715,8 +1673,8 @@ Maybe<Expression*> Parser::ParseMethodDefinition() {
   bool is_setter = false;
 
   if (((is_getter = value().IsAsciiEqual("get")) ||
-       (is_setter = value().IsAsciiEqual("set")))
-      && Token::OneOf(peek(), { Token::IDENTIFIER, Token::LEFT_BRACKET })) {
+       (is_setter = value().IsAsciiEqual("set"))) &&
+      Token::OneOf(peek(), {Token::IDENTIFIER, Token::LEFT_BRACKET})) {
     advance();
   }
 
@@ -1730,33 +1688,29 @@ Maybe<Expression*> Parser::ParseMethodDefinition() {
       auto maybe_name = Nothing<Expression*>();
       auto formal_parameters = Nothing<Expression*>();
 
-      if (cur() == Token::IDENTIFIER
-          && value().IsAsciiEqual("async")) {
+      if (cur() == Token::IDENTIFIER && value().IsAsciiEqual("async")) {
         return ParseAsyncMethod();
-      } else  {
+      } else {
         maybe_name = ParsePropertyName();
       }
 
       EXPECT(Expression*, this, cur(), Token::LEFT_PAREN, '(');
       if (is_getter) {
         if (cur() != Token::RIGHT_PAREN) {
-          REPORT_SYNTAX_ERROR(
-              Expression*,
-              this, "Getter must not have any formal parameters.");
+          REPORT_SYNTAX_ERROR(Expression*, this,
+                              "Getter must not have any formal parameters.");
         }
         advance();
         formal_parameters = Just(NewNode<Expressions>());
       } else if (is_setter) {
         if (cur() == Token::RIGHT_PAREN) {
-          REPORT_SYNTAX_ERROR(
-              Expression*,
-              this, "Setter must have exactly one formal parameter.");
+          REPORT_SYNTAX_ERROR(Expression*, this,
+                              "Setter must have exactly one formal parameter.");
         }
         formal_parameters = ParsePropertySetParameterList();
         if (cur() != Token::RIGHT_PAREN) {
-          REPORT_SYNTAX_ERROR(
-              Expression*,
-              this, "Setter must have exactly one formal parameter.");
+          REPORT_SYNTAX_ERROR(Expression*, this,
+                              "Setter must have exactly one formal parameter.");
         }
         advance();
       } else {
@@ -1772,10 +1726,10 @@ Maybe<Expression*> Parser::ParseMethodDefinition() {
           }
           auto body = body_ret.value();
           EXPECT(Expression*, this, cur(), Token::RIGHT_BRACE, '}');
-          auto type = is_getter? Function::GETTER: Function::SETTER;
+          auto type = is_getter ? Function::GETTER : Function::SETTER;
 
-          auto fn = NewNode<FunctionExpression>(
-              type, maybe_name, formal_parameters, body);
+          auto fn = NewNode<FunctionExpression>(type, maybe_name,
+                                                formal_parameters, body);
           return Just(NewExpression<ObjectPropertyExpression>(name, fn));
         };
       };
@@ -1817,9 +1771,7 @@ Maybe<Expression*> Parser::ParseFormalParameters() {
     if (cur() == Token::COMMA) {
       advance();
       if (cur() == Token::SPREAD) {
-        ParseFunctionRestParameter() >>= [&](auto rp) {
-          exprs->Push(rp);
-        };
+        ParseFunctionRestParameter() >>= [&](auto rp) { exprs->Push(rp); };
       }
     }
     return Just(exprs->ToExpression());
@@ -1835,9 +1787,7 @@ Maybe<Expression*> Parser::ParseFormalParameterList() {
       case Token::IDENTIFIER:
       case Token::LEFT_BRACE:
       case Token::LEFT_BRACKET:
-        ParseBindingElement() >>= [&](auto bi) {
-          exprs->Push(bi);
-        };
+        ParseBindingElement() >>= [&](auto bi) { exprs->Push(bi); };
         break;
       case Token::COMMA:
         advance();
@@ -1858,8 +1808,7 @@ Maybe<Expression*> Parser::ParseFunctionRestParameter() {
     case Token::LEFT_BRACKET:
       return ParseBindingPattern();
     default:
-      return ParseSingleNameBinding(Allowance(
-          Allowance::INITIALIZER));
+      return ParseSingleNameBinding(Allowance(Allowance::INITIALIZER));
   }
   EXIT_PARSING;
 }
@@ -1871,8 +1820,7 @@ Maybe<Expression*> Parser::ParseBindingElement() {
     case Token::LEFT_BRACE:
       return ParseBindingPattern();
     default:
-      return ParseSingleNameBinding(Allowance(
-          Allowance::INITIALIZER));
+      return ParseSingleNameBinding(Allowance(Allowance::INITIALIZER));
   }
   EXIT_PARSING;
 }
@@ -1890,12 +1838,10 @@ Maybe<Expression*> Parser::ParseSingleNameBinding(Allowance allowance) {
   }
 
   INVALIDATE(identifier != nullptr);
-  if (allowance.is_initializer_allowed() &&
-      cur() == Token::OP_ASSIGN) {
+  if (allowance.is_initializer_allowed() && cur() == Token::OP_ASSIGN) {
     advance();
     return ParseAssignmentExpression() >>= [&, this](auto i) -> Expression* {
-      return NewNode<BinaryExpression>(
-          Token::OP_ASSIGN, identifier, i);
+      return NewNode<BinaryExpression>(Token::OP_ASSIGN, identifier, i);
     };
   }
   return Just(identifier);
@@ -1906,12 +1852,10 @@ Maybe<Expression*> Parser::ParseBindingPattern() {
   ENTER_PARSING;
   switch (cur()) {
     case Token::LEFT_BRACE:
-      return ParseObjectLiteral(Allowance(
-          Allowance::BINDING_PATTERN));
+      return ParseObjectLiteral(Allowance(Allowance::BINDING_PATTERN));
     default:
       INVALIDATE(cur() == Token::LEFT_BRACKET);
-      return ParseArrayLiteral(Allowance(
-          Allowance::BINDING_PATTERN));
+      return ParseArrayLiteral(Allowance(Allowance::BINDING_PATTERN));
   }
   EXIT_PARSING;
 }
@@ -1924,14 +1868,12 @@ Maybe<Expression*> Parser::ParseArguments() {
     if (cur() == Token::SPREAD) {
       advance();
       ParseAssignmentExpression() >>= [&, this](auto expr) {
-        auto u = NewNode<UnaryExpression>(
-            UnaryExpression::PRE, Token::SPREAD, expr);
+        auto u =
+            NewNode<UnaryExpression>(UnaryExpression::PRE, Token::SPREAD, expr);
         exprs->Push(u);
       };
     } else {
-      ParseAssignmentExpression() >>= [&](auto expr) {
-        exprs->Push(expr);
-      };
+      ParseAssignmentExpression() >>= [&](auto expr) { exprs->Push(expr); };
     }
 
     if (cur() == Token::COMMA) {
@@ -1950,8 +1892,7 @@ Maybe<Expression*> Parser::ParseArguments() {
 
 Maybe<Expression*> Parser::ParseIdentifier() {
   ENTER_PARSING;
-  EXPECT_NOT_ADVANCE(
-      Expression*, this, cur(), Token::IDENTIFIER, "Identifier");
+  EXPECT_NOT_ADVANCE(Expression*, this, cur(), Token::IDENTIFIER, "Identifier");
   return Just(NewExpression<Literal>(Token::IDENTIFIER, value().Clone()));
   EXIT_PARSING;
 }
@@ -1959,11 +1900,8 @@ Maybe<Expression*> Parser::ParseIdentifier() {
 Maybe<Expression*> Parser::ParseArrowFunction() {
   ENTER_PARSING;
   return ParseArrowParameters() >>= [&, this](auto p) {
-    if (cur() != Token::TERMINATE ||
-        has_linebreak_before()) {
-      EXPECT(Expression*,
-             this, cur(),
-             Token::ARROW_FUNCTION_GLYPH, "=>");
+    if (cur() != Token::TERMINATE || has_linebreak_before()) {
+      EXPECT(Expression*, this, cur(), Token::ARROW_FUNCTION_GLYPH, "=>");
       auto body_ret = ParseConciseBody();
       if (body_ret) {
         auto body = body_ret.value();
@@ -1983,9 +1921,7 @@ Maybe<Expression*> Parser::ParseArrowParameters() {
       return ParseCoverParenthesizedExpressionAndArrowParameterList();
     default: {
       auto exprs = NewNode<Expressions>();
-      ParseSingleNameBinding() >>= [&](auto p) {
-        exprs->Push(p);
-      };
+      ParseSingleNameBinding() >>= [&](auto p) { exprs->Push(p); };
       return Just(exprs->ToExpression());
     }
   }
@@ -2006,20 +1942,18 @@ Parser::ParseCoverParenthesizedExpressionAndArrowParameterList() {
     if (cur() == Token::SPREAD) {
       advance();
       auto e = Nothing<Expression*>();
-      if (Token::OneOf(cur(), { Token::LEFT_BRACKET, Token::LEFT_BRACE })) {
+      if (Token::OneOf(cur(), {Token::LEFT_BRACKET, Token::LEFT_BRACE})) {
         e = ParseBindingPattern();
       } else {
         e = ParseSingleNameBinding();
       }
       e >>= [&, this](auto e) {
-        auto u = NewNode<UnaryExpression>(
-            UnaryExpression::PRE, Token::SPREAD, e);
+        auto u =
+            NewNode<UnaryExpression>(UnaryExpression::PRE, Token::SPREAD, e);
         exprs->Push(u);
       };
     } else {
-      ParseExpression() >>= [&](auto n) {
-        exprs->Push(n);
-      };
+      ParseExpression() >>= [&](auto n) { exprs->Push(n); };
     }
 
     if (cur() != Token::COMMA) {
@@ -2059,16 +1993,12 @@ Maybe<Ast*> Parser::ParseConciseBody() {
   EXIT_PARSING;
 }
 
-Maybe<Statement*> Parser::ParseModule() {
-  return ParseModuleBody();
-}
+Maybe<Statement*> Parser::ParseModule() { return ParseModuleBody(); }
 
 Maybe<Statement*> Parser::ParseModuleBody() {
   auto statements = NewNode<Statements>();
   while (has_more()) {
-    ParseModuleItem() >>= [&](auto i) {
-      statements->Push(i);
-    };
+    ParseModuleItem() >>= [&](auto i) { statements->Push(i); };
   }
   return Just(statements);
 }
@@ -2087,20 +2017,22 @@ Maybe<Statement*> Parser::ParseModuleItem() {
 Maybe<Statement*> Parser::ParseImportDeclaration() {
   ENTER_PARSING
   INVALIDATE(cur() == Token::IMPORT);
+  auto start = position();
   advance();
   if (cur() == Token::STRING_LITERAL) {
-    auto str = NewExpression<Literal>(cur(), value().Clone());
-    return Just(NewStatement<ImportDeclaration>(
-        Nothing<Expression*>(), str));
+    auto str =
+        NewExpressionWithPosition<Literal>(start, cur(), value().Clone());
+    return Just(NewStatementWithPosition<ImportDeclaration>(
+        start, Nothing<Expression*>(), str));
   }
 
   auto default_binding_result = Nothing<Expression*>();
+  start = position();
   if (cur() == Token::IDENTIFIER) {
     default_binding_result = ParseIdentifier();
     advance();
   }
-  auto ib = NewNode<ImportBinding>(
-      default_binding_result);
+  auto ib = NewNodeWithPosition<ImportBinding>(start, default_binding_result);
 
   switch (cur()) {
     case Token::LEFT_BRACE:
@@ -2109,21 +2041,17 @@ Maybe<Statement*> Parser::ParseImportDeclaration() {
     case Token::OP_MUL:
       ib->set_namespace_import(ParseNameSpaceImport());
     default:
-      REPORT_SYNTAX_ERROR(Statement*,
-                          this,
-                          "Unexpected token.");
+      REPORT_SYNTAX_ERROR(Statement*, this, "Unexpected token.");
   }
 
-  if (cur() == Token::IDENTIFIER
-      && value().IsAsciiEqual("from")) {
+  if (cur() == Token::IDENTIFIER && value().IsAsciiEqual("from")) {
     advance();
     if (cur() == Token::STRING_LITERAL) {
       auto str = NewExpression<Literal>(cur(), value().Clone());
       if (cur() == Token::TERMINATE) {
         advance();
       } else if (!tokenizer_->has_linebreak_after()) {
-        REPORT_SYNTAX_ERROR(Statement*,
-                            this, "';' expected.");
+        REPORT_SYNTAX_ERROR(Statement*, this, "';' expected.");
       }
       return Just(NewStatement<ImportDeclaration>(Just(ib), str));
     }
@@ -2134,15 +2062,13 @@ Maybe<Statement*> Parser::ParseImportDeclaration() {
   EXIT_PARSING
 }
 
-Maybe<Expression*> Parser::ParseNamedImports() {
-  return ParseNamedList();
-}
+Maybe<Expression*> Parser::ParseNamedImports() { return ParseNamedList(); }
 
 Maybe<Expression*> Parser::ParseNameSpaceImport() {
   EXPECT(Expression*, this, cur(), Token::OP_MUL, '*');
   if (cur() == Token::IDENTIFIER && value().IsAsciiEqual("as")) {
-    return Just(NewExpression<ImportSpecifier>(
-        ParseIdentifier(), Nothing<Expression*>(), true));
+    return Just(NewExpression<ImportSpecifier>(ParseIdentifier(),
+                                               Nothing<Expression*>(), true));
   }
   REPORT_SYNTAX_ERROR(Expression*, this, "'as' expected.");
 }
@@ -2188,8 +2114,8 @@ Maybe<Statement*> Parser::ParseExportDeclaration() {
   if (cur() == Token::IDENTIFIER && value().IsAsciiEqual("from")) {
     advance();
     if (cur() == Token::STRING_LITERAL) {
-      exp->set_from_clause(Just(NewExpression<Literal>(
-          Token::STRING_LITERAL, value().Clone())));
+      exp->set_from_clause(
+          Just(NewExpression<Literal>(Token::STRING_LITERAL, value().Clone())));
     } else {
       REPORT_SYNTAX_ERROR(Statement*, this, "Module specifier expected.");
     }
@@ -2204,9 +2130,7 @@ Maybe<Statement*> Parser::ParseExportDeclaration() {
   return Just(exp);
 }
 
-Maybe<Expression*> Parser::ParseExportClause() {
-  return ParseNamedList();
-}
+Maybe<Expression*> Parser::ParseExportClause() { return ParseNamedList(); }
 
 Maybe<Expression*> Parser::ParseNamedList() {
   EXPECT(Expression*, this, cur(), Token::LEFT_BRACE, '{');
@@ -2218,11 +2142,10 @@ Maybe<Expression*> Parser::ParseNamedList() {
     if (cur() == Token::IDENTIFIER && value().IsAsciiEqual("as")) {
       advance();
       auto maybe_ref = ParseIdentifier();
-      list->Push(NewNode<ImportSpecifier>(
-          maybe_identifier, maybe_ref, false));
+      list->Push(NewNode<ImportSpecifier>(maybe_identifier, maybe_ref, false));
     } else {
-      list->Push(NewNode<ImportSpecifier>(
-          maybe_identifier, Nothing<Expression*>(), false));
+      list->Push(NewNode<ImportSpecifier>(maybe_identifier,
+                                          Nothing<Expression*>(), false));
     }
 
     if (cur() == Token::COMMA) {
@@ -2235,9 +2158,7 @@ Maybe<Expression*> Parser::ParseNamedList() {
   return Just(list);
 }
 
-Maybe<Expression*> Parser::ParseElementList() {
-  return Nothing<Expression*>();
-}
+Maybe<Expression*> Parser::ParseElementList() { return Nothing<Expression*>(); }
 Maybe<Expression*> Parser::ParseTemplateLiteral() {
   return Nothing<Expression*>();
 }
@@ -2251,9 +2172,7 @@ Maybe<Expression*> Parser::ParseTemplateMiddleList() {
 Maybe<Expression*> Parser::ParseSuperCall() {
   EXPECT(Expression*, this, cur(), Token::SUPER, "super");
   return ParseArguments() >>= [&, this](auto args) {
-    return Just(NewExpression<CallExpression>(Receiver::SUPER,
-                                              nullptr,
-                                              args));
+    return Just(NewExpression<CallExpression>(Receiver::SUPER, nullptr, args));
   };
 }
 
@@ -2263,10 +2182,10 @@ Maybe<Statement*> Parser::ParseHoistableDeclaration() {
 Maybe<Statement*> Parser::ParseBreakableStatement() {
   return Nothing<Statement*>();
 }
-Maybe<Statement*> Parser::ParseBlockStatement() {return Nothing<Statement*>();}
-Maybe<Statement*> Parser::ParseBlock() {
+Maybe<Statement*> Parser::ParseBlockStatement() {
   return Nothing<Statement*>();
 }
+Maybe<Statement*> Parser::ParseBlock() { return Nothing<Statement*>(); }
 Maybe<Statement*> Parser::ParseLexicalDeclaration() {
   return Nothing<Statement*>();
 }
@@ -2282,38 +2201,44 @@ Maybe<Statement*> Parser::ParseVariableDeclarationList() {
 Maybe<Statement*> Parser::ParseVariableDeclaration() {
   return Nothing<Statement*>();
 }
-Maybe<Statement*> Parser::ParseIfStatement() {
-  return Nothing<Statement*>();
-}
+Maybe<Statement*> Parser::ParseIfStatement() { return Nothing<Statement*>(); }
 Maybe<Statement*> Parser::ParseIterationStatement() {
   return Nothing<Statement*>();
 }
-Maybe<Statement*> Parser::ParseForDeclaration() {return Nothing<Statement*>();}
-Maybe<Statement*> Parser::ParseForBinding() {
+Maybe<Statement*> Parser::ParseForDeclaration() {
   return Nothing<Statement*>();
 }
+Maybe<Statement*> Parser::ParseForBinding() { return Nothing<Statement*>(); }
 Maybe<Statement*> Parser::ParseContinueStatement() {
   return Nothing<Statement*>();
 }
-Maybe<Statement*> Parser::ParseBreakStatement() {return Nothing<Statement*>();}
-Maybe<Statement*> Parser::ParseReturnStatement() {return Nothing<Statement*>();}
-Maybe<Statement*> Parser::ParseWithStatement() {return Nothing<Statement*>();}
-Maybe<Statement*> Parser::ParseSwitchStatement() {return Nothing<Statement*>();}
-Maybe<Statement*> Parser::ParseCaseBlock() {return Nothing<Statement*>();}
-Maybe<Statement*> Parser::ParseCaseClauses() {return Nothing<Statement*>();}
-Maybe<Statement*> Parser::ParseCaseClause() {return Nothing<Statement*>();}
-Maybe<Statement*> Parser::ParseDefaultClause() {
+Maybe<Statement*> Parser::ParseBreakStatement() {
   return Nothing<Statement*>();
 }
+Maybe<Statement*> Parser::ParseReturnStatement() {
+  return Nothing<Statement*>();
+}
+Maybe<Statement*> Parser::ParseWithStatement() { return Nothing<Statement*>(); }
+Maybe<Statement*> Parser::ParseSwitchStatement() {
+  return Nothing<Statement*>();
+}
+Maybe<Statement*> Parser::ParseCaseBlock() { return Nothing<Statement*>(); }
+Maybe<Statement*> Parser::ParseCaseClauses() { return Nothing<Statement*>(); }
+Maybe<Statement*> Parser::ParseCaseClause() { return Nothing<Statement*>(); }
+Maybe<Statement*> Parser::ParseDefaultClause() { return Nothing<Statement*>(); }
 Maybe<Statement*> Parser::ParseLabelledStatement() {
   return Nothing<Statement*>();
 }
-Maybe<Statement*> Parser::ParseLabelledItem() {return Nothing<Statement*>();}
-Maybe<Statement*> Parser::ParseThrowStatement() {return Nothing<Statement*>();}
-Maybe<Statement*> Parser::ParseTryStatement() {return Nothing<Statement*>();}
-Maybe<Statement*> Parser::ParseCatch() {return Nothing<Statement*>();}
-Maybe<Statement*> Parser::ParseFinally() {return Nothing<Statement*>();}
-Maybe<Statement*> Parser::ParseCatchParameter() {return Nothing<Statement*>();}
+Maybe<Statement*> Parser::ParseLabelledItem() { return Nothing<Statement*>(); }
+Maybe<Statement*> Parser::ParseThrowStatement() {
+  return Nothing<Statement*>();
+}
+Maybe<Statement*> Parser::ParseTryStatement() { return Nothing<Statement*>(); }
+Maybe<Statement*> Parser::ParseCatch() { return Nothing<Statement*>(); }
+Maybe<Statement*> Parser::ParseFinally() { return Nothing<Statement*>(); }
+Maybe<Statement*> Parser::ParseCatchParameter() {
+  return Nothing<Statement*>();
+}
 Maybe<Statement*> Parser::ParseDebuggerStatement() {
   return Nothing<Statement*>();
 }
@@ -2329,10 +2254,8 @@ Maybe<Statement*> Parser::ParseFunctionDeclaration(bool async,
   auto identifier = Nothing<Expression*>();
 
   if (cur() == Token::IDENTIFIER) {
-    if (parser_state_->IsInState({
-          IN_ASYNC_FUNCTION,
-            IN_GENERATOR_FUNCTION,
-            IN_ASYNC_GENERATOR_FUNCTION})) {
+    if (parser_state_->IsInState({IN_ASYNC_FUNCTION, IN_GENERATOR_FUNCTION,
+                                  IN_ASYNC_GENERATOR_FUNCTION})) {
       identifier = ParseIdentifier();
     } else {
       identifier = ParseIdentifier();
@@ -2347,12 +2270,15 @@ Maybe<Statement*> Parser::ParseFunctionDeclaration(bool async,
     EXPECT(Statement*, this, cur(), Token::LEFT_BRACE, '{');
     return ParseFunctionBody() >>= [&, this](auto body) {
       EXPECT(Statement*, this, cur(), Token::RIGHT_BRACE, '}');
-      auto function_type = async? Function::ASYNC:
-        parser_state_->IsInState({IN_GENERATOR_FUNCTION})? Function::GENERATOR:
-        parser_state_->IsInState({IN_ASYNC_GENERATOR_FUNCTION})?
-        Function::ASYNC_GENERATOR: Function::NORMAL;
-      auto fn = NewNode<FunctionExpression>(
-          function_type, identifier, params, body);
+      auto function_type =
+          async ? Function::ASYNC
+                : parser_state_->IsInState({IN_GENERATOR_FUNCTION})
+                      ? Function::GENERATOR
+                      : parser_state_->IsInState({IN_ASYNC_GENERATOR_FUNCTION})
+                            ? Function::ASYNC_GENERATOR
+                            : Function::NORMAL;
+      auto fn =
+          NewNode<FunctionExpression>(function_type, identifier, params, body);
       fn->set_start_positions(start);
       auto expr = NewNode<ExpressionStatement>(fn);
       expr->set_start_positions(start);
@@ -2381,48 +2307,38 @@ Maybe<Expression*> Parser::ParseArrowFormalParameters() {
 Maybe<Expression*> Parser::ParseAsyncArrowFunction() {
   return Nothing<Expression*>();
 }
-Maybe<Ast*> Parser::ParseAsyncConciseBody() {return Nothing<Ast*>();}
-Maybe<Ast*> Parser::ParseAsyncArrowHead() {return Nothing<Ast*>();}
+Maybe<Ast*> Parser::ParseAsyncConciseBody() { return Nothing<Ast*>(); }
+Maybe<Ast*> Parser::ParseAsyncArrowHead() { return Nothing<Ast*>(); }
 Maybe<Expression*> Parser::ParsePropertySetParameterList() {
   return Nothing<Expression*>();
 }
 Maybe<Expression*> Parser::ParseGeneratorMethod() {
   return Nothing<Expression*>();
 }
-Maybe<Ast*> Parser::ParseGeneratorDeclaration() {
-  return Nothing<Ast*>();
-}
+Maybe<Ast*> Parser::ParseGeneratorDeclaration() { return Nothing<Ast*>(); }
 Maybe<Expression*> Parser::ParseRegularExpression() {
   return Nothing<Expression*>();
 }
 Maybe<Expression*> Parser::ParseGeneratorExpression() {
   return Nothing<Expression*>();
 }
-Maybe<Ast*> Parser::ParseGeneratorBody() {return Nothing<Ast*>();}
+Maybe<Ast*> Parser::ParseGeneratorBody() { return Nothing<Ast*>(); }
 Maybe<Expression*> Parser::ParseYieldExpression() {
   return Nothing<Expression*>();
 }
-Maybe<Expression*> Parser::ParseAsyncMethod() {
-  return Nothing<Expression*>();
-}
-Maybe<Ast*> Parser::ParseAsyncFunctionDeclaration() {
-  return Nothing<Ast*>();
-}
-Maybe<Ast*> Parser::ParseAsyncFunctionBody() {
-  return Nothing<Ast*>();
-}
+Maybe<Expression*> Parser::ParseAsyncMethod() { return Nothing<Expression*>(); }
+Maybe<Ast*> Parser::ParseAsyncFunctionDeclaration() { return Nothing<Ast*>(); }
+Maybe<Ast*> Parser::ParseAsyncFunctionBody() { return Nothing<Ast*>(); }
 Maybe<Expression*> Parser::ParseAwaitExpression() {
   return Nothing<Expression*>();
 }
-Maybe<Ast*> Parser::ParseClassDeclaration() {
-  return Nothing<Ast*>();
-}
+Maybe<Ast*> Parser::ParseClassDeclaration() { return Nothing<Ast*>(); }
 Maybe<Expression*> Parser::ParseClassExpression() {
   return Nothing<Expression*>();
 }
-Maybe<Ast*> Parser::ParseClassTail() {return Nothing<Ast*>();}
-Maybe<Ast*> Parser::ParseClassHeritage() {return Nothing<Ast*>();}
-Maybe<Ast*> Parser::ParseClassBody() {return Nothing<Ast*>();}
-Maybe<Ast*> Parser::ParseClassElementList() {return Nothing<Ast*>();}
-Maybe<Ast*> Parser::ParseClassElement() {return Nothing<Ast*>();}
+Maybe<Ast*> Parser::ParseClassTail() { return Nothing<Ast*>(); }
+Maybe<Ast*> Parser::ParseClassHeritage() { return Nothing<Ast*>(); }
+Maybe<Ast*> Parser::ParseClassBody() { return Nothing<Ast*>(); }
+Maybe<Ast*> Parser::ParseClassElementList() { return Nothing<Ast*>(); }
+Maybe<Ast*> Parser::ParseClassElement() { return Nothing<Ast*>(); }
 }  // namespace lux

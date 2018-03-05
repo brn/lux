@@ -23,8 +23,8 @@
 #ifndef SRC_PARSER_H_
 #define SRC_PARSER_H_
 
-#include <string>
 #include <sstream>
+#include <string>
 #include <vector>
 
 #include "./maybe.h"
@@ -33,168 +33,164 @@
 #include "./unicode.h"
 #include "./zone.h"
 
-#define KEYWORD_TOKEN_LIST(V, G)                \
-  G('a')                                        \
-  V(AWAIT, "await")                             \
-  G('b')                                        \
-  V(BREAK, "break")                             \
-  G('c')                                        \
-  V(CASE, "case")                               \
-  V(CATCH, "catch")                             \
-  V(CLASS, "class")                             \
-  V(CONST, "const")                             \
-  V(CONTINUE, "continue")                       \
-  G('d')                                        \
-  V(DEBUGGER, "debugger")                       \
-  V(DEFAULT, "default")                         \
-  V(DELETE, "delete")                           \
-  V(DO, "do")                                   \
-  G('e')                                        \
-  V(ELSE, "else")                               \
-  V(EXPORT, "export")                           \
-  V(EXTENDS, "extends")                         \
-  G('f')                                        \
-  V(FINALLY, "finally")                         \
-  V(FOR, "for")                                 \
-  V(FUNCTION, "function")                       \
-  G('i')                                        \
-  V(IF, "if")                                   \
-  V(IMPORT, "import")                           \
-  V(IN, "in")                                   \
-  V(INSTANCEOF, "instanceof")                   \
-  G('n')                                        \
-  V(NEW, "new")                                 \
-  V(NULL_VALUE, "null")                         \
-  G('r')                                        \
-  V(RETURN, "return")                           \
-  G('s')                                        \
-  V(SUPER, "super")                             \
-  V(SWITCH, "switch")                           \
-  G('t')                                        \
-  V(THIS, "this")                               \
-  V(THROW, "throw")                             \
-  V(TRY, "try")                                 \
-  V(TYPEOF, "typeof")                           \
-  G('v')                                        \
-  V(VAR, "var")                                 \
-  V(VOID, "void")                               \
-  G('w')                                        \
-  V(WHILE, "while")                             \
-  V(WITH, "with")                               \
-  G('y')                                        \
+#define KEYWORD_TOKEN_LIST(V, G) \
+  G('a')                         \
+  V(AWAIT, "await")              \
+  G('b')                         \
+  V(BREAK, "break")              \
+  G('c')                         \
+  V(CASE, "case")                \
+  V(CATCH, "catch")              \
+  V(CLASS, "class")              \
+  V(CONST, "const")              \
+  V(CONTINUE, "continue")        \
+  G('d')                         \
+  V(DEBUGGER, "debugger")        \
+  V(DEFAULT, "default")          \
+  V(DELETE, "delete")            \
+  V(DO, "do")                    \
+  G('e')                         \
+  V(ELSE, "else")                \
+  V(EXPORT, "export")            \
+  V(EXTENDS, "extends")          \
+  G('f')                         \
+  V(FINALLY, "finally")          \
+  V(FOR, "for")                  \
+  V(FUNCTION, "function")        \
+  G('i')                         \
+  V(IF, "if")                    \
+  V(IMPORT, "import")            \
+  V(IN, "in")                    \
+  V(INSTANCEOF, "instanceof")    \
+  G('n')                         \
+  V(NEW, "new")                  \
+  V(NULL_VALUE, "null")          \
+  G('r')                         \
+  V(RETURN, "return")            \
+  G('s')                         \
+  V(SUPER, "super")              \
+  V(SWITCH, "switch")            \
+  G('t')                         \
+  V(THIS, "this")                \
+  V(THROW, "throw")              \
+  V(TRY, "try")                  \
+  V(TYPEOF, "typeof")            \
+  G('v')                         \
+  V(VAR, "var")                  \
+  V(VOID, "void")                \
+  G('w')                         \
+  V(WHILE, "while")              \
+  V(WITH, "with")                \
+  G('y')                         \
   V(YIELD, "yield")
 
-#define FUTURE_RESERVED_KEYWORD_LIST(V)         \
-  V(ENUM, "enum")
+#define FUTURE_RESERVED_KEYWORD_LIST(V) V(ENUM, "enum")
 
-#define SYMBOL_TOKEN_LIST(V)                         \
-  V(BACK_QUOTE, "`")                                  \
-  V(COLON, ":")                                       \
-  V(COMMA, ",")                                       \
-  V(DOT, ".")                                         \
-  V(FALSE, "false")                                   \
-  V(ARROW_FUNCTION_GLYPH, "=>")                       \
-  V(LEFT_BRACE, "{")                                  \
-  V(LEFT_BRACKET, "[")                                \
-  V(LEFT_PAREN, "(")                                  \
-  V(OP_AND, "&")                                      \
-  V(OP_AND_ASSIGN, "&=")                              \
-  V(OP_ASSIGN, "=")                                   \
-  V(OP_DECREMENT, "--")                               \
-  V(OP_DIV, "/")                                      \
-  V(OP_DIV_ASSIGN, "=")                               \
-  V(OP_EQ, "==")                                      \
-  V(OP_GREATER_THAN, ">")                             \
-  V(OP_GREATER_THAN_EQ, ">=")                         \
-  V(OP_INCREMENT, "++")                               \
-  V(OP_LESS_THAN, "<")                                \
-  V(OP_LESS_THAN_OR_EQ, "<=")                         \
-  V(OP_LOGICAL_AND, "&&")                             \
-  V(OP_LOGICAL_OR, "||")                              \
-  V(OP_MINUS, "-")                                    \
-  V(OP_MINUS_ASSIGN, "-=")                            \
-  V(OP_MOD, "%")                                      \
-  V(OP_MOD_ASSIGN, "%=")                              \
-  V(OP_MUL, "*")                                      \
-  V(OP_MUL_ASSIGN, "*=")                              \
-  V(OP_NOT, "!")                                      \
-  V(OP_NOT_EQ, "!=")                                  \
-  V(OP_OR, "|")                                       \
-  V(OP_OR_ASSIGN, "|=")                               \
-  V(OP_PLUS, "+")                                     \
-  V(OP_PLUS_ASSIGN, "+=")                             \
-  V(OP_POW, "**")                                     \
-  V(OP_POW_ASSIGN, "**=")                             \
-  V(OP_SHIFT_LEFT, "<<")                              \
-  V(OP_SHIFT_LEFT_ASSIGN, "<<=")                      \
-  V(OP_SHIFT_RIGHT, ">>")                             \
-  V(OP_SHIFT_RIGHT_ASSIGN, ">>=")                     \
-  V(OP_STRICT_EQ, "===")                              \
-  V(OP_STRICT_NOT_EQ, "!==")                          \
-  V(OP_TILDE, "~")                                    \
-  V(OP_U_SHIFT_RIGHT, ">>>")                          \
-  V(OP_U_SHIFT_RIGHT_ASSIGN, ">>>=")                  \
-  V(OP_XOR, "^")                                      \
-  V(OP_XOR_ASSIGN, "^=")                              \
-  V(QUESTION, "?")                                    \
-  V(RIGHT_BRACE, "}")                                 \
-  V(RIGHT_BRACKET, "]")                               \
-  V(RIGHT_PAREN, ")")                                 \
-  V(SPREAD, "...")                                    \
-  V(TERMINATE, ";")                                   \
+#define SYMBOL_TOKEN_LIST(V)         \
+  V(BACK_QUOTE, "`")                 \
+  V(COLON, ":")                      \
+  V(COMMA, ",")                      \
+  V(DOT, ".")                        \
+  V(FALSE, "false")                  \
+  V(ARROW_FUNCTION_GLYPH, "=>")      \
+  V(LEFT_BRACE, "{")                 \
+  V(LEFT_BRACKET, "[")               \
+  V(LEFT_PAREN, "(")                 \
+  V(OP_AND, "&")                     \
+  V(OP_AND_ASSIGN, "&=")             \
+  V(OP_ASSIGN, "=")                  \
+  V(OP_DECREMENT, "--")              \
+  V(OP_DIV, "/")                     \
+  V(OP_DIV_ASSIGN, "=")              \
+  V(OP_EQ, "==")                     \
+  V(OP_GREATER_THAN, ">")            \
+  V(OP_GREATER_THAN_EQ, ">=")        \
+  V(OP_INCREMENT, "++")              \
+  V(OP_LESS_THAN, "<")               \
+  V(OP_LESS_THAN_OR_EQ, "<=")        \
+  V(OP_LOGICAL_AND, "&&")            \
+  V(OP_LOGICAL_OR, "||")             \
+  V(OP_MINUS, "-")                   \
+  V(OP_MINUS_ASSIGN, "-=")           \
+  V(OP_MOD, "%")                     \
+  V(OP_MOD_ASSIGN, "%=")             \
+  V(OP_MUL, "*")                     \
+  V(OP_MUL_ASSIGN, "*=")             \
+  V(OP_NOT, "!")                     \
+  V(OP_NOT_EQ, "!=")                 \
+  V(OP_OR, "|")                      \
+  V(OP_OR_ASSIGN, "|=")              \
+  V(OP_PLUS, "+")                    \
+  V(OP_PLUS_ASSIGN, "+=")            \
+  V(OP_POW, "**")                    \
+  V(OP_POW_ASSIGN, "**=")            \
+  V(OP_SHIFT_LEFT, "<<")             \
+  V(OP_SHIFT_LEFT_ASSIGN, "<<=")     \
+  V(OP_SHIFT_RIGHT, ">>")            \
+  V(OP_SHIFT_RIGHT_ASSIGN, ">>=")    \
+  V(OP_STRICT_EQ, "===")             \
+  V(OP_STRICT_NOT_EQ, "!==")         \
+  V(OP_TILDE, "~")                   \
+  V(OP_U_SHIFT_RIGHT, ">>>")         \
+  V(OP_U_SHIFT_RIGHT_ASSIGN, ">>>=") \
+  V(OP_XOR, "^")                     \
+  V(OP_XOR_ASSIGN, "^=")             \
+  V(QUESTION, "?")                   \
+  V(RIGHT_BRACE, "}")                \
+  V(RIGHT_BRACKET, "]")              \
+  V(RIGHT_PAREN, ")")                \
+  V(SPREAD, "...")                   \
+  V(TERMINATE, ";")                  \
   V(TRUE, "true")
 
-#define LITERAL_TOKEN_LIST(V)                         \
-  V(IDENTIFIER, "Identifier")                         \
-  V(NUMERIC_LITERAL, "Numeric Literal")               \
-  V(REGEXP_LITERAL, "RegExp Literal")                 \
-  V(STRING_LITERAL, "String Literal")                 \
-  V(TEMPLATE_CHARACTERS, "Template Characters")       \
-  V(TEMPLATE_SUBSTITUTION, "Template Substitutions")  \
+#define LITERAL_TOKEN_LIST(V)                   \
+  V(IDENTIFIER, "Identifier")                   \
+  V(NUMERIC_LITERAL, "Numeric Literal")         \
+  V(REGEXP_LITERAL, "RegExp Literal")           \
+  V(STRING_LITERAL, "String Literal")           \
+  V(TEMPLATE_CHARACTERS, "Template Characters") \
+  V(TEMPLATE_SUBSTITUTION, "Template Substitutions")
 
 #define GROUP_DUMMY_(v)
-#define TOKEN_LIST(V)                           \
-  V(INVALID, "Invalid")                         \
-  V(END, "End")                                 \
-  KEYWORD_TOKEN_LIST(V, GROUP_DUMMY_)           \
-  FUTURE_RESERVED_KEYWORD_LIST(V)               \
-  SYMBOL_TOKEN_LIST(V)                          \
+#define TOKEN_LIST(V)                 \
+  V(INVALID, "Invalid")               \
+  V(END, "End")                       \
+  KEYWORD_TOKEN_LIST(V, GROUP_DUMMY_) \
+  FUTURE_RESERVED_KEYWORD_LIST(V)     \
+  SYMBOL_TOKEN_LIST(V)                \
   LITERAL_TOKEN_LIST(V)
 
 namespace lux {
 class ErrorReporter;
 class Utf16CodePoint;
 
-#define BASE_AST_TYPES(A)                       \
-  A(STATEMENT, Statement, 0)                    \
+#define BASE_AST_TYPES(A)    \
+  A(STATEMENT, Statement, 0) \
   A(EXPRESSION, Expression, 0)
 
-#define CONCRETE_AST_TYPES(A)                           \
-  A(ARROW_FUNCTION_EXPRESSION,                          \
-    ArrowFunctionExpression, 1)                         \
-  A(BINARY_EXPRESSION, BinaryExpression, 3)             \
-  A(ELISION, Elision, 5)                                \
-  A(EXPRESSIONS, Expressions, 7)                        \
-  A(CALL_EXPRESSION, CallExpression, 9)                 \
-  A(CONDITIONAL_EXPRESSION, ConditionalExpression, 11)  \
-  A(FUNCTION_EXPRESSION, FunctionExpression, 13)        \
-  A(LITERAL, Literal, 15)                               \
-  A(OBJECT_PROPERTY_EXPRESSION,                         \
-    ObjectPropertyExpression, 17)                       \
-  A(PROPERTY_ACCESS_EXPRESSION,                         \
-    PropertyAccessExpression, 19)                       \
-  A(STRUCTUAL_LITERAL, StructuralLiteral, 21)           \
-  A(UNARY_EXPRESSION, UnaryExpression, 23)              \
-  A(IMPORT_SPECIFIER, ImportSpecifier, 25)              \
-  A(IMPORT_BINDING, ImportBinding, 27)                  \
-  A(NAMED_IMPORT_LIST, NamedImportList, 29)             \
-  A(STATEMENTS, Statements, 0)                          \
-  A(IMPORT_DECLARATION, ImportDeclaration, 2)           \
-  A(EXPORT_DECLARATION, ExportDeclaration, 4)           \
+#define CONCRETE_AST_TYPES(A)                                 \
+  A(ARROW_FUNCTION_EXPRESSION, ArrowFunctionExpression, 1)    \
+  A(BINARY_EXPRESSION, BinaryExpression, 3)                   \
+  A(ELISION, Elision, 5)                                      \
+  A(EXPRESSIONS, Expressions, 7)                              \
+  A(CALL_EXPRESSION, CallExpression, 9)                       \
+  A(CONDITIONAL_EXPRESSION, ConditionalExpression, 11)        \
+  A(FUNCTION_EXPRESSION, FunctionExpression, 13)              \
+  A(LITERAL, Literal, 15)                                     \
+  A(OBJECT_PROPERTY_EXPRESSION, ObjectPropertyExpression, 17) \
+  A(PROPERTY_ACCESS_EXPRESSION, PropertyAccessExpression, 19) \
+  A(STRUCTUAL_LITERAL, StructuralLiteral, 21)                 \
+  A(UNARY_EXPRESSION, UnaryExpression, 23)                    \
+  A(IMPORT_SPECIFIER, ImportSpecifier, 25)                    \
+  A(IMPORT_BINDING, ImportBinding, 27)                        \
+  A(NAMED_IMPORT_LIST, NamedImportList, 29)                   \
+  A(STATEMENTS, Statements, 0)                                \
+  A(IMPORT_DECLARATION, ImportDeclaration, 2)                 \
+  A(EXPORT_DECLARATION, ExportDeclaration, 4)                 \
   A(EXPRESSION_STATEMENT, ExpressionStatement, 6)
 
-#define AST_TYPES(A)                            \
-  BASE_AST_TYPES(A)                             \
+#define AST_TYPES(A) \
+  BASE_AST_TYPES(A)  \
   CONCRETE_AST_TYPES(A)
 
 #define FORWARD(T, Type, _) class Type;
@@ -206,12 +202,12 @@ struct Token {
 #define DEFINE(TOKEN, _) TOKEN,
     TOKEN_LIST(DEFINE)
 #undef DEFINE
-    LAST__
+        LAST__
   };
 
-  inline static bool OneOf(
-      Type base, std::initializer_list<Token::Type> candidate) {
-    for (auto &t : candidate) {
+  inline static bool OneOf(Type base,
+                           std::initializer_list<Token::Type> candidate) {
+    for (auto& t : candidate) {
       if (t == base) {
         return true;
       }
@@ -224,16 +220,15 @@ struct Token {
 #define DEF_TOKEN(T, _) #T,
         TOKEN_LIST(DEF_TOKEN)
 #undef DEF_TOKEN
-          }};
+    }};
     return kTokenNameArray[token];
   }
 };
 
-
-#define RECEIVER_TYPE_LIST(A)                        \
-  A(EXPRESSION, 0)                              \
-  A(NEW, 0x4)                                   \
-  A(SUPER, 0x8)                                 \
+#define RECEIVER_TYPE_LIST(A) \
+  A(EXPRESSION, 0)            \
+  A(NEW, 0x4)                 \
+  A(SUPER, 0x8)               \
   A(TEMPLATE, 0xa)
 
 struct Receiver {
@@ -245,20 +240,19 @@ struct Receiver {
 
   static const char* ToString(Type type) {
     switch (type) {
-#define DEFINE_RECIEVER(R, v) case R: return #R;
-    RECEIVER_TYPE_LIST(DEFINE_RECIEVER)
+#define DEFINE_RECIEVER(R, v) \
+  case R:                     \
+    return #R;
+      RECEIVER_TYPE_LIST(DEFINE_RECIEVER)
 #undef DEFINE_RECIEVER
-    default:
-      UNREACHABLE();
+      default:
+        UNREACHABLE();
     }
   }
 };
 
 struct Scope {
-  enum Type {
-    OPAQUE,
-    TRANSPARENT
-  };
+  enum Type { OPAQUE, TRANSPARENT };
 };
 
 template <typename T>
@@ -266,35 +260,22 @@ class AstListTraits {
  public:
   using iterator = typename std::vector<T*>::iterator;
   using const_iterator = typename std::vector<T*>::const_iterator;
-  void Push(T* el) {
-    node_list_.push_back(el);
-  }
+  void Push(T* el) { node_list_.push_back(el); }
 
-  T* at(size_t n) const {
-    return node_list_[n];
-  }
+  T* at(size_t n) const { return node_list_[n]; }
 
-  iterator begin() {
-    return node_list_.begin();
-  }
+  iterator begin() { return node_list_.begin(); }
 
-  iterator end() {
-    return node_list_.end();
-  }
+  iterator end() { return node_list_.end(); }
 
-  const_iterator begin() const {
-    return node_list_.cbegin();
-  }
+  const_iterator begin() const { return node_list_.cbegin(); }
 
-  const_iterator end() const {
-    return node_list_.cend();
-  }
+  const_iterator end() const { return node_list_.cend(); }
 
  protected:
-  void ToStringList(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringList(std::string* indent, std::stringstream* ss) const {
     auto ni = "  " + (*indent);
-    for (auto &n : *this) {
+    for (auto& n : *this) {
       n->ToStringTree(&ni, ss);
     }
   }
@@ -303,27 +284,27 @@ class AstListTraits {
   std::vector<T*> node_list_;
 };
 
-class Ast: public Zone {
+class Ast : public Zone {
  public:
   enum Type {
-#define D(V, _ , v) V = v,
+#define D(V, _, v) V = v,
     AST_TYPES(D)
 #undef D
-    LAST__
+        LAST__
   };
   static const uint8_t kStatementFlag = 0x0;
   static const uint8_t kExpressionFlag = 0x1;
-#define IS_TYPE(TYPE, name, _)                            \
-  inline bool Is##name() const {                          \
-    return type_ == Ast::TYPE;                            \
-  }
+#define IS_TYPE(TYPE, name, _) \
+  inline bool Is##name() const { return type_ == Ast::TYPE; }
   CONCRETE_AST_TYPES(IS_TYPE)
 #undef IS_TYPE
 
   inline const char* GetName() const {
     switch (type_) {
-#define DEF_AST_VALUE(Type, name, _) case Type: return #name;
-        CONCRETE_AST_TYPES(DEF_AST_VALUE)
+#define DEF_AST_VALUE(Type, name, _) \
+  case Type:                         \
+    return #name;
+      CONCRETE_AST_TYPES(DEF_AST_VALUE)
 #undef DEF_AST_VALUE
     }
   }
@@ -356,13 +337,9 @@ class Ast: public Zone {
     source_position_.set_end_line_number(pos.end_line_number());
   }
 
-  void set_start_pos(uint32_t start) {
-    source_position_.set_start_col(start);
-  }
+  void set_start_pos(uint32_t start) { source_position_.set_start_col(start); }
 
-  void set_end_pos(uint32_t end) {
-    source_position_.set_end_col(end);
-  }
+  void set_end_pos(uint32_t end) { source_position_.set_end_col(end); }
 
   void set_start_line_number(uint32_t start_line) {
     source_position_.set_start_line_number(start_line);
@@ -372,8 +349,7 @@ class Ast: public Zone {
     source_position_.set_end_line_number(end_line);
   }
 
-  LUX_CONST_PROPERTY(
-      SourcePosition, source_position, source_position_)
+  LUX_CONST_PROPERTY(SourcePosition, source_position, source_position_)
 
   std::string ToString() const {
     std::string indent = "";
@@ -388,17 +364,17 @@ class Ast: public Zone {
     return ss.str();
   }
 
-  virtual void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const = 0;
-  virtual void ToStringTree(
-      std::string* indent, std::stringstream* ss) const = 0;
+  virtual void ToStringSelf(const Ast* ast, std::string* indent,
+                            std::stringstream* ss) const = 0;
+  virtual void ToStringTree(std::string* indent,
+                            std::stringstream* ss) const = 0;
 
 #define CAST(TYPE, Type, _)                     \
-  Type* To##Type() {                        \
+  Type* To##Type() {                            \
     INVALIDATE(Is##Type());                     \
     return reinterpret_cast<Type*>(this);       \
   }                                             \
-  const Type* To##Type() const {            \
+  const Type* To##Type() const {                \
     INVALIDATE(Is##Type());                     \
     return reinterpret_cast<const Type*>(this); \
   }
@@ -406,71 +382,62 @@ class Ast: public Zone {
 #undef CAST
 
  protected:
-  explicit Ast(Ast::Type type)
-    : type_(type) {}
+  explicit Ast(Ast::Type type) : type_(type) {}
 
  private:
-  LUX_INLINE uint8_t type() const {
-    return static_cast<uint8_t>(type_);
-  }
+  LUX_INLINE uint8_t type() const { return static_cast<uint8_t>(type_); }
 
   SourcePosition source_position_;
   Ast::Type type_;
 };
 
-class Expression: public Ast {
+class Expression : public Ast {
  protected:
-  explicit Expression(Ast::Type type)
-      : Ast(type) {}
+  explicit Expression(Ast::Type type) : Ast(type) {}
 };
 
-class Expressions: public Expression, public AstListTraits<Expression> {
+class Expressions : public Expression, public AstListTraits<Expression> {
  public:
-  Expressions()
-      : Expression(Ast::EXPRESSIONS),
-        AstListTraits<Expression>() {}
+  Expressions() : Expression(Ast::EXPRESSIONS), AstListTraits<Expression>() {}
   Expressions(std::initializer_list<Expression*> list)
-      : Expression(Ast::EXPRESSIONS),
-        AstListTraits<Expression>() {
-    for (auto &it : list) {
+      : Expression(Ast::EXPRESSIONS), AstListTraits<Expression>() {
+    for (auto& it : list) {
       Push(it);
     }
   }
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName()
-          << ' ' << source_position().ToString() << ']' << '\n';
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ' '
+          << source_position().ToString() << ']' << '\n';
   }
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     ToStringList(indent, ss);
   }
 };
 
-class BinaryExpression: public Expression {
+class BinaryExpression : public Expression {
  public:
-  BinaryExpression()
-      : Expression(Ast::BINARY_EXPRESSION) {}
+  BinaryExpression() : Expression(Ast::BINARY_EXPRESSION) {}
 
-  BinaryExpression(Token::Type op,
-                   Expression* lhs, Expression* rhs)
+  BinaryExpression(Token::Type op, Expression* lhs, Expression* rhs)
       : Expression(Ast::BINARY_EXPRESSION),
-        operand_(op), lhs_(lhs), rhs_(rhs) {}
+        operand_(op),
+        lhs_(lhs),
+        rhs_(rhs) {}
 
   LUX_CONST_PROPERTY(Expression*, lhs, lhs_);
   LUX_CONST_PROPERTY(Expression*, rhs, rhs_);
   LUX_CONST_PROPERTY(Token::Type, operand, operand_);
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName() << " operand = "
-          << Token::ToString(operand_)
-          << ' ' << source_position().ToString() << ']' << '\n';
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName()
+          << " operand = " << Token::ToString(operand_) << ' '
+          << source_position().ToString() << ']' << '\n';
   }
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     auto ni = "  " + (*indent);
     lhs_->ToStringTree(&ni, ss);
@@ -483,33 +450,30 @@ class BinaryExpression: public Expression {
   Expression* rhs_;
 };
 
-class UnaryExpression: public Expression {
+class UnaryExpression : public Expression {
  public:
-  enum OperandPosition {
-    PRE,
-    POST
-  };
+  enum OperandPosition { PRE, POST };
 
-  UnaryExpression()
-      : Expression(Ast::UNARY_EXPRESSION) {}
+  UnaryExpression() : Expression(Ast::UNARY_EXPRESSION) {}
 
   UnaryExpression(OperandPosition position, Token::Type op, Expression* exp)
       : Expression(Ast::UNARY_EXPRESSION),
-        operand_position_(position), operand_(op), expression_(exp) {}
+        operand_position_(position),
+        operand_(op),
+        expression_(exp) {}
 
   LUX_CONST_PROPERTY(Token::Type, operand, operand_)
   LUX_CONST_PROPERTY(Expression*, expression, expression_)
   LUX_CONST_PROPERTY(OperandPosition, operand_position, operand_position_)
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName() << " operand = "
-          << Token::ToString(operand_)
-          << " position = " << (operand_position_ == PRE? "PRE": "POST")
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName()
+          << " operand = " << Token::ToString(operand_)
+          << " position = " << (operand_position_ == PRE ? "PRE" : "POST")
           << ' ' << source_position().ToString() << ']' << '\n';
   }
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     auto ni = "  " + (*indent);
     expression_->ToStringTree(&ni, ss);
@@ -521,50 +485,34 @@ class UnaryExpression: public Expression {
   Expression* expression_;
 };
 
-class ConditionalExpression: public Expression {
+class ConditionalExpression : public Expression {
  public:
-  ConditionalExpression()
-      : Expression(Ast::CONDITIONAL_EXPRESSION) {}
+  ConditionalExpression() : Expression(Ast::CONDITIONAL_EXPRESSION) {}
 
-  ConditionalExpression(
-      Expression* condition,
-      Expression* then_expression,
-      Expression* else_expression)
+  ConditionalExpression(Expression* condition, Expression* then_expression,
+                        Expression* else_expression)
       : Expression(Ast::CONDITIONAL_EXPRESSION),
         condition_(condition),
         then_expression_(then_expression),
         else_expression_(else_expression) {}
 
-  LUX_INLINE void set_condition(Expression* e) {
-    condition_ = e;
-  }
-  LUX_INLINE Expression* condition() const {
-    return condition_;
-  }
+  LUX_INLINE void set_condition(Expression* e) { condition_ = e; }
+  LUX_INLINE Expression* condition() const { return condition_; }
 
-  LUX_INLINE void set_then_expression(Expression* n) {
-    then_expression_ = n;
-  }
+  LUX_INLINE void set_then_expression(Expression* n) { then_expression_ = n; }
 
-  LUX_INLINE Expression* then_expression() const {
-    return then_expression_;
-  }
+  LUX_INLINE Expression* then_expression() const { return then_expression_; }
 
-  LUX_INLINE void set_else_expression(Expression* n) {
-    else_expression_ = n;
-  }
+  LUX_INLINE void set_else_expression(Expression* n) { else_expression_ = n; }
 
-  LUX_INLINE Expression* else_expression() const {
-    return else_expression_;
-  }
+  LUX_INLINE Expression* else_expression() const { return else_expression_; }
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName()
-          << ' ' << source_position().ToString() << ']' << '\n';
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ' '
+          << source_position().ToString() << ']' << '\n';
   }
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     auto ni = "  " + (*indent);
     condition_->ToStringTree(&ni, ss);
@@ -578,12 +526,10 @@ class ConditionalExpression: public Expression {
   Expression* else_expression_;
 };
 
-class CallExpression: public Expression {
+class CallExpression : public Expression {
  public:
-  CallExpression()
-      : Expression(Ast::CALL_EXPRESSION) {}
-  CallExpression(Receiver::Type receiver_type,
-                 Expression* callee,
+  CallExpression() : Expression(Ast::CALL_EXPRESSION) {}
+  CallExpression(Receiver::Type receiver_type, Expression* callee,
                  Expression* arguments = nullptr)
       : Expression(Ast::CALL_EXPRESSION),
         receiver_type_(receiver_type),
@@ -594,14 +540,13 @@ class CallExpression: public Expression {
   LUX_CONST_PROPERTY(Expression*, callee, callee_)
   LUX_CONST_PROPERTY(Expression*, arguments, arguments_)
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName() << " receiver = "
-          << Receiver::ToString(receiver_type_)
-          << ' ' << source_position().ToString() << ']' << '\n';
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName()
+          << " receiver = " << Receiver::ToString(receiver_type_) << ' '
+          << source_position().ToString() << ']' << '\n';
   }
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     auto ni = "  " + (*indent);
     callee_->ToStringTree(&ni, ss);
@@ -614,28 +559,21 @@ class CallExpression: public Expression {
   Expression* arguments_;
 };
 
-class PropertyAccessExpression: public Expression {
+class PropertyAccessExpression : public Expression {
  public:
-  enum AccessType: uint8_t {
-    DOT = 0x1,
-    ELEMENT = 0x2
-  };
+  enum AccessType : uint8_t { DOT = 0x1, ELEMENT = 0x2 };
 
-  static const uint8_t kAccessTypeMask
-  = AccessType::DOT | AccessType::ELEMENT;
+  static const uint8_t kAccessTypeMask = AccessType::DOT | AccessType::ELEMENT;
 
-  static const uint8_t kReceiverTypeMask
-  = Receiver::Type::NEW | Receiver::Type::SUPER;
+  static const uint8_t kReceiverTypeMask =
+      Receiver::Type::NEW | Receiver::Type::SUPER;
 
-  PropertyAccessExpression():
-      Expression(Ast::PROPERTY_ACCESS_EXPRESSION) {}
-  PropertyAccessExpression(AccessType access_type,
-                           Receiver::Type receiver_type,
-                           Expression* receiver,
-                           Expression* property):
-      Expression(Ast::PROPERTY_ACCESS_EXPRESSION),
-      receiver_(receiver),
-      property_(property) {
+  PropertyAccessExpression() : Expression(Ast::PROPERTY_ACCESS_EXPRESSION) {}
+  PropertyAccessExpression(AccessType access_type, Receiver::Type receiver_type,
+                           Expression* receiver, Expression* property)
+      : Expression(Ast::PROPERTY_ACCESS_EXPRESSION),
+        receiver_(receiver),
+        property_(property) {
     type_flag_.assign(access_type | receiver_type);
   }
 
@@ -647,17 +585,11 @@ class PropertyAccessExpression: public Expression {
     return type_flag_.mask<Receiver::Type>(kReceiverTypeMask);
   }
 
-  bool is_dot_access() const {
-    return type_flag_.get(AccessType::DOT);
-  }
+  bool is_dot_access() const { return type_flag_.get(AccessType::DOT); }
 
-  bool is_element_access() const {
-    return type_flag_.get(AccessType::ELEMENT);
-  }
+  bool is_element_access() const { return type_flag_.get(AccessType::ELEMENT); }
 
-  bool is_meta_property() const {
-    return type_flag_.get(Receiver::Type::NEW);
-  }
+  bool is_meta_property() const { return type_flag_.get(Receiver::Type::NEW); }
 
   bool is_super_property() const {
     return type_flag_.get(Receiver::Type::SUPER);
@@ -666,8 +598,8 @@ class PropertyAccessExpression: public Expression {
   LUX_CONST_PROPERTY(Expression*, receiver, receiver_);
   LUX_CONST_PROPERTY(Expression*, property, property_);
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
     (*ss) << *indent << '[' << ast->GetName() << " property_access = ";
     if (is_dot_access()) {
       (*ss) << " dot";
@@ -681,8 +613,7 @@ class PropertyAccessExpression: public Expression {
     }
     (*ss) << ' ' << source_position().ToString() << "]\n";
   }
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     auto ni = "  " + (*indent);
     receiver_->ToStringTree(&ni, ss);
@@ -696,12 +627,12 @@ class PropertyAccessExpression: public Expression {
 };
 
 struct Function {
-#define FUNCTION_TYPE_LIST(A)                   \
-  A(NORMAL, normal, 0x4)                        \
-  A(ASYNC, async, 0x8)                          \
-  A(GENERATOR, generator, 0x10)                 \
-  A(ASYNC_GENERATOR, async_generator, 0x20)     \
-  A(GETTER, getter, 0x40)                       \
+#define FUNCTION_TYPE_LIST(A)               \
+  A(NORMAL, normal, 0x4)                    \
+  A(ASYNC, async, 0x8)                      \
+  A(GENERATOR, generator, 0x10)             \
+  A(ASYNC_GENERATOR, async_generator, 0x20) \
+  A(GETTER, getter, 0x40)                   \
   A(SETTER, setter, 0x80)
 
   enum Type {
@@ -715,34 +646,22 @@ class BaseFunction {
  public:
   BaseFunction() {}
 
-  BaseFunction(Function::Type fn_type,
-               Scope::Type scope_type,
-               Maybe<Expression*> name,
-               Expression* formal_parameters,
+  BaseFunction(Function::Type fn_type, Scope::Type scope_type,
+               Maybe<Expression*> name, Expression* formal_parameters,
                Ast* body)
-      : name_(name),
-        formal_parameters_(formal_parameters),
-        body_(body) {
+      : name_(name), formal_parameters_(formal_parameters), body_(body) {
     flags_.assign(fn_type | scope_type);
   }
 
-#define FUNCTION_TYPE_PROPERTIES(NAME, name, _)     \
-  bool is_##name() {                                \
-    return flags_.get(Function::NAME);        \
-  }                                                 \
-  void set_##name() {                               \
-    flags_.set(Function::NAME);         \
-  }
+#define FUNCTION_TYPE_PROPERTIES(NAME, name, _)           \
+  bool is_##name() { return flags_.get(Function::NAME); } \
+  void set_##name() { flags_.set(Function::NAME); }
   FUNCTION_TYPE_LIST(FUNCTION_TYPE_PROPERTIES)
 #undef FUNCTION_TYPE_PROPERTIES
 
-  bool is_transparent_scope() {
-    return flags_.get(Scope::TRANSPARENT);
-  }
+  bool is_transparent_scope() { return flags_.get(Scope::TRANSPARENT); }
 
-  bool is_opaque_scope() {
-    return flags_.get(Scope::OPAQUE);
-  }
+  bool is_opaque_scope() { return flags_.get(Scope::OPAQUE); }
 
   LUX_CONST_PROPERTY(Maybe<Expression*>, name, name_)
 
@@ -756,64 +675,48 @@ class BaseFunction {
 };
 
 template <bool allow_statements>
-class FunctionTraits: public BaseFunction {};
+class FunctionTraits : public BaseFunction {};
 
 template <>
-class FunctionTraits<true>: public BaseFunction {
+class FunctionTraits<true> : public BaseFunction {
  public:
-  FunctionTraits(Function::Type fn_type,
-                 Scope::Type scope_type,
-                 Maybe<Expression*> name,
-                 Expression* formal_parameters,
+  FunctionTraits(Function::Type fn_type, Scope::Type scope_type,
+                 Maybe<Expression*> name, Expression* formal_parameters,
                  Ast* body)
-      : BaseFunction(fn_type,
-                     scope_type,
-                     name,
-                     formal_parameters,
-                     body) {}
+      : BaseFunction(fn_type, scope_type, name, formal_parameters, body) {}
 
   LUX_CONST_GETTER(Statement*, body, reinterpret_cast<Statement*>(body_))
   LUX_SETTER(Ast*, body, body_)
 };
 
 template <>
-class FunctionTraits<false>: public BaseFunction {
+class FunctionTraits<false> : public BaseFunction {
  public:
-  FunctionTraits(Function::Type fn_type,
-                 Scope::Type scope_type,
-                 Maybe<Expression*> name,
-                 Expression* formal_parameters,
+  FunctionTraits(Function::Type fn_type, Scope::Type scope_type,
+                 Maybe<Expression*> name, Expression* formal_parameters,
                  Ast* body)
-      : BaseFunction(fn_type,
-                     scope_type,
-                     name,
-                     formal_parameters,
-                     body) {}
+      : BaseFunction(fn_type, scope_type, name, formal_parameters, body) {}
   LUX_CONST_PROPERTY(Ast*, body, body_)
 };
 
 template <bool allow_statements>
-class FunctionExpressionBase: public Expression,
-                              public FunctionTraits<allow_statements> {
+class FunctionExpressionBase : public Expression,
+                               public FunctionTraits<allow_statements> {
  public:
-  FunctionExpressionBase(Ast::Type type,
-                         Function::Type fn_type,
-                         Scope::Type scope_type,
-                         Maybe<Expression*> name,
-                         Expression* formal_parameters,
-                         Ast* body)
+  FunctionExpressionBase(Ast::Type type, Function::Type fn_type,
+                         Scope::Type scope_type, Maybe<Expression*> name,
+                         Expression* formal_parameters, Ast* body)
       : Expression(type),
-        FunctionTraits<allow_statements>(
-            fn_type, scope_type, name, formal_parameters, body) {}
+        FunctionTraits<allow_statements>(fn_type, scope_type, name,
+                                         formal_parameters, body) {}
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName()
-          << ' ' << source_position().ToString() << ']' << '\n';
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ' '
+          << source_position().ToString() << ']' << '\n';
   }
 
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     auto ni = "  " + (*indent);
     BaseFunction::name_ >>= [&](auto n) { n->ToStringTree(&ni, ss); };
@@ -822,50 +725,45 @@ class FunctionExpressionBase: public Expression,
   }
 };
 
-class FunctionExpression: public FunctionExpressionBase<true> {
+class FunctionExpression : public FunctionExpressionBase<true> {
  public:
-  FunctionExpression(Function::Type fn_type,
-                     Maybe<Expression*> name,
-                     Expression* formal_parameters,
-                     Statement* body)
-      : FunctionExpressionBase<true>(
-            Ast::FUNCTION_EXPRESSION,
-            fn_type, Scope::OPAQUE, name, formal_parameters,
-            reinterpret_cast<Ast*>(body)) {}
+  FunctionExpression(Function::Type fn_type, Maybe<Expression*> name,
+                     Expression* formal_parameters, Statement* body)
+      : FunctionExpressionBase<true>(Ast::FUNCTION_EXPRESSION, fn_type,
+                                     Scope::OPAQUE, name, formal_parameters,
+                                     reinterpret_cast<Ast*>(body)) {}
 };
 
-class ArrowFunctionExpression: public FunctionExpressionBase<false> {
+class ArrowFunctionExpression : public FunctionExpressionBase<false> {
  public:
-  ArrowFunctionExpression(Function::Type fn_type,
-                          Maybe<Expression*> name,
-                          Expression* formal_parameters,
-                          Ast* body)
-      : FunctionExpressionBase<false>(
-            Ast::ARROW_FUNCTION_EXPRESSION,
-            fn_type, Scope::TRANSPARENT, name, formal_parameters, body) {}
+  ArrowFunctionExpression(Function::Type fn_type, Maybe<Expression*> name,
+                          Expression* formal_parameters, Ast* body)
+      : FunctionExpressionBase<false>(Ast::ARROW_FUNCTION_EXPRESSION, fn_type,
+                                      Scope::TRANSPARENT, name,
+                                      formal_parameters, body) {}
 };
 
-class ObjectPropertyExpression: public Expression {
+class ObjectPropertyExpression : public Expression {
  public:
-  ObjectPropertyExpression()
-      : Expression(Ast::OBJECT_PROPERTY_EXPRESSION) {}
+  ObjectPropertyExpression() : Expression(Ast::OBJECT_PROPERTY_EXPRESSION) {}
 
   ObjectPropertyExpression(Expression* key, Expression* value,
                            Expression* initializer = nullptr)
       : Expression(Ast::OBJECT_PROPERTY_EXPRESSION),
-        key_(key), value_(value), initializer_(initializer) {}
+        key_(key),
+        value_(value),
+        initializer_(initializer) {}
 
   LUX_CONST_PROPERTY(Expression*, key, key_);
   LUX_CONST_PROPERTY(Expression*, value, value_);
   LUX_CONST_PROPERTY(Expression*, initializer, initializer_);
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName()
-          << ' ' << source_position().ToString() << ']' << '\n';
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ' '
+          << source_position().ToString() << ']' << '\n';
   }
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     auto ni = "  " + (*indent);
     key_->ToStringTree(&ni, ss);
@@ -883,39 +781,30 @@ class ObjectPropertyExpression: public Expression {
   Expression* initializer_;
 };
 
-class Elision: public Expression {
+class Elision : public Expression {
  public:
-  Elision()
-      : Expression(Ast::ELISION) {}
+  Elision() : Expression(Ast::ELISION) {}
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName()
-          << ' ' << source_position().ToString() << ']' << '\n';
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ' '
+          << source_position().ToString() << ']' << '\n';
   }
 
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
   }
 };
 
-class StructuralLiteral: public Expression, public AstListTraits<Expression> {
+class StructuralLiteral : public Expression, public AstListTraits<Expression> {
  public:
-  enum Type {
-    ARRAY = 0x1,
-    OBJECT = 0x2
-  };
+  enum Type { ARRAY = 0x1, OBJECT = 0x2 };
 
-  enum Flag {
-    HAS_ACCESSOR = 0x4,
-    HAS_GENERATOR = 0x8,
-    HAS_SPREAD = 0x10
-  };
+  enum Flag { HAS_ACCESSOR = 0x4, HAS_GENERATOR = 0x8, HAS_SPREAD = 0x10 };
 
   static const uint8_t kTypeMask = Type::ARRAY | Type::OBJECT;
   static const uint8_t kFlagMask =
-    Flag::HAS_ACCESSOR | Flag::HAS_GENERATOR | Flag::HAS_SPREAD;
+      Flag::HAS_ACCESSOR | Flag::HAS_GENERATOR | Flag::HAS_SPREAD;
 
   explicit StructuralLiteral(uint8_t flag)
       : Expression(Ast::STRUCTUAL_LITERAL) {
@@ -930,40 +819,24 @@ class StructuralLiteral: public Expression, public AstListTraits<Expression> {
     return flag_.mask<Flag>(kFlagMask);
   }
 
-  LUX_INLINE bool is_array_literal() const {
-    return flag_.get(ARRAY);
-  }
+  LUX_INLINE bool is_array_literal() const { return flag_.get(ARRAY); }
 
-  LUX_INLINE bool is_object_literal() const {
-    return flag_.get(OBJECT);
-  }
+  LUX_INLINE bool is_object_literal() const { return flag_.get(OBJECT); }
 
-  LUX_INLINE void set_accessor() {
-    flag_.set(HAS_ACCESSOR);
-  }
+  LUX_INLINE void set_accessor() { flag_.set(HAS_ACCESSOR); }
 
-  LUX_INLINE bool has_accessor() const {
-    return flag_.get(HAS_ACCESSOR);
-  }
+  LUX_INLINE bool has_accessor() const { return flag_.get(HAS_ACCESSOR); }
 
-  LUX_INLINE void set_generator() {
-    flag_.set(HAS_GENERATOR);
-  }
+  LUX_INLINE void set_generator() { flag_.set(HAS_GENERATOR); }
 
-  LUX_INLINE bool has_generator() const {
-    return flag_.get(HAS_GENERATOR);
-  }
+  LUX_INLINE bool has_generator() const { return flag_.get(HAS_GENERATOR); }
 
-  LUX_INLINE void set_spread() {
-    flag_.set(HAS_SPREAD);
-  }
+  LUX_INLINE void set_spread() { flag_.set(HAS_SPREAD); }
 
-  LUX_INLINE bool has_spread() const {
-    return flag_.get(HAS_SPREAD);
-  }
+  LUX_INLINE bool has_spread() const { return flag_.get(HAS_SPREAD); }
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
     (*ss) << *indent << '[' << ast->GetName() << " type = ";
     if (is_array_literal()) {
       (*ss) << "ArrayLiteral";
@@ -982,8 +855,7 @@ class StructuralLiteral: public Expression, public AstListTraits<Expression> {
     }
     (*ss) << ' ' << source_position().ToString() << "]\n";
   }
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     ToStringList(indent, ss);
   }
@@ -992,49 +864,34 @@ class StructuralLiteral: public Expression, public AstListTraits<Expression> {
   Bitset<uint8_t> flag_;
 };
 
-class Literal: public Expression {
+class Literal : public Expression {
  public:
-  Literal()
-      : Expression(Ast::LITERAL) {}
+  Literal() : Expression(Ast::LITERAL) {}
 
   explicit Literal(Token::Type type)
-      : Expression(Ast::LITERAL),
-        literal_type_(type) {}
+      : Expression(Ast::LITERAL), literal_type_(type) {}
 
   Literal(Token::Type type, Utf16String value)
-      : Expression(Ast::LITERAL),
-        literal_type_(type),
-        value_(value) {}
+      : Expression(Ast::LITERAL), literal_type_(type), value_(value) {}
 
-  bool Is(Token::Type t) {
-    return literal_type_ == t;
-  }
+  bool Is(Token::Type t) { return literal_type_ == t; }
 
-  Token::Type literal_type() const {
-    return literal_type_;
-  }
+  Token::Type literal_type() const { return literal_type_; }
 
-  void set_literal_type(Token::Type t) {
-    literal_type_ = t;
-  }
+  void set_literal_type(Token::Type t) { literal_type_ = t; }
 
-  Utf16String value() const {
-    return value_;
-  }
+  Utf16String value() const { return value_; }
 
-  void set_value(Utf16String n) {
-    value_ = n;
-  }
+  void set_value(Utf16String n) { value_ = n; }
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
     (*ss) << *indent << '[' << ast->GetName()
           << " type = " << Token::ToString(literal_type_)
-          << " value = " << value().ToUtf8String()
-          << ' ' << source_position().ToString() << "]\n";
+          << " value = " << value().ToUtf8String() << ' '
+          << source_position().ToString() << "]\n";
   }
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
   }
 
@@ -1043,49 +900,45 @@ class Literal: public Expression {
   Utf16String value_;
 };
 
-class Statement: public Ast {
+class Statement : public Ast {
  protected:
-  explicit Statement(Ast::Type type)
-      : Ast(type) {}
+  explicit Statement(Ast::Type type) : Ast(type) {}
 };
 
-class Statements: public Statement, public AstListTraits<Statement> {
+class Statements : public Statement, public AstListTraits<Statement> {
  public:
-  Statements()
-      : Statement(Ast::STATEMENTS),
-        AstListTraits<Statement>() {}
+  Statements() : Statement(Ast::STATEMENTS), AstListTraits<Statement>() {}
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName()
-          << ' ' << source_position().ToString() << ']' << '\n';
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ' '
+          << source_position().ToString() << ']' << '\n';
   }
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     ToStringList(indent, ss);
   }
 };
 
-class ImportSpecifier: public Expression {
+class ImportSpecifier : public Expression {
  public:
   ImportSpecifier(Maybe<Expression*> name, Maybe<Expression*> as,
                   bool is_namespace)
       : Expression(Ast::IMPORT_SPECIFIER),
         is_namespace_(is_namespace),
-        name_(name), as_(as) {}
+        name_(name),
+        as_(as) {}
 
   LUX_CONST_GETTER(Maybe<Expression*>, name, name_)
   LUX_CONST_GETTER(Maybe<Expression*>, as, as_)
   LUX_CONST_GETTER(bool, is_namespace, is_namespace_)
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName()
-          << ' ' << source_position().ToString() << ']' << '\n';
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ' '
+          << source_position().ToString() << ']' << '\n';
   }
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     auto n = *indent + "  ";
     name_ >>= [&](auto name) { name->ToStringTree(&n, ss); };
@@ -1098,57 +951,46 @@ class ImportSpecifier: public Expression {
   Maybe<Expression*> as_;
 };
 
-class NamedImportList:
-      public Expression, public AstListTraits<ImportSpecifier> {
+class NamedImportList : public Expression,
+                        public AstListTraits<ImportSpecifier> {
  public:
   NamedImportList()
-      : Expression(Ast::NAMED_IMPORT_LIST),
-        AstListTraits<ImportSpecifier>() {}
+      : Expression(Ast::NAMED_IMPORT_LIST), AstListTraits<ImportSpecifier>() {}
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName()
-          << ' ' << source_position().ToString() << ']' << '\n';
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ' '
+          << source_position().ToString() << ']' << '\n';
   }
 
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     ToStringList(indent, ss);
   }
 };
 
-class ImportBinding: public Expression {
+class ImportBinding : public Expression {
  public:
   explicit ImportBinding(Maybe<Expression*> default_binding)
-      : Expression(Ast::IMPORT_BINDING),
-        default_binding_(default_binding) {}
+      : Expression(Ast::IMPORT_BINDING), default_binding_(default_binding) {}
 
-  LUX_CONST_GETTER(
-      Maybe<Expression*>, default_binding, default_binding_)
+  LUX_CONST_GETTER(Maybe<Expression*>, default_binding, default_binding_)
 
-  LUX_CONST_GETTER(Maybe<Expression*>,
-                   namespace_import,
-                   namespace_import_)
-  LUX_CONST_GETTER(Maybe<Expression*>,
-                   named_import_list,
-                   named_import_list_)
-  void set_namespace_import(Maybe<Expression*> exp) {
-    namespace_import_ = exp;
-  }
+  LUX_CONST_GETTER(Maybe<Expression*>, namespace_import, namespace_import_)
+  LUX_CONST_GETTER(Maybe<Expression*>, named_import_list, named_import_list_)
+  void set_namespace_import(Maybe<Expression*> exp) { namespace_import_ = exp; }
 
   void set_named_import_list(Maybe<Expression*> exp) {
     named_import_list_ = exp;
   }
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName()
-          << ' ' << source_position().ToString() << ']' << '\n';
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ' '
+          << source_position().ToString() << ']' << '\n';
   }
 
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     default_binding_ >>= [&](auto db) {
       auto ni = *indent + "  ";
@@ -1170,7 +1012,7 @@ class ImportBinding: public Expression {
   Maybe<Expression*> named_import_list_;
 };
 
-class ImportDeclaration: public Statement {
+class ImportDeclaration : public Statement {
  public:
   ImportDeclaration(Maybe<Expression*> import_binding,
                     Expression* module_specifier)
@@ -1178,22 +1020,18 @@ class ImportDeclaration: public Statement {
         import_binding_(import_binding),
         module_specifier_(module_specifier) {}
 
-  LUX_CONST_GETTER(
-      Maybe<Expression*>, import_binding, import_binding_)
+  LUX_CONST_GETTER(Maybe<Expression*>, import_binding, import_binding_)
   LUX_CONST_GETTER(Expression*, module_specifier, module_specifier_)
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName()
-          << ' ' << source_position().ToString() << ']' << '\n';
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ' '
+          << source_position().ToString() << ']' << '\n';
   }
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     auto n = *indent + "  ";
-    import_binding_ >>= [&](auto ib) {
-      ib->ToStringTree(&n, ss);
-    };
+    import_binding_ >>= [&](auto ib) { ib->ToStringTree(&n, ss); };
     module_specifier_->ToStringTree(&n, ss);
   }
 
@@ -1202,34 +1040,27 @@ class ImportDeclaration: public Statement {
   Expression* module_specifier_;
 };
 
-class ExportDeclaration: public Statement {
+class ExportDeclaration : public Statement {
  public:
-  enum {
-    NAMESPACE_EXPORT,
-    DEFAULT_EXPORT
-  };
+  enum { NAMESPACE_EXPORT, DEFAULT_EXPORT };
 
-  ExportDeclaration()
-      : Statement(Ast::EXPORT_DECLARATION) {}
+  ExportDeclaration() : Statement(Ast::EXPORT_DECLARATION) {}
 
-  LUX_CONST_GETTER(
-      bool, namespace_export, flags_.get(NAMESPACE_EXPORT))
-  LUX_CONST_GETTER(
-      bool, default_export, flags_.get(DEFAULT_EXPORT))
+  LUX_CONST_GETTER(bool, namespace_export, flags_.get(NAMESPACE_EXPORT))
+  LUX_CONST_GETTER(bool, default_export, flags_.get(DEFAULT_EXPORT))
   void set_namespace_export() { flags_.set(NAMESPACE_EXPORT); }
   void set_default_export() { flags_.set(DEFAULT_EXPORT); }
 
   LUX_CONST_PROPERTY(Maybe<Ast*>, export_clause, export_clause_)
   LUX_CONST_PROPERTY(Maybe<Ast*>, from_clause, from_clause_)
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
     (*ss) << *indent << '[' << ast->GetName()
-          << " type = " << (namespace_export()? "namespace" : "default")
-          << ' ' << source_position().ToString() << ']' << '\n';
+          << " type = " << (namespace_export() ? "namespace" : "default") << ' '
+          << source_position().ToString() << ']' << '\n';
   }
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     auto n = *indent + "  ";
     export_clause_ >>= [&](auto ast) { ast->ToStringTree(&n, ss); };
@@ -1242,25 +1073,22 @@ class ExportDeclaration: public Statement {
   Maybe<Ast*> from_clause_;
 };
 
-class ExpressionStatement: public Statement {
+class ExpressionStatement : public Statement {
  public:
   explicit ExpressionStatement(Expression* expr)
-      : Statement(Ast::EXPRESSION_STATEMENT),
-        expr_(expr) {}
+      : Statement(Ast::EXPRESSION_STATEMENT), expr_(expr) {}
 
   ExpressionStatement()
-      : Statement(Ast::EXPRESSION_STATEMENT),
-        expr_(nullptr) {}
+      : Statement(Ast::EXPRESSION_STATEMENT), expr_(nullptr) {}
 
   LUX_CONST_PROPERTY(Expression*, expr, expr_)
 
-  void ToStringSelf(
-      const Ast* ast, std::string* indent, std::stringstream* ss) const {
-    (*ss) << *indent << '[' << ast->GetName()
-          << ' ' << source_position().ToString() << ']' << '\n';
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ' '
+          << source_position().ToString() << ']' << '\n';
   }
-  void ToStringTree(
-      std::string* indent, std::stringstream* ss) const {
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
     auto n = *indent + "  ";
     expr_->ToStringTree(&n, ss);
@@ -1272,10 +1100,7 @@ class ExpressionStatement: public Statement {
 
 class Parser {
  public:
-  enum ParseType {
-    SCRIPT,
-    MODULE
-  };
+  enum ParseType { SCRIPT, MODULE };
 
   enum State {
     IN_FUNCTION,
@@ -1288,36 +1113,28 @@ class Parser {
 
   class Allowance {
    public:
-#define ALLOWANCE_TYPE_LIST(A)                  \
-    A(TEMPLATE, template, 0x1)                  \
-    A(CALL, call, 0x2)                          \
-    A(BINDING_PATTERN, binding_pattern, 0x4)    \
-    A(INITIALIZER, initializer, 0x8)
+#define ALLOWANCE_TYPE_LIST(A)             \
+  A(TEMPLATE, template, 0x1)               \
+  A(CALL, call, 0x2)                       \
+  A(BINDING_PATTERN, binding_pattern, 0x4) \
+  A(INITIALIZER, initializer, 0x8)
     enum Type {
 #define DEF_ALLOWANCE(V, _, v) V = v,
       ALLOWANCE_TYPE_LIST(DEF_ALLOWANCE)
 #undef DEF_ALLOWANCE
     };
 
-    explicit Allowance(uint16_t type) {
-      flag_.assign(type);
-    }
+    explicit Allowance(uint16_t type) { flag_.assign(type); }
 
     Allowance() {}
 
-#define ALLOWANCE_PROPERTIES(V, name, _)          \
-    LUX_INLINE void set_##name() {                \
-      flag_.set(V);                               \
-    }                                             \
-    LUX_INLINE bool is_##name##_allowed() const { \
-      return flag_.get(V);                        \
-    }
+#define ALLOWANCE_PROPERTIES(V, name, _)         \
+  LUX_INLINE void set_##name() { flag_.set(V); } \
+  LUX_INLINE bool is_##name##_allowed() const { return flag_.get(V); }
     ALLOWANCE_TYPE_LIST(ALLOWANCE_PROPERTIES)
 #undef ALLOWANCE_PROPERTIES
 
-    LUX_INLINE void assign(uint16_t flag) {
-      flag_.assign(flag);
-    }
+    LUX_INLINE void assign(uint16_t flag) { flag_.assign(flag); }
 
    private:
     Bitset<uint16_t> flag_;
@@ -1328,26 +1145,22 @@ class Parser {
  private:
   class ParserState {
    public:
-    void PushState(State state) {
-      state_stack_.push_back(state);
-    }
+    void PushState(State state) { state_stack_.push_back(state); }
 
     void PopState(State state) {
       INVALIDATE(state_stack_.back() == state);
       state_stack_.pop_back();
     }
 
-    State CurrentState(State state) const {
-      return state_stack_.back();
-    }
+    State CurrentState(State state) const { return state_stack_.back(); }
 
     bool Is(State state) const {
-      return state_stack_.size() > 0? state == state_stack_.back(): false;
+      return state_stack_.size() > 0 ? state == state_stack_.back() : false;
     }
 
     bool IsInState(std::initializer_list<State> states) const {
-      for (auto &s : state_stack_) {
-        for (auto &ms : states) {
+      for (auto& s : state_stack_) {
+        for (auto& ms : states) {
           if (s == ms) {
             return true;
           }
@@ -1356,25 +1169,9 @@ class Parser {
       return false;
     }
 
-    bool is_strict_mode() const {
-      return flags_.get(0);
-    }
+    bool is_strict_mode() const { return flags_.get(0); }
 
-    void set_strict_mode() {
-      flags_.set(0);
-    }
-
-    void set_implicit_octal() {
-      flags_.set(1);
-    }
-
-    void unset_implicit_octal() {
-      flags_.unset(1);
-    }
-
-    bool is_implicit_octal() {
-      return flags_.get(1);
-    }
+    void set_strict_mode() { flags_.set(0); }
 
    private:
     std::vector<State> state_stack_;
@@ -1388,14 +1185,23 @@ class Parser {
   };
 
  public:
+  class TokenizerState {
+   public:
+    enum Type { IMPLICIT_OCTAL };
+
+    bool Is(Type type) const { return flag_.get(type); }
+
+    void Set(Type type) { flag_.set(type); }
+
+    void Unset(Type type) { flag_.unset(type); }
+
+   private:
+    Bitset<uint8_t> flag_;
+  };
   class Tokenizer {
    public:
-    enum Flag {
-      HAS_LINE_BREAK_BEFORE,
-      HAS_LINE_BREAK_AFTER
-    };
-    explicit Tokenizer(Utf16String* sources,
-                       ParserState* parser_state,
+    enum Flag { HAS_LINE_BREAK_BEFORE, HAS_LINE_BREAK_AFTER };
+    explicit Tokenizer(Utf16String* sources, ParserState* parser_state,
                        ErrorReporter* reporter)
         : current_position_(nullptr),
           skipped_(0),
@@ -1416,9 +1222,7 @@ class Parser {
 
     Token::Type Current() const { return token_; }
 
-    SourcePosition position() const {
-      return position_;
-    }
+    const SourcePosition& position() const { return position_; }
 
     inline bool HasMore() const {
       return it_ != end_ && !reporter_->HasPendingError();
@@ -1444,6 +1248,8 @@ class Parser {
     void set_linebreak_before();
     void unset_linebreak_before();
 
+    const TokenizerState& state() { return state_; }
+
    private:
     Token::Type Tokenize();
 
@@ -1459,6 +1265,7 @@ class Parser {
 
     Token::Type GetIdentifierType();
 
+    void CollectLineBreak();
     bool SkipLineBreak();
     bool SkipWhiteSpace();
 
@@ -1487,9 +1294,12 @@ class Parser {
     Utf16String::iterator it_;
     Utf16String::iterator end_;
     Utf16String* sources_;
-    Bitset<uint8_t> flag_;
+    TokenizerState state_;
+    TokenizerState lookahead_state_;
+    TokenizerState* current_state_;
     ParserState* parser_state_;
     ErrorReporter* reporter_;
+    Bitset<uint8_t> flag_;
   };
 
   Maybe<Ast*> Parse(ParseType parse_type);
@@ -1497,41 +1307,25 @@ class Parser {
  private:
   void ParseDirectivePrologue();
 
-  LUX_INLINE Token::Type advance() {
-    return tokenizer_->Next();
-  }
+  LUX_INLINE Token::Type advance() { return tokenizer_->Next(); }
 
-  LUX_INLINE Token::Type peek() {
-    return tokenizer_->Peek();
-  }
+  LUX_INLINE Token::Type peek() { return tokenizer_->Peek(); }
 
-  LUX_INLINE Token::Type cur() const {
-    return tokenizer_->Current();
-  }
+  LUX_INLINE Token::Type cur() const { return tokenizer_->Current(); }
 
-  LUX_INLINE Utf16String value() const {
-    return tokenizer_->Value();
-  }
+  LUX_INLINE Utf16String value() const { return tokenizer_->Value(); }
 
-  LUX_INLINE Utf16String peek_value() const {
-    return tokenizer_->PeekValue();
-  }
+  LUX_INLINE Utf16String peek_value() const { return tokenizer_->PeekValue(); }
 
-  LUX_INLINE SourcePosition position() const {
+  LUX_INLINE const SourcePosition& position() const {
     return tokenizer_->position();
   }
 
-  inline void PushState(State s) {
-    parser_state_->PushState(s);
-  }
+  inline void PushState(State s) { parser_state_->PushState(s); }
 
-  inline void PopState(State s) {
-    parser_state_->PopState(s);
-  }
+  inline void PopState(State s) { parser_state_->PopState(s); }
 
-  inline bool MatchState(State s) {
-    return parser_state_->Is(s);
-  }
+  inline bool MatchState(State s) { return parser_state_->Is(s); }
 
   inline bool IsInState(std::initializer_list<State> s) {
     return parser_state_->IsInState(s);
@@ -1541,19 +1335,17 @@ class Parser {
     return cur() != Token::END && !reporter_->HasPendingError();
   }
 
-  void Record() {
-    record_ = tokenizer_->Record();
-  }
+  const TokenizerState& tokenizer_state() { return tokenizer_->state(); }
 
-  void Restore() {
-    tokenizer_->Restore(record_);
-  }
+  void Record() { record_ = tokenizer_->Record(); }
+
+  void Restore() { tokenizer_->Restore(record_); }
 
   bool MatchStates(std::initializer_list<State> s);
 
- VISIBLE_FOR_TESTING:
-  template <typename T>
-  Maybe<T*> ParseTerminator(T* node);
+  VISIBLE_FOR_TESTING : template <typename T>
+                        Maybe<T*>
+                        ParseTerminator(T* node);
   Maybe<Expression*> ParseIdentifierReference();
   Maybe<Expression*> ParseIdentifier();
   Maybe<Expression*> ParseAsyncArrowBindingIdentifier();
@@ -1581,8 +1373,7 @@ class Parser {
   Maybe<Expression*> ParseMemberExpression();
   Maybe<Expression*> ParsePostMemberExpression(Expression* pre);
   Maybe<Expression*> ParsePropertyAccessPostExpression(
-      Expression*, Receiver::Type, Allowance,
-      bool error_if_default = false);
+      Expression*, Receiver::Type, Allowance, bool error_if_default = false);
   Maybe<Expression*> ParseSuperProperty();
   Maybe<Expression*> ParseNewTarget();
   Maybe<Expression*> ParseNewExpression();
@@ -1661,8 +1452,8 @@ class Parser {
   Maybe<Statement*> ParseFinally();
   Maybe<Statement*> ParseCatchParameter();
   Maybe<Statement*> ParseDebuggerStatement();
-  Maybe<Statement*> ParseFunctionDeclaration(
-      bool async, bool in_default = false);
+  Maybe<Statement*> ParseFunctionDeclaration(bool async,
+                                             bool in_default = false);
   Maybe<Expression*> ParseFunctionExpression();
   Maybe<Expression*> ParseFormalParameters();
   Maybe<Expression*> ParseFormalParameterList();
@@ -1706,75 +1497,89 @@ class Parser {
   Maybe<Expression*> ParseNamedList();
 
  private:
-  template <typename T, typename ...Args>
+  template <typename T, typename... Args>
   T* NewNode(Args... args) {
-    auto ast = new(zone()) T(args...);
+    auto ast = new (zone()) T(args...);
     ast->set_source_position(position());
     return ast;
+  }
+
+  template <typename T, typename... Args>
+  T* NewNodeWithPosition(SourcePosition start, Args... args) {
+    auto n = NewNode<T>(args...);
+    n->set_start_positions(start);
+    return n;
   }
 
   template <typename T, typename E>
   T* NewNode(std::initializer_list<E> args) {
-    auto ast = new(zone()) T(args);
+    auto ast = new (zone()) T(args);
     ast->set_source_position(position());
     return ast;
   }
 
-  template <typename T, typename ...Args>
+  template <typename T, typename... Args>
   Expression* NewExpression(Args... args) {
-    auto expr = new(zone()) T(args...);
+    auto expr = new (zone()) T(args...);
     expr->set_source_position(position());
     return expr;
   }
 
-  template <typename T, typename ...Args>
+  template <typename T, typename... Args>
+  Expression* NewExpressionWithPosition(const SourcePosition& start,
+                                        Args... args) {
+    auto expr = NewExpression<T>(args...);
+    expr->set_start_positions(start);
+    return expr;
+  }
+
+  template <typename T, typename... Args>
   Statement* NewStatement(Args... args) {
-    auto stmt = new(zone()) T(args...);
+    auto stmt = new (zone()) T(args...);
     stmt->set_source_position(position());
     return stmt;
   }
 
+  template <typename T, typename... Args>
+  Statement* NewStatementWithPosition(SourcePosition start, Args... args) {
+    auto stmt = NewStatement<T>(args...);
+    stmt->set_start_positions(start);
+    return stmt;
+  }
+
   LUX_INLINE bool IsAssignmentOperator(Token::Type token) {
-    return Token::OneOf(token, {
-        Token::OP_MUL_ASSIGN,
-          Token::OP_DIV_ASSIGN,
-          Token::OP_PLUS_ASSIGN,
-          Token::OP_MINUS_ASSIGN,
-          Token::OP_SHIFT_LEFT_ASSIGN,
-          Token::OP_SHIFT_RIGHT_ASSIGN,
-          Token::OP_U_SHIFT_RIGHT_ASSIGN,
-          Token::OP_AND_ASSIGN,
-          Token::OP_OR_ASSIGN,
-          Token::OP_XOR_ASSIGN,
-          Token::OP_POW_ASSIGN
-          });
+    return Token::OneOf(
+        token,
+        {Token::OP_MUL_ASSIGN, Token::OP_DIV_ASSIGN, Token::OP_PLUS_ASSIGN,
+         Token::OP_MINUS_ASSIGN, Token::OP_SHIFT_LEFT_ASSIGN,
+         Token::OP_SHIFT_RIGHT_ASSIGN, Token::OP_U_SHIFT_RIGHT_ASSIGN,
+         Token::OP_AND_ASSIGN, Token::OP_OR_ASSIGN, Token::OP_XOR_ASSIGN,
+         Token::OP_POW_ASSIGN});
   }
 
   bool has_linebreak_before() const {
     return tokenizer_->has_linebreak_before();
   }
 
-  bool has_linebreak_after() const {
-    return tokenizer_->has_linebreak_after();
-  }
+  bool has_linebreak_after() const { return tokenizer_->has_linebreak_after(); }
 
-  ZoneAllocator* zone() {
-    return &zone_allocator_;
-  }
+  ZoneAllocator* zone() { return &zone_allocator_; }
 
 #if defined(DEBUG)
   std::string ToStringCurrentToken() {
     switch (cur()) {
-#define CASE(T, v) case Token::T : return #T;
+#define CASE(T, v) \
+  case Token::T:   \
+    return #T;
       SYMBOL_TOKEN_LIST(CASE)
       KEYWORD_TOKEN_LIST(CASE, GROUP_DUMMY_)
 #undef CASE
-#define LITERAL_CASE(T, v)                                          \
-        case Token::T : {                                           \
-          std::stringstream st;                                     \
-          st << #T << "[value = " << value().ToUtf8String() << "]"; \
-          return st.str();                                          \
-        }
+#define LITERAL_CASE(T, v)                                    \
+  case Token::T: {                                            \
+    std::stringstream st;                                     \
+    st << #T << "[value = " << value().ToUtf8String() << "]"; \
+    return st.str();                                          \
+  }
       LITERAL_TOKEN_LIST(LITERAL_CASE)
 #undef LITERAL_CASE
       case Token::END:
@@ -1788,7 +1593,7 @@ class Parser {
   class DebugStream {
    public:
     template <typename T>
-    DebugStream& operator << (T value) {
+    DebugStream& operator<<(T value) {
       buffer_ << value;
       if (Print) {
         std::cout << value;
@@ -1796,10 +1601,8 @@ class Parser {
       return *this;
     }
 
+    void PrintStackTrace() { printf("%s\n", buffer_.str().c_str()); }
 
-    void PrintStackTrace() {
-      printf("%s\n", buffer_.str().c_str());
-    }
    private:
     std::stringstream buffer_;
   };

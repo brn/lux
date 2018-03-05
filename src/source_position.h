@@ -128,7 +128,7 @@ class SourcePosition: private Unmovable {
     end_line_number_ += index;
   }
 
-  std::string ToString() {
+  std::string ToString() const {
     std::stringstream ss;
     ss << "[" << start_line_number() << ','
        << end_line_number() << ','
