@@ -47,7 +47,7 @@ class RegExpTest : public lux::IsolateSetup {
       }
     } else {
       auto a = p.node()->ToString();
-      lux::testing::CompareNode(regexp, a.c_str(), expected);
+      ASSERT_TRUE(lux::testing::CompareNode(regexp, a.c_str(), expected));
     }
   }
 };

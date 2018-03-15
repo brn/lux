@@ -25,6 +25,7 @@
 
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "./maybe.h"
@@ -143,12 +144,13 @@
   V(TERMINATE, ";")                  \
   V(TRUE, "true")
 
-#define LITERAL_TOKEN_LIST(V)                   \
-  V(IDENTIFIER, "Identifier")                   \
-  V(NUMERIC_LITERAL, "Numeric Literal")         \
-  V(REGEXP_LITERAL, "RegExp Literal")           \
-  V(STRING_LITERAL, "String Literal")           \
-  V(TEMPLATE_CHARACTERS, "Template Characters") \
+#define LITERAL_TOKEN_LIST(V)              \
+  V(IDENTIFIER, "Identifier")              \
+  V(NUMERIC_LITERAL, "Numeric Literal")    \
+  V(REGEXP_LITERAL, "RegExp Literal")      \
+  V(STRING_LITERAL, "String Literal")      \
+  V(TEMPLATE_LITERAL, "Template Literal")  \
+  V(TEMPLATE_PARTS, "Template Characters") \
   V(TEMPLATE_SUBSTITUTION, "Template Substitutions")
 
 #define GROUP_DUMMY_(v)
@@ -185,6 +187,7 @@ class Utf16CodePoint;
   A(IMPORT_BINDING, ImportBinding, 27)                        \
   A(NAMED_IMPORT_LIST, NamedImportList, 29)                   \
   A(NEW_EXPRESSION, NewExpression, 31)                        \
+  A(TEMPLATE_LITERAL, TemplateLiteral, 33)                    \
   A(STATEMENTS, Statements, 0)                                \
   A(IMPORT_DECLARATION, ImportDeclaration, 2)                 \
   A(EXPORT_DECLARATION, ExportDeclaration, 4)                 \
@@ -608,15 +611,13 @@ class PropertyAccessExpression : public Expression {
     return type_flag_.mask<Receiver::Type>(kReceiverTypeMask);
   }
 
-  bool is_dot_access() const { return type_flag_.get(AccessType::DOT); }
+  bool is_dot_access() const { return type_flag_.get_raw(DOT); }
 
-  bool is_element_access() const { return type_flag_.get(AccessType::ELEMENT); }
+  bool is_element_access() const { return type_flag_.get_raw(ELEMENT); }
 
-  bool is_meta_property() const { return type_flag_.get(Receiver::Type::NEW); }
+  bool is_meta_property() const { return type_flag_.get_raw(Receiver::NEW); }
 
-  bool is_super_property() const {
-    return type_flag_.get(Receiver::Type::SUPER);
-  }
+  bool is_super_property() const { return type_flag_.get_raw(Receiver::SUPER); }
 
   LUX_CONST_PROPERTY(Expression*, receiver, receiver_);
   LUX_CONST_PROPERTY(Expression*, property, property_);
@@ -625,14 +626,14 @@ class PropertyAccessExpression : public Expression {
                     std::stringstream* ss) const {
     (*ss) << *indent << '[' << ast->GetName() << " property_access = ";
     if (is_dot_access()) {
-      (*ss) << " dot";
+      (*ss) << "dot";
     } else if (is_element_access()) {
-      (*ss) << " element";
+      (*ss) << "element";
     } else if (is_meta_property()) {
-      (*ss) << " meta";
+      (*ss) << "meta";
     } else {
       INVALIDATE(is_super_property());
-      (*ss) << " super";
+      (*ss) << "super";
     }
     (*ss) << ' ' << source_position().ToString() << "]\n";
   }
@@ -895,7 +896,7 @@ class Literal : public Expression {
       : Expression(Ast::LITERAL), literal_type_(type) {}
 
   Literal(Token::Type type, Utf16String value)
-      : Expression(Ast::LITERAL), literal_type_(type), value_(value) {}
+      : Expression(Ast::LITERAL), literal_type_(type), value_(value.Clone()) {}
 
   bool Is(Token::Type t) { return literal_type_ == t; }
 
@@ -921,6 +922,37 @@ class Literal : public Expression {
  private:
   Token::Type literal_type_;
   Utf16String value_;
+};
+
+class TemplateLiteral : public Expression {
+ public:
+  using iterator = std::vector<Ast*>::iterator;
+  TemplateLiteral() : Expression(Ast::TEMPLATE_LITERAL) {}
+
+  explicit TemplateLiteral(std::vector<Ast*>&& parts)
+      : Expression(Ast::TEMPLATE_LITERAL), parts_(parts) {}
+
+  bool has_substitution() { return parts_.size() > 1; }
+
+  iterator begin() { return parts_.begin(); }
+
+  iterator end() { return parts_.end(); }
+
+  void ToStringSelf(const Ast* ast, std::string* indent,
+                    std::stringstream* ss) const {
+    (*ss) << *indent << '[' << ast->GetName() << ' '
+          << source_position().ToString() << "]\n";
+  }
+  void ToStringTree(std::string* indent, std::stringstream* ss) const {
+    ToStringSelf(this, indent, ss);
+    auto ni = *indent + "  ";
+    for (auto& ast : parts_) {
+      ast->ToStringTree(&ni, ss);
+    }
+  }
+
+ private:
+  std::vector<Ast*> parts_;
 };
 
 class Statement : public Ast {
@@ -1131,7 +1163,8 @@ class Parser {
     IN_GENERATOR_FUNCTION,
     IN_ASYNC_GENERATOR_FUNCTION,
     EXPECTED_BINARY_OPERATOR,
-    IN_TEMPLATE_LITERAL
+    IN_TEMPLATE_LITERAL,
+    IN_TEMPLATE_INTERPOLATION
   };
 
   class Allowance {
@@ -1403,9 +1436,10 @@ class Parser {
   Maybe<Expression*> ParseTemplateSpans();
   Maybe<Expression*> ParseTemplateMiddleList();
   Maybe<Expression*> ParseMemberExpression();
-  Maybe<Expression*> ParsePostMemberExpression(Expression* pre);
-  Maybe<Expression*> ParsePropertyAccessPostExpression(
-      Expression*, Receiver::Type, Allowance, bool error_if_default = false);
+  Maybe<Expression*> ParsePostMemberExpression(const SourcePosition&,
+                                               Expression*, Receiver::Type,
+                                               Allowance,
+                                               bool error_if_default = false);
   Maybe<Expression*> ParseSuperProperty();
   Maybe<Expression*> ParseNewTarget();
   Maybe<Expression*> ParseNewExpression();
@@ -1531,14 +1565,14 @@ class Parser {
  private:
   template <typename T, typename... Args>
   T* NewNode(Args... args) {
-    auto ast = new (zone()) T(args...);
+    auto ast = new (zone()) T(std::forward<Args>(args)...);
     ast->set_source_position(position());
     return ast;
   }
 
   template <typename T, typename... Args>
   T* NewNodeWithPosition(SourcePosition start, Args... args) {
-    auto n = NewNode<T>(args...);
+    auto n = NewNode<T>(std::forward<Args>(args)...);
     n->set_start_positions(start);
     return n;
   }
@@ -1552,7 +1586,7 @@ class Parser {
 
   template <typename T, typename... Args>
   Expression* NewExpression(Args... args) {
-    auto expr = new (zone()) T(args...);
+    auto expr = new (zone()) T(std::forward<Args>(args)...);
     expr->set_source_position(position());
     return expr;
   }
@@ -1560,21 +1594,21 @@ class Parser {
   template <typename T, typename... Args>
   Expression* NewExpressionWithPosition(const SourcePosition& start,
                                         Args... args) {
-    auto expr = NewExpression<T>(args...);
+    auto expr = NewExpression<T>(std::forward<Args>(args)...);
     expr->set_start_positions(start);
     return expr;
   }
 
   template <typename T, typename... Args>
   Statement* NewStatement(Args... args) {
-    auto stmt = new (zone()) T(args...);
+    auto stmt = new (zone()) T(std::forward<Args>(args)...);
     stmt->set_source_position(position());
     return stmt;
   }
 
   template <typename T, typename... Args>
   Statement* NewStatementWithPosition(SourcePosition start, Args... args) {
-    auto stmt = NewStatement<T>(args...);
+    auto stmt = NewStatement<T>(std::forward<Args>(args)...);
     stmt->set_start_positions(start);
     return stmt;
   }
@@ -1635,6 +1669,8 @@ class Parser {
 
     void PrintStackTrace() { printf("%s\n", buffer_.str().c_str()); }
 
+    std::string StackTrace() const { return buffer_.str(); }
+
    private:
     std::stringstream buffer_;
   };
@@ -1643,6 +1679,7 @@ class Parser {
   std::string indent_;
 
  public:
+  std::string stack_trace() const { return phase_buffer_.StackTrace(); }
   void PrintStackTrace() { phase_buffer_.PrintStackTrace(); }
 
  private:

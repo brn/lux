@@ -126,6 +126,14 @@ inline TestableAst NewExpr(lux::SourcePosition sp, const TestableAst& callee) {
   return Ast("NewExpression", "", sp, {callee});
 }
 
+inline TestableAst Prop(const char* type, lux::SourcePosition sp,
+                        const TestableAst& callee, const TestableAst& prop) {
+  std::stringstream ss;
+  ss << "property_access = " << type;
+  auto s = ss.str();
+  return Ast("PropertyAccessExpression", s.c_str(), sp, {callee, prop});
+}
+
 inline TestableAst Lit(const char* attr, lux::SourcePosition sp,
                        std::initializer_list<TestableAst> ast = {}) {
   return Ast("Literal", attr, sp, ast);
@@ -139,12 +147,16 @@ inline TestableAst Number(const char* value, lux::SourcePosition sp,
   return Ast("Literal", s.c_str(), sp, ast);
 }
 
-inline TestableAst Str(const char* value, lux::SourcePosition sp,
-                       std::initializer_list<TestableAst> ast = {}) {
+inline TestableAst Str(const char* value, lux::SourcePosition sp) {
   std::stringstream ss;
   ss << "type = STRING_LITERAL value = " << value;
   auto s = ss.str();
-  return Ast("Literal", s.c_str(), sp, ast);
+  return Ast("Literal", s.c_str(), sp, {});
+}
+
+inline TestableAst Tmpl(lux::SourcePosition sp,
+                        std::initializer_list<TestableAst> ast) {
+  return Ast("TemplateLiteral", "", sp, ast);
 }
 
 inline TestableAst Ident(const char* value, lux::SourcePosition sp,
@@ -190,8 +202,9 @@ class ParserTest : public lux::IsolateSetup {
         auto exp = parser.Parse(lux::Parser::SCRIPT);
         if (exp) {
           exp >>= [&](auto expr) {
-            lux::testing::CompareNode(ret.c_str(), expr->ToStringTree().c_str(),
-                                      expectations[i]);
+            ASSERT_TRUE(lux::testing::CompareNode(
+                ret.c_str(), expr->ToStringTree().c_str(), expectations[i]))
+                << parser.stack_trace();
           };
         } else {
           parser.PrintStackTrace();
@@ -232,31 +245,46 @@ class ParserTest : public lux::IsolateSetup {
   }
 
   template <typename Fn>
-  std::unique_ptr<const char*> FunctionExprWrapper(uint32_t expr_size,
-                                                   Fn ast_builder) {
+  std::unique_ptr<const char*> FunctionExprWrapper(
+      uint32_t expr_size, Fn ast_builder, uint32_t end_line_number,
+      uint32_t before_line_break_col_count) {
     std::stringstream ss;
-    uint32_t exit = 31 + expr_size;
-    uint32_t exit_expr = 13 + expr_size;
+
+    uint32_t original_blb_cc = before_line_break_col_count;
+    if (before_line_break_col_count > 0) {
+      before_line_break_col_count += 14;
+    }
+
+    uint32_t exit = (31 + expr_size) - before_line_break_col_count;
+    uint32_t exit_expr = (13 + expr_size) - before_line_break_col_count;
     uint32_t func_exit = exit_expr + 2;
     uint32_t base_position = 9;
+    uint32_t sentinel_start =
+        original_blb_cc > 0 ? (expr_size - original_blb_cc) + 2 : func_exit + 1;
 
     auto ast = Stmts(
-        {0, exit, 0, 0},
+        {0, exit, 0, end_line_number},
         {ExprStmt(
-             {0, func_exit, 0, 0},
-             {FnExpr({0, func_exit, 0, 0},
-                     {Ident("X", {base_position, base_position + 1, 0, 0}),
-                      Exprs({base_position + 1, base_position + 3, 0, 0}),
-                      Stmts({base_position + 4, base_position + (7 + expr_size),
-                             0, 0},
-                            {ExprStmt({base_position + 5,
-                                       base_position + (5 + expr_size), 0, 0},
-                                      {ast_builder(base_position + 5,
-                                                   base_position +
-                                                       (5 + expr_size))})})})}),
-         ExprStmt({func_exit + 1, exit, 0, 0},
+             {0, func_exit, 0, end_line_number},
+             {FnExpr(
+                 {0, func_exit, 0, end_line_number},
+                 {Ident("X", {base_position, base_position + 1, 0, 0}),
+                  Exprs({base_position + 1, base_position + 3, 0, 0}),
+                  Stmts({base_position + 4,
+                         (base_position + (7 + expr_size)) -
+                             before_line_break_col_count,
+                         0, end_line_number},
+                        {ExprStmt(
+                            {base_position + 5,
+                             (base_position + (5 + expr_size)) -
+                                 before_line_break_col_count,
+                             0, end_line_number},
+                            {ast_builder(base_position + 5,
+                                         (base_position + (5 + expr_size) -
+                                          before_line_break_col_count))})})})}),
+         ExprStmt({sentinel_start, exit, 0, end_line_number},
                   {Lit("type = IDENTIFIER value = PARSER_SENTINEL",
-                       {func_exit + 1, exit, 0, 0})})});
+                       {sentinel_start, exit, 0, end_line_number})})});
     auto s = ast.ToString();
     auto m = new char[s.size() + 2]();
     snprintf(m, s.size() + 1, "%s", s.c_str());
@@ -265,29 +293,40 @@ class ParserTest : public lux::IsolateSetup {
 
   template <typename Fn>
   void SingleExpressionTest(Fn ast_builder, const char* value,
-                            bool is_skip_strict_mode = false) {
+                            bool is_skip_strict_mode = false,
+                            uint32_t end_line_number = 0,
+                            uint32_t before_line_break_col_count = 0) {
     const char* env[][2] = {
         {"", ""},
         {(is_skip_strict_mode ? nullptr : "'use strict';"), ""},
         {"function X() {", "}"}};
     uint32_t size = strlen(value);
-    auto f = FunctionExprWrapper(size, ast_builder);
+    auto f = FunctionExprWrapper(size, ast_builder, end_line_number,
+                                 before_line_break_col_count);
 
-    uint32_t exit = 16 + size;
+    uint32_t exit = (16 + size) - before_line_break_col_count;
+    uint32_t expr_exit = size - before_line_break_col_count;
     auto normal =
-        Stmts({0, exit, 0, 0},
-              {ExprStmt({0, size, 0, 0}, {ast_builder(0, size)}),
-               ExprStmt({size + 1, exit, 0, 0},
-                        {Ident("PARSER_SENTINEL", {size + 1, exit, 0, 0})})})
+        Stmts({0, exit, 0, end_line_number},
+              {ExprStmt({0, expr_exit, 0, end_line_number},
+                        {ast_builder(0, size - before_line_break_col_count)}),
+               ExprStmt({(size + 1) - before_line_break_col_count, exit, 0,
+                         end_line_number},
+                        {Ident("PARSER_SENTINEL",
+                               {(size + 1) - before_line_break_col_count, exit,
+                                0, end_line_number})})})
             .ToString();
     exit = 29 + size;
-    uint32_t expr_stmt_exit = 13 + size;
+    uint32_t expr_stmt_exit = (13 + size) - before_line_break_col_count;
     auto strict =
-        Stmts({13, exit, 0, 0},
-              {ExprStmt({13, expr_stmt_exit, 0, 0},
+        Stmts({13, exit, 0, end_line_number},
+              {ExprStmt({13, expr_stmt_exit, 0, end_line_number},
                         {ast_builder(13, expr_stmt_exit)}),
-               ExprStmt({size + 14, exit, 0, 0},
-                        {Ident("PARSER_SENTINEL", {size + 14, exit, 0, 0})})})
+               ExprStmt({(size + 14) - before_line_break_col_count, exit, 0,
+                         end_line_number},
+                        {Ident("PARSER_SENTINEL",
+                               {(size + 14) - before_line_break_col_count, exit,
+                                0, end_line_number})})})
             .ToString();
     Expectations expected = {{normal.c_str(), strict.c_str(), *f}};
     ParseTest(env, value, expected);
@@ -465,6 +504,79 @@ TEST_F(ParserTest, StringLiteralAsciiEscapeSequence) {
       "'\\x41_\\x42_\\x43_\\x44'", true);
 }
 
+TEST_F(ParserTest, TemplateLiteralWithoutInterpolation) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Tmpl({start, end, 0, 0}, {Str("test", {start + 1, end, 0, 0})});
+      },
+      "`test`", true);
+}
+
+TEST_F(ParserTest, EscapedTemplateLiteralWithoutInterpolation) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Tmpl({start, end, 0, 0},
+                    {Str("test${aaa}", {start + 1, end, 0, 0})});
+      },
+      "`test\\${aaa}`", true);
+}
+
+TEST_F(ParserTest, TemplateLiteralWithoutInterpolationAndLineBreak) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Tmpl({start, end, 0, 1},
+                    {Str("test\ntest", {start + 1, end, 0, 1})});
+      },
+      "`test\ntest`", true, 1, 5);
+}
+
+TEST_F(ParserTest, TemplateLiteralWithInterpolationAndEmptySuffix) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Tmpl({start, end, 0, 0},
+                    {Str("test", {start + 1, end - 6, 0, 0}),
+                     Ident("test", {start + 7, end - 2, 0, 0})});
+      },
+      "`test${test}`", true);
+}
+
+TEST_F(ParserTest, TemplateLiteralWithInterpolationAndSuffix) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Tmpl({start, end, 0, 0},
+                    {Str("foo", {start + 1, end - 8, 0, 0}),
+                     Ident("bar", {start + 6, end - 5, 0, 0}),
+                     Str("baz", {start + 10, end})});
+      },
+      "`foo${bar}baz`", true);
+}
+
+TEST_F(ParserTest, TemplateLiteralWithManyInterpolationAndSuffix) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Tmpl({start, end, 0, 0},
+                    {Str("foo", {start + 1, end - 21, 0, 0}),
+                     Ident("bar", {start + 6, end - 18, 0, 0}),
+                     Str("baz", {start + 10, end - 12}),
+                     Number("100", {start + 15, end - 9}),
+                     Unary("OP_PLUS", "PRE", {start + 21, end - 2},
+                           {Ident("foo", {start + 22, end - 2})})});
+      },
+      "`foo${bar}baz${100}${+foo}`", true);
+}
+
+TEST_F(ParserTest, NestedTemplateLiteral) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Tmpl({start, end, 0, 0},
+                    {Str("foo", {start + 1, end - 13, 0, 0}),
+                     Tmpl({start + 6, end - 2, 0, 0},
+                          {Str("foo", {start + 7, end - 7}),
+                           Ident("bar", {start + 12, end - 4})})});
+      },
+      "`foo${`foo${bar}`}`", true);
+}
+
 TEST_F(ParserTest, UnterminatedStringLiteralError) {
   const char* env[][2] = {
       {"", ""}, {"'use strict';", ""}, {"function X() {", "}"}};
@@ -611,10 +723,158 @@ TEST_F(ParserTest, NewExpressionWithArgs) {
                          0,
                      },
                      Ident("X", {start + 4, end - 3, 0, 0}),
-                     Exprs({start + 6, end - 1},
+                     Exprs({start + 5, end},
                            {Number("1", {start + 6, end - 1, 0, 0})})));
       },
       "new X(1)");
+}
+
+TEST_F(ParserTest, NewExpressionWithPropsCall) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return NewExpr(
+            {start, end, 0, 0},
+            CallExpr("EXPRESSION",
+                     {
+                         start + 4,
+                         end,
+                         0,
+                         0,
+                     },
+                     Prop("dot", {start + 4, end - 3, 0, 0},
+                          Ident("X", {start + 4, end - 5, 0, 0}),
+                          Ident("a", {start + 6, end - 3, 0, 0})),
+                     Exprs({start + 7, end, 0, 0},
+                           {Number("1", {start + 8, end - 1, 0, 0})})));
+      },
+      "new X.a(1)");
+}
+
+TEST_F(ParserTest, NewExpressionWithElementCall) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return NewExpr(
+            {start, end, 0, 0},
+            CallExpr("EXPRESSION",
+                     {
+                         start + 4,
+                         end,
+                         0,
+                         0,
+                     },
+                     Prop("element", {start + 4, end - 3, 0, 0},
+                          Ident("X", {start + 4, end - 8, 0, 0}),
+                          Str("a", {start + 6, end - 4, 0, 0})),
+                     Exprs({start + 10, end, 0, 0},
+                           {Number("1", {start + 11, end - 1, 0, 0})})));
+      },
+      "new X['a'](1)");
+}
+
+TEST_F(ParserTest, NewExpressionWithCallProps) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Prop(
+            "dot", {start, end, 0, 0},
+            NewExpr({start, end - 2, 0, 0},
+                    CallExpr("EXPRESSION",
+                             {
+                                 start + 4,
+                                 end - 2,
+                                 0,
+                                 0,
+                             },
+                             Ident("X", {start + 4, end - 5, 0, 0}),
+                             Exprs({start + 5, end - 2, 0, 0},
+                                   {Number("1", {start + 6, end - 3, 0, 0})}))),
+            Ident("a", {start + 9, end, 0, 0}));
+      },
+      "new X(1).a");
+}
+
+TEST_F(ParserTest, NewExpressionWithCallElement) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Prop(
+            "element", {start, end, 0, 0},
+            NewExpr({start, end - 5, 0, 0},
+                    CallExpr("EXPRESSION",
+                             {
+                                 start + 4,
+                                 end - 5,
+                                 0,
+                                 0,
+                             },
+                             Ident("X", {start + 4, end - 8, 0, 0}),
+                             Exprs({start + 5, end - 5, 0, 0},
+                                   {Number("1", {start + 6, end - 6, 0, 0})}))),
+            Str("a", {start + 9, end - 1, 0, 0}));
+      },
+      "new X(1)['a']");
+}
+
+TEST_F(ParserTest, NewExpressionWithPropsChain) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return NewExpr(
+            {start, end, 0, 0},
+            CallExpr("EXPRESSION", {start + 4, end},
+                     Prop("dot", {start + 4, end - 2},
+                          Prop("dot", {start + 4, end - 4},
+                               Ident("a", {start + 4, end - 6, 0, 0}),
+                               Ident("b", {start + 6, end - 4, 0, 0})),
+                          Ident("c", {start + 8, end - 2, 0, 0})),
+                     Exprs({start + 9, end})));
+      },
+      "new a.b.c()");
+}
+
+TEST_F(ParserTest, NewExpressionWithPropsAndElementChain) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return NewExpr(
+            {start, end, 0, 0},
+            CallExpr("EXPRESSION", {start + 4, end},
+                     Prop("dot", {start + 4, end - 2},
+                          Prop("element", {start + 4, end - 4},
+                               Ident("a", {start + 4, end - 9, 0, 0}),
+                               Str("b", {start + 6, end - 5, 0, 0})),
+                          Ident("c", {start + 11, end - 2, 0, 0})),
+                     Exprs({start + 12, end})));
+      },
+      "new a['b'].c()");
+}
+
+TEST_F(ParserTest, NewExpressionWithPropsCallChain) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Prop(
+            "dot", {start, end},
+            NewExpr({start, end - 2, 0, 0},
+                    CallExpr("EXPRESSION", {start + 4, end - 2},
+                             Prop("dot", {start + 4, end - 4},
+                                  Ident("a", {start + 4, end - 6, 0, 0}),
+                                  Ident("b", {start + 6, end - 4, 0, 0})),
+                             Exprs({start + 7, end - 2}))),
+            Ident("c", {start + 10, end, 0, 0}));
+      },
+      "new a.b().c");
+}
+
+TEST_F(ParserTest, NewExpressionWithTaggedTemplate) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return CallExpr(
+            "TEMPLATE", {start, end},
+            Prop("dot", {start, end - 6},
+                 NewExpr({start, end - 8, 0, 0},
+                         CallExpr("EXPRESSION", {start + 4, end - 8},
+                                  Ident("X", {start + 4, end - 10, 0, 0}),
+                                  Exprs({start + 5, end - 8}))),
+                 Ident("a", {start + 8, end - 6, 0, 0})),
+            Tmpl({start + 9, end}, {Str("test", {start + 10, end})}));
+      },
+      "new X().a`test`");
 }
 
 }  // namespace

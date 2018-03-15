@@ -140,9 +140,9 @@ inline ::testing::AssertionResult DoCompareNode(const char* code,
   return ::testing::AssertionSuccess();
 }
 
-inline void CompareNode(const char* code, std::string value,
-                        std::string expected) {
-  ASSERT_TRUE((DoCompareNode(code, value, expected)));
+inline ::testing::AssertionResult CompareNode(const char* code, std::string value,
+                                              std::string expected) {
+    return DoCompareNode(code, value, expected);
 }
 
 }  // namespace testing

@@ -1,17 +1,25 @@
 /**
  * The MIT License (MIT)
  * Copyright (c) Taketoshi Aono
- *  
- * Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"),
- * to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense,
- * and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
- *  
- * The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
- *  
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
- * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- * @fileoverview 
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ * @fileoverview
  * @author Taketoshi Aono
  */
 
@@ -26,7 +34,7 @@
 
 namespace lux {
 
-#define KB * 1024
+#define KB *1024
 #define MB KB * 1024
 
 typedef uint8_t u8;
@@ -48,20 +56,20 @@ static const size_t kAlignment = sizeof(void*);
 static const size_t kPointerSize = kAlignment;
 static const size_t kSizeTSize = sizeof(size_t);
 
-
-#define LUX_ALIGN_OFFSET(offset, alignment)           \
+#define LUX_ALIGN_OFFSET(offset, alignment) \
   (offset + (alignment - 1)) & ~(alignment - 1)
 
 inline void Invalidate__(bool cond, const char* message, bool not_own_message) {
   if (!cond) {
-      printf("========== ASSERTION FAILED ==========\n"
-             "\n"
-             "%s %s"
-             "\n"
-             "======================================\n"
-             "\n"
-             "            <Stack Trace>\n\n", message,
-             (not_own_message? "is not valid\n": "\n"));
+    printf(
+        "========== ASSERTION FAILED ==========\n"
+        "\n"
+        "%s %s"
+        "\n"
+        "======================================\n"
+        "\n"
+        "            <Stack Trace>\n\n",
+        message, (not_own_message ? "is not valid\n" : "\n"));
     lux::debug::StackTrace st;
     st.Print();
     exit(1);
@@ -88,10 +96,10 @@ struct Use__ {
   template <typename T>
   Use__(T&&) {}  // NOLINT(runtime/explicit)
 };
-#define USE(...)                                         \
-  do {                                                   \
-    lux::Use__ unused_tmp_array_for_use_macro[]{__VA_ARGS__};  \
-    (void)unused_tmp_array_for_use_macro;                \
+#define USE(...)                                              \
+  do {                                                        \
+    lux::Use__ unused_tmp_array_for_use_macro[]{__VA_ARGS__}; \
+    (void)unused_tmp_array_for_use_macro;                     \
   } while (false)
 
 /**
@@ -108,25 +116,21 @@ struct Use__ {
 template <typename T>
 class LuxScoped__ {
  public:
-  explicit LuxScoped__(T cb)
-      : cb_(cb) {}
+  explicit LuxScoped__(T cb) : cb_(cb) {}
 
-  ~LuxScoped__() {
-    cb_();
-  }
+  ~LuxScoped__() { cb_(); }
 
  private:
   T cb_;
 };
 
-#define LUX_SCOPED_INNER__L(exit_function, line)          \
-  auto exit_function_of_scope##line = exit_function;      \
-  LuxScoped__<decltype(exit_function_of_scope##line)>   \
-  lux_scoped_once##line(exit_function_of_scope##line);
+#define LUX_SCOPED_INNER__L(exit_function, line)                             \
+  auto exit_function_of_scope##line = exit_function;                         \
+  LuxScoped__<decltype(exit_function_of_scope##line)> lux_scoped_once##line( \
+      exit_function_of_scope##line);
 #define LUX_SCOPED_INNER__(exit_function, line) \
   LUX_SCOPED_INNER__L(exit_function, line);
-#define LUX_SCOPED(exit_function)               \
-  LUX_SCOPED_INNER__(exit_function, __LINE__)
+#define LUX_SCOPED(exit_function) LUX_SCOPED_INNER__(exit_function, __LINE__)
 
 #ifdef LUX_TEST
 #define VISIBLE_FOR_TESTING public
@@ -134,26 +138,22 @@ class LuxScoped__ {
 #define VISIBLE_FOR_TESTING private
 #endif
 
-#define LUX_GETTER(type, name, field)                    \
+#define LUX_GETTER(type, name, field) \
   LUX_INLINE type name() { return field; }
 
-#define LUX_CONST_GETTER(type, name, field)            \
+#define LUX_CONST_GETTER(type, name, field) \
   LUX_INLINE type name() const { return field; }
 
-
-#define LUX_SETTER(type, name, field)                              \
+#define LUX_SETTER(type, name, field) \
   LUX_INLINE void set_##name(type name) { field = name; }
 
-
-#define LUX_PROPERTY(type, name, field)        \
-  LUX_GETTER(type, name, field)                \
+#define LUX_PROPERTY(type, name, field) \
+  LUX_GETTER(type, name, field)         \
   LUX_SETTER(type, name, field)
 
-
-#define LUX_CONST_PROPERTY(type, name, field)        \
-  LUX_CONST_GETTER(type, name, field)                \
+#define LUX_CONST_PROPERTY(type, name, field) \
+  LUX_CONST_GETTER(type, name, field)         \
   LUX_SETTER(type, name, field)
-
 
 template <size_t size, typename T>
 struct BitUtil {};
@@ -221,14 +221,13 @@ struct BitUtil<sizeof(uint32_t), uint32_t> {
 template <>
 struct BitUtil<sizeof(uint64_t), uint64_t> {
   static int count(uint64_t v) {
-    uint64_t count
-      = (v & 0x5555555555555555) + ((v >> 1) & 0x5555555555555555);
+    uint64_t count = (v & 0x5555555555555555) + ((v >> 1) & 0x5555555555555555);
     count = (count & 0x3333333333333333) + ((count >> 2) & 0x3333333333333333);
     count = (count & 0x0f0f0f0f0f0f0f0f) + ((count >> 4) & 0x0f0f0f0f0f0f0f0f);
     count = (count & 0x00ff00ff00ff00ff) + ((count >> 8) & 0x00ff00ff00ff00ff);
     count = (count & 0x0000ffff0000ffff) + ((count >> 16) & 0x0000ffff0000ffff);
-    return static_cast<int>(((count & 0x00000000ffffffff)
-                             + ((count >> 32) & 0x00000000ffffffff)));
+    return static_cast<int>(
+        ((count & 0x00000000ffffffff) + ((count >> 32) & 0x00000000ffffffff)));
   }
 
   static bool msb(uint64_t v, int* out) {
@@ -247,28 +246,23 @@ struct BitUtil<sizeof(uint64_t), uint64_t> {
 template <typename T>
 class Bitset {
  public:
-  Bitset()
-      : bit_field_(0) {}
+  Bitset() : bit_field_(0) {}
 
-  void set(uint32_t index) {
-    bit_field_ |= (0x1 << index);
-  }
+  void set(uint32_t index) { bit_field_ |= (0x1 << index); }
 
-  void unset(uint32_t index) {
-    bit_field_ &= ~((0x1 << index));
-  }
+  void set_raw(uint32_t value) { bit_field_ |= value; }
 
-  void assign(uint32_t bit_value) {
-    bit_field_ = bit_value;
-  }
+  void unset(uint32_t index) { bit_field_ &= ~((0x1 << index)); }
 
-  bool get(uint32_t index) const {
-    return bit_field_ & (0x1 << index);
-  }
+  void unset_raw(uint32_t value) { bit_field_ &= ~value; }
 
-  bool is_full() const {
-    return bit_field_ == (~static_cast<T>(0));
-  }
+  void assign(uint32_t bit_value) { bit_field_ = bit_value; }
+
+  bool get(uint32_t index) const { return bit_field_ & (0x1 << index); }
+
+  bool get_raw(uint32_t value) const { return (bit_field_ & value) == value; }
+
+  bool is_full() const { return bit_field_ == (~static_cast<T>(0)); }
 
   template <typename R = T>
   R mask(T mask) const {
@@ -295,7 +289,7 @@ class Static {
   Static() = delete;
   Static(const Static&) = delete;
   Static(Static&&) = delete;
-  Static& operator = (const Static&) = delete;
+  Static& operator=(const Static&) = delete;
 };
 
 template <typename T>
@@ -324,16 +318,15 @@ class Uncopyable {
   Uncopyable() = default;
   virtual ~Uncopyable() = default;
   Uncopyable(const Uncopyable&) = delete;
-  Uncopyable& operator = (const Uncopyable&) = delete;
+  Uncopyable& operator=(const Uncopyable&) = delete;
 };
-
 
 class Unmovable {
  public:
   Unmovable() = default;
   virtual ~Unmovable() = default;
   Unmovable(Unmovable&&) = delete;
-  Unmovable& operator = (Unmovable&&) = delete;
+  Unmovable& operator=(Unmovable&&) = delete;
 };
 
 class StackObject {
@@ -362,8 +355,7 @@ class Bitmask {
 template <typename T>
 class LazyInitializer {
  public:
-  LazyInitializer()
-      : ptr_(nullptr) {}
+  LazyInitializer() : ptr_(nullptr) {}
 
   ~LazyInitializer() {
     if (ptr_ != nullptr) {
@@ -371,66 +363,55 @@ class LazyInitializer {
     }
   }
 
-  template <typename ... Args>
-  T* operator()(Args ... args) {
+  template <typename... Args>
+  T* operator()(Args... args) {
     ptr_ = nullptr;
-    return ptr_ = new(heap_) T(args...);
+    return ptr_ = new (heap_) T(args...);
   }
 
-  T* Get() {return ptr_;}
+  T* Get() { return ptr_; }
 
-  const T* Get() const {return ptr_;}
+  const T* Get() const { return ptr_; }
 
-  T& operator * () {
-    return *ptr_;
-  }
+  T& operator*() { return *ptr_; }
 
-  const T& operator * () const {
-    return *ptr_;
-  }
+  const T& operator*() const { return *ptr_; }
 
-  T* operator -> () {
-    return ptr_;
-  }
+  T* operator->() { return ptr_; }
 
-
-  const T* operator -> () const {
-    return ptr_;
-  }
+  const T* operator->() const { return ptr_; }
 
   template <typename U>
-  bool operator == (U u) const {
+  bool operator==(U u) const {
     return ptr_ == u;
   }
 
   template <typename U>
-  bool operator != (U u) const {
+  bool operator!=(U u) const {
     return ptr_ != u;
   }
 
   template <typename U>
-  T& operator >> (U u) {
+  T& operator>>(U u) {
     return *ptr_ >> u;
   }
 
   template <typename U>
-  const T& operator >> (U u) const {
+  const T& operator>>(U u) const {
     return *ptr_ >> u;
   }
 
   template <typename U>
-  T& operator << (U u) {
+  T& operator<<(U u) {
     return *ptr_ << u;
   }
 
   template <typename U>
-  const T& operator << (U u) const {
+  const T& operator<<(U u) const {
     return *ptr_ << u;
   }
 
-  inline bool initialized() const {
-    return ptr_ != nullptr;
-  }
+  inline bool initialized() const { return ptr_ != nullptr; }
 
  private:
   Address heap_[sizeof(T) + 1];
@@ -448,45 +429,34 @@ class Double {
 
   static const double kNaN;
 
-  explicit Double(double value) {
-    value_.floating_value = value;
-  }
+  explicit Double(double value) { value_.floating_value = value; }
 
-  inline bool is_signed() const {
-    return (value_.bit >> kSignedShift) == 1;
-  }
+  inline bool is_signed() const { return (value_.bit >> kSignedShift) == 1; }
 
   inline uint16_t exponent() const {
     return ((value_.bit >> kExponentShift) & kExponentMask) - kBias;
   }
 
-  inline uint64_t fraction() const {
-    return (value_.bit & kFractionMask) + 1;
-  }
+  inline uint64_t fraction() const { return (value_.bit & kFractionMask) + 1; }
 
   inline bool Equals(const Double& d) const {
-    return d.is_signed() == is_signed() &&
-      d.exponent() == exponent() &&
-      (d.fraction() > fraction()? d.fraction() - fraction():
-      fraction() - d.fraction()) <= 4;
+    return d.is_signed() == is_signed() && d.exponent() == exponent() &&
+           (d.fraction() > fraction() ? d.fraction() - fraction()
+                                      : fraction() - d.fraction()) <= 4;
   }
 
   inline bool GreaterThan(const Double& d) const {
     if (!is_signed() && d.is_signed()) {
       return true;
     }
-    return exponent() > d.exponent()
-      || (fraction() - d.fraction()) > 4;
+    return exponent() > d.exponent() || (fraction() - d.fraction()) > 4;
   }
 
   inline bool IsNaN() const {
-    return exponent() == kMaxExponent
-      && fraction() > 0;
+    return exponent() == kMaxExponent && fraction() > 0;
   }
 
-  inline double value() const {
-    return value_.floating_value;
-  }
+  inline double value() const { return value_.floating_value; }
 
  private:
   union Value {

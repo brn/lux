@@ -65,17 +65,17 @@ namespace lux {
     REPORT_SYNTAX_ERROR(T, parser, "'" << expect << "' expected"); \
   }
 
-#define EXPECT_NOT_ADVANCE_ONE_OF(T, parser, n, token, expects)    \
-  if (!Token::OneOf(n, token)) {                                   \
-    REPORT_SYNTAX_ERROR(T, parser, "'" << expect << "' expected"); \
+#define EXPECT_NOT_ADVANCE_ONE_OF(T, parser, n, expects, ...)       \
+  if (!Token::OneOf(n, {__VA_ARGS__})) {                            \
+    REPORT_SYNTAX_ERROR(T, parser, "'" << expects << "' expected"); \
   }
 
 #define EXPECT(T, parser, n, token, expect)       \
   EXPECT_NOT_ADVANCE(T, parser, n, token, expect) \
   advance();
 
-#define EXPECT_ONE_OF(T, parser, n, token, expects)       \
-  EXPECT_NOT_ADVANCE_ONE_OF(T, parser, n, token, expects) \
+#define EXPECT_ONE_OF(T, parser, n, expects, ...)               \
+  EXPECT_NOT_ADVANCE_ONE_OF(T, parser, n, expects, __VA_ARGS__) \
   advance();
 
 #define EXPECT_NO_RETURN(parser, n, token, expect)                        \
@@ -422,6 +422,7 @@ Token::Type Parser::Tokenizer::Tokenize() {
       Advance();
       return Token::QUESTION;
     case '`':
+      parser_state_->PushState(State::IN_TEMPLATE_LITERAL);
       Advance();
       return Token::BACK_QUOTE;
     case '\'':
@@ -718,38 +719,62 @@ Token::Type Parser::Tokenizer::GetIdentifierType() {
 
 Token::Type Parser::Tokenizer::TokenizeTemplateCharacters() {
   current_buffer_->clear();
-  auto value = *it_;
   bool escaped = false;
-  while (1) {
-    auto lookahead = *(it_ + 1);
-    switch (lookahead.code()) {
-      case '\\':
+
+  if (*it_ == '{') {
+    Advance();
+  }
+
+  while (HasMore()) {
+    switch (*it_) {
+      case '\\': {
+        auto value = *it_;
         if (!escaped) {
           auto lookahead = it_ + 1;
           if (IsStartEscapeSequence(&lookahead)) {
             bool ok = true;
             value = DecodeEscapeSequence(&ok);
             if (!ok) {
-              return Token::INVALID;
+              REPORT_TOKENIZER_ERROR(this,
+                                     "Invalid unicode escape sequence found");
             }
+          } else {
+            escaped = true;
+            Advance();
+            break;
           }
         }
         escaped = !escaped;
+        current_buffer_->push_back(value);
         break;
+      }
       case '$':
-        if (!escaped && *(it_ + 2) == '{') {
-          it_ += 2;
-          return Token::TEMPLATE_CHARACTERS;
+        if (!escaped && *(it_ + 1) == '{') {
+          Advance();
+          Advance();
+          return Token::TEMPLATE_PARTS;
         }
+        AdvanceAndPushBuffer();
         escaped = false;
         break;
       case '`':
-        return Token::TEMPLATE_CHARACTERS;
+        if (!escaped) {
+          Advance();
+          return Token::TEMPLATE_LITERAL;
+        }
+      case '\r':
+        if (*(it_ + 1) == '\n') {
+          Advance();
+        }
+      case '\n':
+        current_position_->set_end_col(0);
+        current_position_->add_end_line_number();
+      default:
+        AdvanceAndPushBuffer();
     }
-    current_buffer_->push_back(value);
-    Advance();
-    value = *it_;
   }
+
+  REPORT_TOKENIZER_ERROR(this, "Unterminated template literal.");
 }
 
 Token::Type Parser::Tokenizer::TokenizeRegExp() {
@@ -1335,7 +1360,6 @@ Maybe<Expression*> Parser::ParseNewExpression() {
     auto start = position();
     if (peek() == Token::NEW) {
       advance();
-      advance();
       return ParseNewExpression() >>= [&, this](auto callee) {
         auto expr =
             NewExpressionWithPosition<lux::NewExpression>(start, callee);
@@ -1352,6 +1376,7 @@ Maybe<Expression*> Parser::ParseNewExpression() {
 
 Maybe<Expression*> Parser::ParseCallExpression() {
   ENTER_PARSING;
+  auto start = position();
   switch (cur()) {
     case Token::SUPER: {
       Record();
@@ -1359,8 +1384,8 @@ Maybe<Expression*> Parser::ParseCallExpression() {
       if (cur() == Token::LEFT_PAREN) {
         Restore();
         return ParseSuperCall() >>= [&, this](auto n) {
-          return ParsePropertyAccessPostExpression(
-              n, Receiver::SUPER,
+          return ParsePostMemberExpression(
+              start, n, Receiver::SUPER,
               Allowance(Allowance::CALL | Allowance::TEMPLATE));
         };
       }
@@ -1374,8 +1399,8 @@ Maybe<Expression*> Parser::ParseCallExpression() {
                  expr = NewNode<CallExpression>(Receiver::EXPRESSION,
                                                 exprs->at(0), exprs->at(1));
                }
-               return ParsePropertyAccessPostExpression(
-                   expr, Receiver::EXPRESSION,
+               return ParsePostMemberExpression(
+                   start, expr, Receiver::EXPRESSION,
                    Allowance(Allowance::CALL | Allowance::TEMPLATE));
              };
     }
@@ -1383,51 +1408,72 @@ Maybe<Expression*> Parser::ParseCallExpression() {
   EXIT_PARSING;
 }
 
-Maybe<Expression*> Parser::ParsePropertyAccessPostExpression(
-    Expression* pre, Receiver::Type receiver_type, Parser::Allowance allowance,
-    bool error_if_default) {
+Maybe<Expression*> Parser::ParsePostMemberExpression(
+    const SourcePosition& start, Expression* pre, Receiver::Type receiver_type,
+    Parser::Allowance allowance, bool error_if_default) {
   ENTER_PARSING;
-  switch (cur()) {
-    case Token::LEFT_PAREN: {
-      if (!allowance.is_call_allowed()) {
-        REPORT_SYNTAX_ERROR(Expression*, this, "Unexpected '(' found.");
+
+  auto current = pre;
+
+  while (1) {
+    switch (cur()) {
+      case Token::LEFT_PAREN: {
+        if (!allowance.is_call_allowed()) {
+          goto Label_End;
+        }
+        ParseArguments() >>= [&](auto a) {
+          current = NewExpressionWithPosition<CallExpression>(
+              start, receiver_type, current, a);
+        };
+        break;
       }
-      return ParseArguments() >>= [&](auto a) {
-        return Just(NewExpression<CallExpression>(receiver_type, pre, a));
-      };
-    }
-    case Token::LEFT_BRACKET: {
-      advance();
-      return ParseExpression() >>= [&, this](auto n) {
-        EXPECT(Expression*, this, cur(), Token::RIGHT_BRACKET, ']');
-        return Just(NewExpression<PropertyAccessExpression>(
-            PropertyAccessExpression::AccessType::ELEMENT, receiver_type, pre,
-            n));
-      };
-    }
-    case Token::DOT: {
-      advance();
-      return ParseExpression() >>= [&](auto n) {
-        return Just(NewExpression<PropertyAccessExpression>(
-            PropertyAccessExpression::DOT, receiver_type, pre, n));
-      };
-    }
-    case Token::BACK_QUOTE: {
-      if (!allowance.is_template_allowed()) {
-        REPORT_SYNTAX_ERROR(Expression*, this, "Unexpected '`' found.");
+      case Token::LEFT_BRACKET: {
+        auto pos = position();
+        advance();
+        ParseExpression() >>= [&, this](auto n) {
+          auto end = position();
+          EXPECT(Expression*, this, cur(), Token::RIGHT_BRACKET, ']');
+          auto expr = NewExpressionWithPosition<PropertyAccessExpression>(
+              start, PropertyAccessExpression::AccessType::ELEMENT,
+              receiver_type, current, n);
+          expr->set_end_positions(end);
+          return Just(current = expr);
+        };
+        break;
       }
-      return ParseTemplateLiteral() >>= [&](auto t) {
-        return Just(NewExpression<CallExpression>(Receiver::TEMPLATE, pre, t));
-      };
-    }
-    default:
-      if (error_if_default) {
-        REPORT_SYNTAX_ERROR(
-            Expression*, this,
-            "Unexpected " << ToStringCurrentToken() << " found.");
+      case Token::DOT: {
+        advance();
+        ParseIdentifierReference() >>= [&](auto n) {
+          auto expr = NewExpressionWithPosition<PropertyAccessExpression>(
+              start, PropertyAccessExpression::DOT, receiver_type, current, n);
+          expr->set_end_positions(n->source_position());
+          current = expr;
+        };
+        break;
       }
-      return Just(pre);
+      case Token::BACK_QUOTE: {
+        if (!allowance.is_template_allowed()) {
+          REPORT_SYNTAX_ERROR(Expression*, this, "Unexpected '`' found.");
+        }
+        ParseTemplateLiteral() >>= [&](auto t) {
+          current = NewExpressionWithPosition<CallExpression>(
+              start, Receiver::TEMPLATE, current, t);
+          current->set_end_positions(t->source_position());
+        };
+        break;
+      }
+      default:
+        if (error_if_default) {
+          REPORT_SYNTAX_ERROR(
+              Expression*, this,
+              "Unexpected " << ToStringCurrentToken() << " found.");
+        }
+        return Just(current);
+    }
   }
+
+Label_End:
+  return Just(current);
   EXIT_PARSING;
 }
 
@@ -1449,12 +1495,9 @@ Maybe<Expression*> Parser::ParseMemberExpression() {
   ENTER_PARSING;
   auto start = position();
   if (cur() == Token::SUPER) {
-    return ParsePropertyAccessPostExpression(nullptr, Receiver::SUPER,
-                                             Allowance(), true) >>=
-           [&, this](auto n) {
-             return ParsePropertyAccessPostExpression(
-                 n, Receiver::EXPRESSION, Allowance(Allowance::TEMPLATE));
-           };
+    advance();
+    return ParsePostMemberExpression(start, nullptr, Receiver::SUPER,
+                                     Allowance(), true);
   }
 
   if (cur() == Token::NEW) {
@@ -1473,17 +1516,28 @@ Maybe<Expression*> Parser::ParseMemberExpression() {
       REPORT_SYNTAX_ERROR(Expression*, this,
                           "new.target? identifier 'target' expected.");
     }
+    auto start_call = position();
     return ParseMemberExpression() >>= [&, this](auto m) {
-      auto expr = NewExpressionWithPosition<lux::NewExpression>(start, m);
-      expr->set_end_positions(m->source_position());
-      return expr;
+      if (cur() != Token::LEFT_PAREN) {
+        auto expr = NewExpressionWithPosition<lux::NewExpression>(start, m);
+        expr->set_end_positions(m->source_position());
+        return Just(expr);
+      }
+      return ParseArguments() >>= [&, this](auto args) {
+        auto call = NewExpressionWithPosition<CallExpression>(
+            start_call, Receiver::EXPRESSION, m, args);
+        call->set_end_positions(args->source_position());
+        auto expr = NewExpressionWithPosition<lux::NewExpression>(start, call);
+        expr->set_end_positions(args->source_position());
+        return ParsePostMemberExpression(start, expr, Receiver::EXPRESSION,
+                                         Allowance(Allowance::TEMPLATE));
+      };
     };
   }
 
   return ParsePrimaryExpression() >>= [&, this](auto n) {
-    return ParsePropertyAccessPostExpression(
-        n, Receiver::EXPRESSION,
-        Allowance(Allowance::TEMPLATE | Allowance::CALL));
+    return ParsePostMemberExpression(start, n, Receiver::EXPRESSION,
+                                     Allowance(Allowance::TEMPLATE));
   };
   EXIT_PARSING;
 }
@@ -2191,7 +2245,37 @@ Maybe<Expression*> Parser::ParseNamedList() {
 
 Maybe<Expression*> Parser::ParseElementList() { return Nothing<Expression*>(); }
 Maybe<Expression*> Parser::ParseTemplateLiteral() {
-  return Nothing<Expression*>();
+  ENTER_PARSING;
+  auto start = position();
+  EXPECT(Expression*, this, cur(), Token::BACK_QUOTE, '`');
+  std::vector<Ast*> buffer;
+
+  while (cur() != Token::TEMPLATE_LITERAL) {
+    if (value().size() > 0) {
+      buffer.push_back(NewExpressionWithPosition<Literal>(
+          position(), Token::STRING_LITERAL, value()));
+    }
+    parser_state_->PushState(IN_TEMPLATE_INTERPOLATION);
+    advance();
+    ParseExpression() >>= [&](auto expr) { buffer.push_back(expr); };
+    parser_state_->PopState(IN_TEMPLATE_INTERPOLATION);
+    EXPECT(Expression*, this, cur(), Token::RIGHT_BRACE, '}');
+  }
+
+  if (value().size() > 0) {
+    buffer.push_back(NewExpressionWithPosition<Literal>(
+        position(), Token::STRING_LITERAL, value()));
+  }
+  auto ast = NewExpressionWithPosition<TemplateLiteral>(start, buffer);
+  if (value().size() > 0) {
+    ast->set_end_positions(buffer.back()->source_position());
+  } else {
+    ast->set_end_positions(position());
+  }
+  parser_state_->PopState(IN_TEMPLATE_LITERAL);
+  advance();
+  return Just(ast);
+  EXIT_PARSING;
 }
 Maybe<Expression*> Parser::ParseTemplateSpans() {
   return Nothing<Expression*>();
