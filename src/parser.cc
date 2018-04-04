@@ -267,6 +267,8 @@ Token::Type Parser::Tokenizer::Tokenize() {
   INVALIDATE(current_position_);
   if (parser_state_->Is(State::IN_TEMPLATE_LITERAL)) {
     return TokenizeTemplateCharacters();
+  } else if (parser_state_->Is(State::REGEXP_EXPECTED)) {
+    return TokenizeRegExp();
   }
 
   switch (*it_) {
@@ -290,6 +292,10 @@ Token::Type Parser::Tokenizer::Tokenize() {
       return Token::RIGHT_BRACKET;
     case '*':
       Advance();
+      if (*it_ == '*') {
+        Advance();
+        return Token::OP_POW;
+      }
       if (*it_ == '=') {
         Advance();
         return Token::OP_MUL_ASSIGN;
@@ -297,6 +303,7 @@ Token::Type Parser::Tokenizer::Tokenize() {
       return Token::OP_MUL;
     case '/':
       Advance();
+
       if (*it_ == '/') {
         Advance();
         SkipSingleLineComment();
@@ -307,14 +314,13 @@ Token::Type Parser::Tokenizer::Tokenize() {
         SkipMultiLineComment();
         return Tokenize();
       }
-      if (parser_state_->Is(State::EXPECTED_BINARY_OPERATOR)) {
-        if (*it_ == '=') {
-          Advance();
-          return Token::OP_DIV_ASSIGN;
-        }
-        return Token::OP_DIV;
+
+      if (*it_ == '=') {
+        Advance();
+        return Token::OP_DIV_ASSIGN;
       }
-      return TokenizeRegExp();
+      return Token::OP_DIV;
+
     case '-':
       Advance();
       if (*it_ == '=') {
@@ -346,18 +352,34 @@ Token::Type Parser::Tokenizer::Tokenize() {
       Advance();
       if (*it_ == '<') {
         Advance();
+        if (*it_ == '=') {
+          Advance();
+          return Token::OP_SHIFT_LEFT_ASSIGN;
+        }
         return Token::OP_SHIFT_LEFT;
+      }
+      if (*it_ == '=') {
+        Advance();
+        return Token::OP_LESS_THAN_OR_EQ;
       }
       return Token::OP_LESS_THAN;
     case '>':
       Advance();
       if (*it_ == '>') {
         Advance();
+        if (*it_ == '=') {
+          Advance();
+          return Token::OP_SHIFT_RIGHT_ASSIGN;
+        }
         if (*it_ == '>') {
           Advance();
           return Token::OP_U_SHIFT_RIGHT;
         }
         return Token::OP_SHIFT_RIGHT;
+      }
+      if (*it_ == '=') {
+        Advance();
+        return Token::OP_GREATER_THAN_OR_EQ;
       }
       return Token::OP_GREATER_THAN;
     case '=':
@@ -377,12 +399,20 @@ Token::Type Parser::Tokenizer::Tokenize() {
         Advance();
         return Token::OP_OR_ASSIGN;
       }
+      if (*it_ == '|') {
+        Advance();
+        return Token::OP_LOGICAL_OR;
+      }
       return Token::OP_OR;
     case '&':
       Advance();
       if (*it_ == '=') {
         Advance();
         return Token::OP_AND_ASSIGN;
+      }
+      if (*it_ == '&') {
+        Advance();
+        return Token::OP_LOGICAL_AND;
       }
       return Token::OP_AND;
     case '~':
@@ -411,6 +441,14 @@ Token::Type Parser::Tokenizer::Tokenize() {
       return Token::DOT;
     case '!':
       Advance();
+      if (*it_ == '=') {
+        Advance();
+        if (*it_ == '=') {
+          Advance();
+          return Token::OP_STRICT_NOT_EQ;
+        }
+        return Token::OP_NOT_EQ;
+      }
       return Token::OP_NOT;
     case ';':
       Advance();
@@ -1189,7 +1227,7 @@ Maybe<Expression*> Parser::ParseAssignmentExpression() {
           case Token::OP_LESS_THAN:
           case Token::OP_LESS_THAN_OR_EQ:
           case Token::OP_GREATER_THAN:
-          case Token::OP_GREATER_THAN_EQ:
+          case Token::OP_GREATER_THAN_OR_EQ:
           case Token::OP_PLUS:
           case Token::OP_MINUS:
           case Token::OP_DIV:
@@ -1221,7 +1259,7 @@ Maybe<Expression*> Parser::ParseAssignmentExpressionLhs() {
 
 Maybe<Expression*> Parser::ParseConditionalExpression() {
   ENTER_PARSING
-  return ParseLogicalORExpression() >>= [this](auto logical_or_exp) {
+  return ParseBinaryExpression() >>= [this](auto binary_expr) {
     if (cur() == Token::QUESTION) {
       return ParseAssignmentExpression() >>= [&, this](auto lhs) {
         if (advance() != Token::COLON) {
@@ -1229,51 +1267,185 @@ Maybe<Expression*> Parser::ParseConditionalExpression() {
         }
         return ParseAssignmentExpression() >>= [&, this](auto rhs) {
           return NewExpression<ConditionalExpression>(
-              logical_or_exp->ToExpression(), lhs->ToExpression(),
+              binary_expr->ToExpression(), lhs->ToExpression(),
               rhs->ToExpression());
         };
       };
     }
-    return Just(logical_or_exp);
+    return Just(binary_expr);
   };
   EXIT_PARSING;
 }
 
-#define SIMPLE_BINARY_EXPRESSION_PARSER(Name, ChildName, ...)             \
-  Maybe<Expression*> Parser::Parse##Name##Expression() {                  \
-    ENTER_PARSING                                                         \
-    return Parse##ChildName##Expression() >>= [&, this](auto child_exp) { \
-      if (Token::OneOf(cur(), {__VA_ARGS__})) {                           \
-        auto t = cur();                                                   \
-        advance();                                                        \
-        return Parse##Name##Expression() >>= [&](auto rhs_exp) {          \
-          return NewExpression<BinaryExpression>(t, child_exp, rhs_exp);  \
-        };                                                                \
-      }                                                                   \
-      return Just(child_exp);                                             \
-    };                                                                    \
-    EXIT_PARSING;                                                         \
-  }
+Maybe<Expression*> Parser::ParseBinaryOperatorByPriority(
+    Expression* prev_ast, Parser::OperatorPriority current_op,
+    Parser::OperatorPriority prev_op) {
+  ENTER_PARSING;
 
-SIMPLE_BINARY_EXPRESSION_PARSER(LogicalOR, LogicalAND, Token::OP_LOGICAL_OR)
-SIMPLE_BINARY_EXPRESSION_PARSER(LogicalAND, BitwiseOR, Token::OP_LOGICAL_AND)
-SIMPLE_BINARY_EXPRESSION_PARSER(BitwiseOR, BitwiseXOR, Token::OP_OR)
-SIMPLE_BINARY_EXPRESSION_PARSER(BitwiseXOR, BitwiseAND, Token::OP_OR)
-SIMPLE_BINARY_EXPRESSION_PARSER(BitwiseAND, Equality, Token::OP_AND)
-SIMPLE_BINARY_EXPRESSION_PARSER(Equality, Relational, Token::OP_EQ,
-                                Token::OP_STRICT_EQ, Token::OP_NOT_EQ,
-                                Token::OP_STRICT_NOT_EQ)
-SIMPLE_BINARY_EXPRESSION_PARSER(Relational, Shift, Token::OP_GREATER_THAN,
-                                Token::OP_GREATER_THAN_EQ, Token::OP_LESS_THAN,
-                                Token::OP_LESS_THAN_OR_EQ, Token::INSTANCEOF,
-                                Token::IN)
-SIMPLE_BINARY_EXPRESSION_PARSER(Shift, Additive, Token::OP_SHIFT_LEFT,
-                                Token::OP_SHIFT_RIGHT, Token::OP_U_SHIFT_RIGHT)
-SIMPLE_BINARY_EXPRESSION_PARSER(Additive, Multiplicative, Token::OP_PLUS,
-                                Token::OP_MINUS)
-SIMPLE_BINARY_EXPRESSION_PARSER(Multiplicative, Exponentiation, Token::OP_MUL,
-                                Token::OP_DIV, Token::OP_MOD)
-SIMPLE_BINARY_EXPRESSION_PARSER(Exponentiation, Unary, Token::OP_POW)
+  auto token = cur();
+  advance();
+
+  return ParseUnaryExpression() >>= [&, this](auto expr) {
+    Expression* left = nullptr;
+    Expression* right = nullptr;
+    if (prev_op == kNone || prev_op >= current_op) {
+      left = prev_ast;
+      right = expr;
+      auto ret = NewExpressionWithPosition<BinaryExpression>(
+          left->source_position(), token, left, right);
+      ret->set_end_positions(expr->source_position());
+      return ret;
+    }
+
+    INVALIDATE(prev_ast->IsBinaryExpression());
+    auto maybe_bin_expr = prev_ast;
+    while (maybe_bin_expr->IsBinaryExpression()) {
+      auto rhs = maybe_bin_expr->ToBinaryExpression()->rhs();
+      if (!rhs->IsBinaryExpression()) {
+        break;
+      }
+      maybe_bin_expr = rhs;
+    }
+    auto bin_expr = maybe_bin_expr->ToBinaryExpression();
+    right = expr;
+    left = bin_expr->rhs();
+    auto ret = NewExpressionWithPosition<BinaryExpression>(
+        left->source_position(), token, left, right);
+    ret->set_end_positions(expr->source_position());
+    bin_expr->set_rhs(ret);
+    prev_ast->set_end_positions(expr->source_position());
+    return prev_ast;
+  };
+
+  EXIT_PARSING;
+}
+
+Maybe<Expression*> Parser::ParseBinaryExpression() {
+  ENTER_PARSING;
+
+  return ParseUnaryExpression() >>= [&, this](auto last) {
+    OperatorPriority last_op = kNone;
+
+    while (1) {
+      switch (cur()) {
+        case Token::OP_LOGICAL_OR: {
+          ParseBinaryOperatorByPriority(last, kLogicalOR, last_op) >>=
+              [&](auto n) {
+                last = n;
+                last_op = kLogicalOR;
+              };
+          break;
+        }
+        case Token::OP_LOGICAL_AND: {
+          ParseBinaryOperatorByPriority(last, kLogicalAND, last_op) >>=
+              [&](auto n) {
+                last = n;
+                last_op = kLogicalAND;
+              };
+          break;
+        }
+
+        case Token::OP_OR: {
+          ParseBinaryOperatorByPriority(last, kBitwiseOR, last_op) >>=
+              [&](auto n) {
+                last = n;
+                last_op = kBitwiseOR;
+              };
+          break;
+        }
+
+        case Token::OP_XOR: {
+          ParseBinaryOperatorByPriority(last, kBitwiseXOR, last_op) >>=
+              [&](auto n) {
+                last = n;
+                last_op = kBitwiseXOR;
+              };
+          break;
+        }
+
+        case Token::OP_AND: {
+          ParseBinaryOperatorByPriority(last, kBitwiseAND, last_op) >>=
+              [&](auto n) {
+                last = n;
+                last_op = kBitwiseAND;
+              };
+          break;
+        }
+
+        case Token::OP_EQ:
+        case Token::OP_STRICT_EQ:
+        case Token::OP_NOT_EQ:
+        case Token::OP_STRICT_NOT_EQ: {
+          ParseBinaryOperatorByPriority(last, kEquality, last_op) >>=
+              [&](auto n) {
+                last = n;
+                last_op = kEquality;
+              };
+          break;
+        }
+
+        case Token::OP_GREATER_THAN:
+        case Token::OP_GREATER_THAN_OR_EQ:
+        case Token::OP_LESS_THAN:
+        case Token::OP_LESS_THAN_OR_EQ:
+        case Token::INSTANCEOF:
+        case Token::IN: {
+          ParseBinaryOperatorByPriority(last, kRelational, last_op) >>=
+              [&](auto n) {
+                last = n;
+                last_op = kRelational;
+              };
+          break;
+        }
+
+        case Token::OP_SHIFT_LEFT:
+        case Token::OP_SHIFT_RIGHT:
+        case Token::OP_U_SHIFT_RIGHT: {
+          ParseBinaryOperatorByPriority(last, kShift, last_op) >>= [&](auto n) {
+            last = n;
+            last_op = kShift;
+          };
+          break;
+        }
+
+        case Token::OP_PLUS:
+        case Token::OP_MINUS: {
+          ParseBinaryOperatorByPriority(last, kAdditive, last_op) >>=
+              [&](auto n) {
+                last = n;
+                last_op = kAdditive;
+              };
+          break;
+        }
+
+        case Token::OP_MUL:
+        case Token::OP_DIV:
+        case Token::OP_MOD: {
+          ParseBinaryOperatorByPriority(last, kMultiplicative, last_op) >>=
+              [&](auto n) {
+                last = n;
+                last_op = kMultiplicative;
+              };
+          break;
+        }
+
+        case Token::OP_POW: {
+          ParseBinaryOperatorByPriority(last, kExponentiation, last_op) >>=
+              [&](auto n) {
+                last = n;
+                last_op = kExponentiation;
+              };
+          break;
+        }
+
+        default:
+          return last;
+      }
+    }
+  };
+  EXIT_PARSING;
+#undef INIT_BY_OPERATOR_ORDER
+}
 
 Maybe<Expression*> Parser::ParseUnaryExpression() {
   ENTER_PARSING;
@@ -1544,6 +1716,7 @@ Maybe<Expression*> Parser::ParseMemberExpression() {
 
 Maybe<Expression*> Parser::ParsePrimaryExpression() {
   ENTER_PARSING;
+
   auto start = position();
   switch (cur()) {
     case Token::THIS: {
@@ -2442,7 +2615,11 @@ Maybe<Expression*> Parser::ParseGeneratorMethod() {
 }
 Maybe<Ast*> Parser::ParseGeneratorDeclaration() { return Nothing<Ast*>(); }
 Maybe<Expression*> Parser::ParseRegularExpression() {
+  ENTER_PARSING;
+  LUX_SCOPED([&] { parser_state_->PopState(State::REGEXP_EXPECTED); })
+  parser_state_->PushState(State::REGEXP_EXPECTED);
   return Nothing<Expression*>();
+  EXIT_PARSING;
 }
 Maybe<Expression*> Parser::ParseGeneratorExpression() {
   return Nothing<Expression*>();

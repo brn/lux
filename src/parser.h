@@ -105,7 +105,7 @@
   V(OP_DIV_ASSIGN, "=")              \
   V(OP_EQ, "==")                     \
   V(OP_GREATER_THAN, ">")            \
-  V(OP_GREATER_THAN_EQ, ">=")        \
+  V(OP_GREATER_THAN_OR_EQ, ">=")     \
   V(OP_INCREMENT, "++")              \
   V(OP_LESS_THAN, "<")               \
   V(OP_LESS_THAN_OR_EQ, "<=")        \
@@ -1162,7 +1162,7 @@ class Parser {
     IN_ASYNC_FUNCTION,
     IN_GENERATOR_FUNCTION,
     IN_ASYNC_GENERATOR_FUNCTION,
-    EXPECTED_BINARY_OPERATOR,
+    REGEXP_EXPECTED,
     IN_TEMPLATE_LITERAL,
     IN_TEMPLATE_INTERPOLATION
   };
@@ -1408,6 +1408,21 @@ class Parser {
 
   bool MatchStates(std::initializer_list<State> s);
 
+  enum OperatorPriority {
+    kNone,
+    kLogicalOR,
+    kLogicalAND,
+    kBitwiseOR,
+    kBitwiseXOR,
+    kBitwiseAND,
+    kEquality,
+    kRelational,
+    kShift,
+    kAdditive,
+    kMultiplicative,
+    kExponentiation,
+  };
+
   VISIBLE_FOR_TESTING : template <typename T>
                         Maybe<T*>
                         ParseTerminator(T* node);
@@ -1452,18 +1467,10 @@ class Parser {
   Maybe<Expression*> ParseLeftHandSideExpression();
   Maybe<Expression*> ParseUpdateExpression();
   Maybe<Expression*> ParseUnaryExpression();
-  Maybe<Expression*> ParseExponentiationExpression();
-  Maybe<Expression*> ParseMultiplicativeExpression();
-  Maybe<Expression*> ParseMultiplicativeOperator();
-  Maybe<Expression*> ParseAdditiveExpression();
-  Maybe<Expression*> ParseShiftExpression();
-  Maybe<Expression*> ParseRelationalExpression();
-  Maybe<Expression*> ParseEqualityExpression();
-  Maybe<Expression*> ParseBitwiseANDExpression();
-  Maybe<Expression*> ParseBitwiseXORExpression();
-  Maybe<Expression*> ParseBitwiseORExpression();
-  Maybe<Expression*> ParseLogicalANDExpression();
-  Maybe<Expression*> ParseLogicalORExpression();
+  Maybe<Expression*> ParseBinaryOperatorByPriority(Expression* prev_ast,
+                                                   OperatorPriority current_op,
+                                                   OperatorPriority prev_op);
+  Maybe<Expression*> ParseBinaryExpression();
   Maybe<Expression*> ParseConditionalExpression();
   Maybe<Expression*> ParseAssignmentExpression();
   Maybe<Expression*> ParseAssignmentExpressionLhs();

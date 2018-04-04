@@ -113,6 +113,14 @@ inline TestableAst Unary(const char* operand, const char* position,
   return Ast("UnaryExpression", s.c_str(), sp, {ast});
 }
 
+inline TestableAst Binary(const char* operand, lux::SourcePosition sp,
+                          const TestableAst& left, const TestableAst& right) {
+  std::stringstream ss;
+  ss << "operand = " << operand;
+  auto s = ss.str();
+  return Ast("BinaryExpression", s.c_str(), sp, {left, right});
+}
+
 inline TestableAst CallExpr(const char* receiver, lux::SourcePosition sp,
                             const TestableAst& callee,
                             const TestableAst& args = TestableAst::kNull) {
@@ -875,6 +883,271 @@ TEST_F(ParserTest, NewExpressionWithTaggedTemplate) {
             Tmpl({start + 9, end}, {Str("test", {start + 10, end})}));
       },
       "new X().a`test`");
+}
+
+TEST_F(ParserTest, ExponentiationExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_POW", {start, end}, Number("1", {start, start + 1}),
+                      Number("1", {start + 5, end}));
+      },
+      "1 ** 1");
+}
+
+TEST_F(ParserTest, MultiplicativeMulExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_MUL", {start, end}, Number("1", {start, start + 1}),
+                      Number("1", {start + 4, end}));
+      },
+      "1 * 1");
+}
+
+TEST_F(ParserTest, MultiplicativeDivExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_DIV", {start, end}, Number("1", {start, start + 1}),
+                      Number("1", {start + 4, end}));
+      },
+      "1 / 1");
+}
+
+TEST_F(ParserTest, MultiplicativeModExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_MOD", {start, end}, Number("1", {start, start + 1}),
+                      Number("1", {start + 4, end}));
+      },
+      "1 % 1");
+}
+
+TEST_F(ParserTest, AdditivePlusExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_PLUS", {start, end}, Number("1", {start, start + 1}),
+                      Number("1", {start + 4, end}));
+      },
+      "1 + 1");
+}
+
+TEST_F(ParserTest, AdditiveMinusExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_MINUS", {start, end}, Number("1", {start, start + 1}),
+                      Number("1", {start + 4, end}));
+      },
+      "1 - 1");
+}
+
+TEST_F(ParserTest, ShiftLeftExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_SHIFT_LEFT", {start, end},
+                      Ident("v", {start, start + 1}),
+                      Number("1", {start + 5, end}));
+      },
+      "v << 1");
+}
+
+TEST_F(ParserTest, ShiftRightExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_SHIFT_RIGHT", {start, end},
+                      Ident("v", {start, start + 1}),
+                      Number("1", {start + 5, end}));
+      },
+      "v >> 1");
+}
+
+TEST_F(ParserTest, UShiftRightExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_U_SHIFT_RIGHT", {start, end},
+                      Ident("v", {start, start + 1}),
+                      Number("1", {start + 6, end}));
+      },
+      "v >>> 1");
+}
+
+TEST_F(ParserTest, InExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("IN", {start, end}, Str("a", {start, start + 3}),
+                      Ident("v", {start + 7, end}));
+      },
+      "'a' in v");
+}
+
+TEST_F(ParserTest, InstanceofExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("INSTANCEOF", {start, end},
+                      Ident("x", {start, start + 1}),
+                      Ident("y", {start + 13, end}));
+      },
+      "x instanceof y");
+}
+
+TEST_F(ParserTest, GreaterThanExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_GREATER_THAN", {start, end},
+                      Number("1", {start, start + 1}),
+                      Number("1", {start + 4, end}));
+      },
+      "1 > 1");
+}
+
+TEST_F(ParserTest, GreaterThanOrEqExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_GREATER_THAN_OR_EQ", {start, end},
+                      Number("1", {start, start + 1}),
+                      Number("1", {start + 5, end}));
+      },
+      "1 >= 1");
+}
+
+TEST_F(ParserTest, LessThanExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_LESS_THAN", {start, end},
+                      Number("1", {start, start + 1}),
+                      Number("1", {start + 4, end}));
+      },
+      "1 < 1");
+}
+
+TEST_F(ParserTest, LessThanOrEqExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_LESS_THAN_OR_EQ", {start, end},
+                      Number("1", {start, start + 1}),
+                      Number("1", {start + 5, end}));
+      },
+      "1 <= 1");
+}
+
+TEST_F(ParserTest, EqExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_EQ", {start, end}, Number("1", {start, start + 1}),
+                      Number("1", {start + 5, end}));
+      },
+      "1 == 1");
+}
+
+TEST_F(ParserTest, StrictEqExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_STRICT_EQ", {start, end},
+                      Number("1", {start, start + 1}),
+                      Number("1", {start + 6, end}));
+      },
+      "1 === 1");
+}
+
+TEST_F(ParserTest, NotEqExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_NOT_EQ", {start, end},
+                      Number("1", {start, start + 1}),
+                      Number("1", {start + 5, end}));
+      },
+      "1 != 1");
+}
+
+TEST_F(ParserTest, StrictNotEqExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_STRICT_NOT_EQ", {start, end},
+                      Number("1", {start, start + 1}),
+                      Number("1", {start + 6, end}));
+      },
+      "1 !== 1");
+}
+
+TEST_F(ParserTest, BitwiseANDExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_AND", {start, end}, Number("1", {start, start + 1}),
+                      Number("1", {start + 4, end}));
+      },
+      "1 & 1");
+}
+
+TEST_F(ParserTest, BitwiseORExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_OR", {start, end}, Number("1", {start, start + 1}),
+                      Number("1", {start + 4, end}));
+      },
+      "1 | 1");
+}
+
+TEST_F(ParserTest, BitwiseXORExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_XOR", {start, end}, Number("1", {start, start + 1}),
+                      Number("1", {start + 4, end}));
+      },
+      "1 ^ 1");
+}
+
+TEST_F(ParserTest, LogicalANDExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_LOGICAL_AND", {start, end},
+                      Number("1", {start, start + 1}),
+                      Number("1", {start + 5, end}));
+      },
+      "1 && 1");
+}
+
+TEST_F(ParserTest, LogicalORExpression) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_LOGICAL_OR", {start, end},
+                      Number("1", {start, start + 1}),
+                      Number("1", {start + 5, end}));
+      },
+      "1 || 1");
+}
+
+TEST_F(ParserTest, OperatorPriority_1) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_OR", {start, end},
+                      Binary("OP_MINUS", {start, start + 9},
+                             Ident("a", {start, start + 1}),
+                             Binary("OP_MUL", {start + 4, start + 9},
+                                    Ident("b", {start + 4, start + 5}),
+                                    Ident("c", {start + 8, start + 9}))),
+                      Binary("OP_SHIFT_LEFT", {start + 12, start + 18},
+                             Ident("d", {start + 12, start + 13}),
+                             Binary("OP_POW", {start + 17, start + 23},
+                                    Ident("e", {start + 17, start + 18}),
+                                    Ident("f", {start + 22, start + 23}))));
+      },
+      "a - b * c | d << e ** f");
+}
+
+TEST_F(ParserTest, OperatorPriority_2) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_OR", {start, end},
+                      Binary("OP_SHIFT_RIGHT", {start, start + 14},
+                             Binary("OP_PLUS", {start, start + 9},
+                                    Binary("OP_MUL", {start, start + 5},
+                                           Ident("a", {start, start + 1}),
+                                           Ident("b", {start + 4, start + 5})),
+                                    Ident("c", {start + 8, start + 9})),
+                             Ident("d", {start + 13, start + 14})),
+                      Binary("OP_DIV", {start + 17, start + 22},
+                             Ident("e", {start + 17, start + 18}),
+                             Ident("f", {start + 21, start + 22})));
+      },
+      "a * b + c >> d | e / f");
 }
 
 }  // namespace
