@@ -147,6 +147,17 @@ inline TestableAst Lit(const char* attr, lux::SourcePosition sp,
   return Ast("Literal", attr, sp, ast);
 }
 
+inline TestableAst ArrayLit(bool has_spread, lux::SourcePosition sp,
+                            std::initializer_list<TestableAst> ast = {}) {
+  std::stringstream st;
+  st << "type = ArrayLiteral";
+  if (has_spread) {
+    st << " spread = true";
+  }
+  auto str = st.str();
+  return Ast("StructuralLiteral", str.c_str(), sp, ast);
+}
+
 inline TestableAst Number(const char* value, lux::SourcePosition sp,
                           std::initializer_list<TestableAst> ast = {}) {
   std::stringstream ss;
@@ -173,6 +184,15 @@ inline TestableAst Ident(const char* value, lux::SourcePosition sp,
   ss << "type = IDENTIFIER value = " << value;
   auto s = ss.str();
   return Ast("Literal", s.c_str(), sp, ast);
+}
+
+inline TestableAst Cond(lux::SourcePosition sp, TestableAst cond,
+                        TestableAst then, TestableAst else_node) {
+  return Ast("ConditionalExpression", "", sp, {cond, then, else_node});
+}
+
+inline TestableAst Elision(lux::SourcePosition sp) {
+  return Ast("Elision", "", sp);
 }
 
 class ParserTest : public lux::IsolateSetup {
@@ -1150,4 +1170,118 @@ TEST_F(ParserTest, OperatorPriority_2) {
       "a * b + c >> d | e / f");
 }
 
+TEST_F(ParserTest, ConditionalExpression_1) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Cond({start, end}, Ident("x", {start, start + 1}),
+                    Number("1", {start + 3, start + 4}),
+                    Number("0", {end - 1, end}));
+      },
+      "x? 1: 0");
+}
+
+TEST_F(ParserTest, ConditionalExpression_2) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Cond(
+            {start, end},
+            Binary("OP_PLUS", {start, start + 5},
+                   Ident("x", {start, start + 1}),
+                   Number("1", {start + 4, start + 5})),
+            NewExpr({start + 7, start + 14},
+                    CallExpr("EXPRESSION",
+                             {
+                                 start + 11,
+                                 start + 14,
+                             },
+                             Ident("X", {start + 11, start + 12}),
+                             Exprs({start + 12, start + 14}, {}))),
+            Binary("OP_MINUS", {end - 5, end}, Ident("y", {end - 5, end - 4}),
+                   Number("3", {end - 1, end})));
+      },
+      "x + 1? new X(): y - 3");
+}
+
+#define ASSIGNMENT_OP_LIST(A)        \
+  A(OP_MUL_ASSIGN, "*=")             \
+  A(OP_DIV_ASSIGN, "/=")             \
+  A(OP_MOD_ASSIGN, "%=")             \
+  A(OP_PLUS_ASSIGN, "+=")            \
+  A(OP_MINUS_ASSIGN, "-=")           \
+  A(OP_AND_ASSIGN, "&=")             \
+  A(OP_OR_ASSIGN, "|=")              \
+  A(OP_XOR_ASSIGN, "^=")             \
+  A(OP_ASSIGN, "=")                  \
+  A(OP_SHIFT_LEFT_ASSIGN, "<<=")     \
+  A(OP_SHIFT_RIGHT_ASSIGN, ">>=")    \
+  A(OP_U_SHIFT_RIGHT_ASSIGN, ">>>=") \
+  A(OP_POW_ASSIGN, "**=")
+
+#define MAKE_ASSIGNMENT_TEST(NAME, op)                                       \
+  TEST_F(ParserTest, AssignmentExpression_##NAME) {                          \
+    SingleExpressionTest(                                                    \
+        [&](uint32_t start, uint32_t end) {                                  \
+          return Binary(#NAME, {start, end}, Ident("x", {start, start + 1}), \
+                        Number("1", {end - 1, end}));                        \
+        },                                                                   \
+        "x " op " 1");                                                       \
+  }
+ASSIGNMENT_OP_LIST(MAKE_ASSIGNMENT_TEST);
+#undef MAKE_ASSIGNMENT_TEST
+#undef ASSIGNMENT_OP_LIST
+
+TEST_F(ParserTest, ArrayLiteral) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return ArrayLit(false, {start, end},
+                        {Number("1", {start + 1, start + 2}),
+                         Number("2", {end - 2, end - 1})});
+      },
+      "[1,2]");
+}
+
+TEST_F(ParserTest, ArrayLiteralSpread) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return ArrayLit(false, {start, end},
+                        {Number("1", {start + 1, start + 2}),
+                         Unary("SPREAD", "PRE", {end - 5, end - 1},
+                               Ident("x", {end - 2, end - 1}))});
+      },
+      "[1,...x]");
+}
+
+TEST_F(ParserTest, ArrayLiteralEmpty) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return ArrayLit(
+            false, {start, end},
+            {Number("1", {start + 1, start + 2}), Elision({end - 2, end - 1})});
+      },
+      "[1,]");
+}
+
+TEST_F(ParserTest, ArrayLiteralEmpty2) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return ArrayLit(
+            false, {start, end},
+            {Number("1", {start + 1, start + 2}), Elision({end - 4, end - 3}),
+             Elision({end - 3, end - 2}), Elision({end - 2, end - 1})});
+      },
+      "[1,,,]");
+}
+
+TEST_F(ParserTest, ArrayAssignmentPattern) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Binary("OP_ASSIGN", {start, end},
+                      ArrayLit(false, {start, end - 4},
+                               {Ident("a", {start + 1, start + 2}),
+                                Ident("b", {start + 3, start + 4}),
+                                Ident("c", {start + 5, start + 6})}),
+                      Ident("y", {end - 1, end}));
+      },
+      "[a,b,c] = y");
+}
 }  // namespace

@@ -396,8 +396,17 @@ class Ast : public Zone {
 };
 
 class Expression : public Ast {
+ public:
+  enum Flags { LHS_EXPR };
+
+  bool is_lhs_expr() { return flags_.get(LHS_EXPR); }
+
+  void set_lhs_expr() { flags_.set(LHS_EXPR); }
+
  protected:
   explicit Expression(Ast::Type type) : Ast(type) {}
+
+  Bitset<uint8_t> flags_;
 };
 
 class Expressions : public Expression, public AstListTraits<Expression> {
@@ -824,7 +833,12 @@ class StructuralLiteral : public Expression, public AstListTraits<Expression> {
  public:
   enum Type { ARRAY = 0x1, OBJECT = 0x2 };
 
-  enum Flag { HAS_ACCESSOR = 0x4, HAS_GENERATOR = 0x8, HAS_SPREAD = 0x10 };
+  enum Flag {
+    HAS_ACCESSOR = 0x4,
+    HAS_GENERATOR = 0x8,
+    HAS_SPREAD = 0x10,
+    VALID_LHS = 0x20
+  };
 
   static const uint8_t kTypeMask = Type::ARRAY | Type::OBJECT;
   static const uint8_t kFlagMask =
@@ -832,7 +846,7 @@ class StructuralLiteral : public Expression, public AstListTraits<Expression> {
 
   explicit StructuralLiteral(uint8_t flag)
       : Expression(Ast::STRUCTUAL_LITERAL) {
-    flag_.assign(flag);
+    flag_.set(flag);
   }
 
   LUX_INLINE StructuralLiteral::Type type() const {
@@ -858,6 +872,12 @@ class StructuralLiteral : public Expression, public AstListTraits<Expression> {
   LUX_INLINE void set_spread() { flag_.set(HAS_SPREAD); }
 
   LUX_INLINE bool has_spread() const { return flag_.get(HAS_SPREAD); }
+
+  LUX_INLINE bool is_valid_lhs() const { return flags_.get(VALID_LHS); }
+
+  LUX_INLINE void set_valid_lhs(bool valid = true) {
+    valid ? flags_.set(VALID_LHS) : flags_.unset(VALID_LHS);
+  }
 
   void ToStringSelf(const Ast* ast, std::string* indent,
                     std::stringstream* ss) const {
@@ -1602,7 +1622,17 @@ class Parser {
   Expression* NewExpressionWithPosition(const SourcePosition& start,
                                         Args... args) {
     auto expr = NewExpression<T>(std::forward<Args>(args)...);
+    expr->set_source_position(start);
+    return expr;
+  }
+
+  template <typename T, typename... Args>
+  Expression* NewExpressionWithPositions(const SourcePosition& start,
+                                         const SourcePosition& end,
+                                         Args... args) {
+    auto expr = NewExpression<T>(std::forward<Args>(args)...);
     expr->set_start_positions(start);
+    expr->set_end_positions(end);
     return expr;
   }
 
@@ -1627,7 +1657,7 @@ class Parser {
          Token::OP_MINUS_ASSIGN, Token::OP_SHIFT_LEFT_ASSIGN,
          Token::OP_SHIFT_RIGHT_ASSIGN, Token::OP_U_SHIFT_RIGHT_ASSIGN,
          Token::OP_AND_ASSIGN, Token::OP_OR_ASSIGN, Token::OP_XOR_ASSIGN,
-         Token::OP_POW_ASSIGN});
+         Token::OP_POW_ASSIGN, Token::OP_ASSIGN, Token::OP_MOD_ASSIGN});
   }
 
   bool has_linebreak_before() const {

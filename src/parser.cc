@@ -91,8 +91,6 @@ const uint8_t Ast::kExpressionFlag;
 const uint8_t PropertyAccessExpression::kAccessTypeMask;
 const uint8_t PropertyAccessExpression::kReceiverTypeMask;
 
-static Elision kElision;
-
 void Parser::Tokenizer::Prologue() {
   current_position_->set_start_col(current_position_->end_col());
   current_state_->Unset(TokenizerState::IMPLICIT_OCTAL);
@@ -290,10 +288,17 @@ Token::Type Parser::Tokenizer::Tokenize() {
     case ']':
       Advance();
       return Token::RIGHT_BRACKET;
+    case ',':
+      Advance();
+      return Token::COMMA;
     case '*':
       Advance();
       if (*it_ == '*') {
         Advance();
+        if (*it_ == '=') {
+          Advance();
+          return Token::OP_POW_ASSIGN;
+        }
         return Token::OP_POW;
       }
       if (*it_ == '=') {
@@ -373,6 +378,10 @@ Token::Type Parser::Tokenizer::Tokenize() {
         }
         if (*it_ == '>') {
           Advance();
+          if (*it_ == '=') {
+            Advance();
+            return Token::OP_U_SHIFT_RIGHT_ASSIGN;
+          }
           return Token::OP_U_SHIFT_RIGHT;
         }
         return Token::OP_SHIFT_RIGHT;
@@ -1185,14 +1194,6 @@ Maybe<Expression*> Parser::ParseAssignmentExpression() {
       return ParseYieldExpression();
     case Token::NEW:
       return ParseAssignmentExpressionLhs();
-    case Token::AWAIT:
-    case Token::DELETE:
-    case Token::VOID:
-    case Token::TYPEOF:
-    case Token::OP_PLUS:
-    case Token::OP_MINUS:
-    case Token::OP_NOT:
-      return ParseConditionalExpression();
     default:
       if (peek() == Token::ARROW_FUNCTION_GLYPH) {
         return ParseArrowFunction();
@@ -1201,44 +1202,30 @@ Maybe<Expression*> Parser::ParseAssignmentExpression() {
         advance();
         auto next = peek();
         Restore();
-        if (next != Token::TERMINATE) {
+        if (next == Token::ARROW_FUNCTION_GLYPH) {
           return ParseAsyncArrowFunction();
         }
-        return ParseIdentifier();
-      } else if (cur() == Token::IDENTIFIER && peek() == Token::LEFT_PAREN) {
-        return ParseAssignmentExpressionLhs();
-      } else {
-        switch (peek()) {
-          case Token::QUESTION:
-          case Token::OP_OR:
-          case Token::OP_AND:
-          case Token::OP_XOR:
-          case Token::OP_LOGICAL_AND:
-          case Token::OP_LOGICAL_OR:
-          case Token::OP_EQ:
-          case Token::OP_STRICT_EQ:
-          case Token::OP_NOT_EQ:
-          case Token::OP_STRICT_NOT_EQ:
-          case Token::IN:
-          case Token::INSTANCEOF:
-          case Token::OP_SHIFT_LEFT:
-          case Token::OP_SHIFT_RIGHT:
-          case Token::OP_U_SHIFT_RIGHT:
-          case Token::OP_LESS_THAN:
-          case Token::OP_LESS_THAN_OR_EQ:
-          case Token::OP_GREATER_THAN:
-          case Token::OP_GREATER_THAN_OR_EQ:
-          case Token::OP_PLUS:
-          case Token::OP_MINUS:
-          case Token::OP_DIV:
-          case Token::OP_MUL:
-          case Token::OP_MOD:
-          case Token::OP_POW:
-            return ParseConditionalExpression();
-          default:
-            return ParseConditionalExpression();
-        }
       }
+      return ParseConditionalExpression() >>= [&](auto node) {
+        if (node->is_lhs_expr()) {
+          if (IsAssignmentOperator(cur())) {
+            if (node->IsStructuralLiteral() &&
+                !node->ToStructuralLiteral()->is_valid_lhs()) {
+              REPORT_SYNTAX_ERROR(Expression*, this,
+                                  "Invalid left-hand-side expression.");
+            }
+            auto op = cur();
+            advance();
+            return ParseAssignmentExpression() >>= [&](auto rhs) {
+              auto ret = NewExpressionWithPosition<BinaryExpression>(
+                  node->source_position(), op, node, rhs);
+              ret->set_end_positions(rhs->source_position());
+              return ret;
+            };
+          }
+        }
+        return Just(node);
+      };
   }
   EXIT_PARSING;
 }
@@ -1261,14 +1248,18 @@ Maybe<Expression*> Parser::ParseConditionalExpression() {
   ENTER_PARSING
   return ParseBinaryExpression() >>= [this](auto binary_expr) {
     if (cur() == Token::QUESTION) {
+      advance();
       return ParseAssignmentExpression() >>= [&, this](auto lhs) {
-        if (advance() != Token::COLON) {
+        if (cur() != Token::COLON) {
           REPORT_SYNTAX_ERROR(Expression*, this, "':' expected.");
         }
+        advance();
         return ParseAssignmentExpression() >>= [&, this](auto rhs) {
-          return NewExpression<ConditionalExpression>(
-              binary_expr->ToExpression(), lhs->ToExpression(),
-              rhs->ToExpression());
+          auto ret = NewExpressionWithPosition<ConditionalExpression>(
+              binary_expr->source_position(), binary_expr->ToExpression(),
+              lhs->ToExpression(), rhs->ToExpression());
+          ret->set_end_positions(rhs->source_position());
+          return ret;
         };
       };
     }
@@ -1498,8 +1489,8 @@ Maybe<Expression*> Parser::ParseUpdateExpression() {
           case Token::OP_INCREMENT:
           case Token::OP_DECREMENT: {
             LUX_SCOPED([&] { advance(); });
-            return Just(NewExpressionWithPosition<UnaryExpression>(
-                start, UnaryExpression::POST, cur(), n));
+            return Just(NewExpressionWithPositions<UnaryExpression>(
+                start, position(), UnaryExpression::POST, cur(), n));
           }
           default:
             return Just(n);
@@ -1512,16 +1503,22 @@ Maybe<Expression*> Parser::ParseUpdateExpression() {
 
 Maybe<Expression*> Parser::ParseLeftHandSideExpression() {
   ENTER_PARSING;
+
+  auto set_lhs = [&](auto node) {
+    node->set_lhs_expr();
+    return node;
+  };
+
   switch (cur()) {
     case Token::NEW: {
       if (peek() == Token::DOT) {
         advance();
-        return ParseCallExpression();
+        return ParseCallExpression() >>= set_lhs;
       }
-      return ParseNewExpression();
+      return ParseNewExpression() >>= set_lhs;
     }
     default:
-      return ParseCallExpression();
+      return ParseCallExpression() >>= set_lhs;
   }
   EXIT_PARSING;
 }
@@ -1808,19 +1805,41 @@ Maybe<Expression*> Parser::ParseIdentifierReference() {
 Maybe<Expression*> Parser::ParseArrayLiteral(Parser::Allowance allowance) {
   ENTER_PARSING;
   INVALIDATE(cur() == Token::LEFT_BRACKET);
-  advance();
   auto array = NewNode<StructuralLiteral>(StructuralLiteral::ARRAY);
+  array->set_source_position(position());
+  advance();
   while (!Token::OneOf(cur(), {Token::RIGHT_BRACKET, Token::INVALID})) {
     if (cur() == Token::COMMA) {
-      array->Push(&kElision);
+      auto start_pos = position();
       advance();
-    }
-    if (cur() == Token::SPREAD) {
-      ParseSpreadElement() >>= [&](auto a) { array->Push(a); };
+      switch (cur()) {
+        case Token::COMMA:
+        case Token::RIGHT_BRACKET: {
+          array->Push(NewExpressionWithPosition<Elision>(start_pos));
+        }
+        default: {
+          while (cur() == Token::COMMA) {
+            array->Push(NewExpressionWithPosition<Elision>(position()));
+            advance();
+          }
+        }
+      }
     } else {
-      ParseAssignmentExpression() >>= [&](auto a) { array->Push(a); };
+      if (cur() == Token::SPREAD) {
+        ParseSpreadElement() >>= [&](auto a) { array->Push(a); };
+      } else {
+        ParseAssignmentExpression() >>= [&](auto a) {
+          if (a->IsLiteral() && a->ToLiteral()->Is(Token::IDENTIFIER)) {
+            array->set_valid_lhs(true);
+          } else {
+            array->set_valid_lhs(false);
+          }
+          array->Push(a);
+        };
+      }
     }
   }
+  array->set_end_positions(position());
   EXPECT(Expression*, this, cur(), Token::RIGHT_BRACKET, ']');
   return Just(array->ToExpression());
   EXIT_PARSING;
@@ -1828,11 +1847,14 @@ Maybe<Expression*> Parser::ParseArrayLiteral(Parser::Allowance allowance) {
 
 Maybe<Expression*> Parser::ParseSpreadElement() {
   ENTER_PARSING;
+  auto start_pos = position();
   INVALIDATE(cur() == Token::SPREAD);
   advance();
   return ParseAssignmentExpression() >>= [&, this](auto expr) {
-    return Just(
-        NewNode<UnaryExpression>(UnaryExpression::PRE, Token::SPREAD, expr));
+    auto node = NewNodeWithPosition<UnaryExpression>(
+        start_pos, UnaryExpression::PRE, Token::SPREAD, expr);
+    node->set_end_positions(expr->source_position());
+    return node;
   };
   EXIT_PARSING;
 }
