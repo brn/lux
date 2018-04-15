@@ -233,7 +233,8 @@ struct Token {
   A(EXPRESSION, 0)            \
   A(NEW, 0x4)                 \
   A(SUPER, 0x8)               \
-  A(TEMPLATE, 0xa)
+  A(TEMPLATE, 0x10)           \
+  A(NONE, 0x20)
 
 struct Receiver {
   enum Type {
@@ -321,6 +322,10 @@ class Ast : public Zone {
     return (type() & kExpressionFlag) == kExpressionFlag;
   }
 
+  operator Maybe<Ast*>() { return Just(this); }
+
+  operator Maybe<const Ast*>() const { return Just(this); }
+
   void set_start_positions(uint32_t col, uint32_t line) {
     source_position_.set_start_col(col);
     source_position_.set_start_line_number(line);
@@ -403,6 +408,10 @@ class Expression : public Ast {
 
   void set_lhs_expr() { flags_.set(LHS_EXPR); }
 
+  operator Maybe<Expression*>() { return Just(this); }
+
+  operator Maybe<const Expression*>() const { return Just(this); }
+
  protected:
   explicit Expression(Ast::Type type) : Ast(type) {}
 
@@ -411,6 +420,7 @@ class Expression : public Ast {
 
 class Expressions : public Expression, public AstListTraits<Expression> {
  public:
+  enum Flag { ARGUMENTS };
   Expressions() : Expression(Ast::EXPRESSIONS), AstListTraits<Expression>() {}
   Expressions(std::initializer_list<Expression*> list)
       : Expression(Ast::EXPRESSIONS), AstListTraits<Expression>() {
@@ -418,6 +428,10 @@ class Expressions : public Expression, public AstListTraits<Expression> {
       Push(it);
     }
   }
+
+  void as_arguments() { flag_.set(ARGUMENTS); }
+
+  bool is_arguments() { return flag_.get(ARGUMENTS); }
 
   void ToStringSelf(const Ast* ast, std::string* indent,
                     std::stringstream* ss) const {
@@ -428,6 +442,9 @@ class Expressions : public Expression, public AstListTraits<Expression> {
     ToStringSelf(this, indent, ss);
     ToStringList(indent, ss);
   }
+
+ private:
+  Bitset<uint8_t> flag_;
 };
 
 class BinaryExpression : public Expression {
@@ -605,7 +622,8 @@ class PropertyAccessExpression : public Expression {
 
   PropertyAccessExpression() : Expression(Ast::PROPERTY_ACCESS_EXPRESSION) {}
   PropertyAccessExpression(AccessType access_type, Receiver::Type receiver_type,
-                           Expression* receiver, Expression* property)
+                           Maybe<Expression*> receiver,
+                           Maybe<Expression*> property)
       : Expression(Ast::PROPERTY_ACCESS_EXPRESSION),
         receiver_(receiver),
         property_(property) {
@@ -628,8 +646,8 @@ class PropertyAccessExpression : public Expression {
 
   bool is_super_property() const { return type_flag_.get_raw(Receiver::SUPER); }
 
-  LUX_CONST_PROPERTY(Expression*, receiver, receiver_);
-  LUX_CONST_PROPERTY(Expression*, property, property_);
+  LUX_CONST_PROPERTY(Maybe<Expression*>, receiver, receiver_);
+  LUX_CONST_PROPERTY(Maybe<Expression*>, property, property_);
 
   void ToStringSelf(const Ast* ast, std::string* indent,
                     std::stringstream* ss) const {
@@ -648,15 +666,16 @@ class PropertyAccessExpression : public Expression {
   }
   void ToStringTree(std::string* indent, std::stringstream* ss) const {
     ToStringSelf(this, indent, ss);
-    auto ni = "  " + (*indent);
-    receiver_->ToStringTree(&ni, ss);
-    property_->ToStringTree(&ni, ss);
+    auto ni1 = "  " + (*indent);
+    auto ni2 = "  " + (*indent);
+    receiver_ >>= [&](auto r) { r->ToStringTree(&ni1, ss); };
+    property_ >>= [&](auto r) { r->ToStringTree(&ni2, ss); };
   }
 
  private:
   Bitset<uint8_t> type_flag_;
-  Expression* receiver_;
-  Expression* property_;
+  Maybe<Expression*> receiver_;
+  Maybe<Expression*> property_;
 };
 
 struct Function {
@@ -780,8 +799,9 @@ class ObjectPropertyExpression : public Expression {
  public:
   ObjectPropertyExpression() : Expression(Ast::OBJECT_PROPERTY_EXPRESSION) {}
 
-  ObjectPropertyExpression(Expression* key, Expression* value,
-                           Expression* initializer = nullptr)
+  ObjectPropertyExpression(
+      Expression* key, Expression* value,
+      Maybe<Expression*> initializer = Nothing<Expression*>())
       : Expression(Ast::OBJECT_PROPERTY_EXPRESSION),
         key_(key),
         value_(value),
@@ -789,7 +809,7 @@ class ObjectPropertyExpression : public Expression {
 
   LUX_CONST_PROPERTY(Expression*, key, key_);
   LUX_CONST_PROPERTY(Expression*, value, value_);
-  LUX_CONST_PROPERTY(Expression*, initializer, initializer_);
+  LUX_CONST_PROPERTY(Maybe<Expression*>, initializer, initializer_);
 
   void ToStringSelf(const Ast* ast, std::string* indent,
                     std::stringstream* ss) const {
@@ -803,16 +823,14 @@ class ObjectPropertyExpression : public Expression {
     if (value_) {
       value_->ToStringTree(&ni, ss);
     }
-    if (initializer_) {
-      initializer_->ToStringTree(&ni, ss);
-    }
+    initializer_ >>= [&](auto i) { i->ToStringTree(&ni, ss); };
   }
 
  private:
   Expression* key_;
   Expression* value_;
-  Expression* initializer_;
-};
+  Maybe<Expression*> initializer_;
+};  // namespace lux
 
 class Elision : public Expression {
  public:
@@ -976,6 +994,11 @@ class TemplateLiteral : public Expression {
 };
 
 class Statement : public Ast {
+ public:
+  operator Maybe<Statement*>() { return Just(this); }
+
+  operator Maybe<const Statement*>() const { return Just(this); }
+
  protected:
   explicit Statement(Ast::Type type) : Ast(type) {}
 };
@@ -1600,7 +1623,16 @@ class Parser {
   template <typename T, typename... Args>
   T* NewNodeWithPosition(SourcePosition start, Args... args) {
     auto n = NewNode<T>(std::forward<Args>(args)...);
+    n->set_source_position(start);
+    return n;
+  }
+
+  template <typename T, typename... Args>
+  T* NewNodeWithPositions(SourcePosition start, SourcePosition end,
+                          Args... args) {
+    auto n = NewNode<T>(std::forward<Args>(args)...);
     n->set_start_positions(start);
+    n->set_end_positions(end);
     return n;
   }
 

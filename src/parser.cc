@@ -1561,17 +1561,17 @@ Maybe<Expression*> Parser::ParseCallExpression() {
       Restore();
     }
     default: {
-      return ParseCoverCallExpressionAndAsyncArrowHead() >>=
-             [&, this](auto expr) {
-               if (expr->IsExpressions()) {
-                 auto exprs = expr->ToExpressions();
-                 expr = NewNode<CallExpression>(Receiver::EXPRESSION,
-                                                exprs->at(0), exprs->at(1));
-               }
-               return ParsePostMemberExpression(
-                   start, expr, Receiver::EXPRESSION,
-                   Allowance(Allowance::CALL | Allowance::TEMPLATE));
-             };
+      return ParseCoverCallExpressionAndAsyncArrowHead() >>= [&,
+                                                              this](auto expr) {
+        if (expr->IsExpressions() && expr->ToExpressions()->is_arguments()) {
+          auto exprs = expr->ToExpressions();
+          expr = NewNode<CallExpression>(Receiver::EXPRESSION, exprs->at(0),
+                                         exprs->at(1));
+        }
+        return ParsePostMemberExpression(
+            start, expr, Receiver::EXPRESSION,
+            Allowance(Allowance::CALL | Allowance::TEMPLATE));
+      };
     }
   }
   EXIT_PARSING;
@@ -1603,8 +1603,8 @@ Maybe<Expression*> Parser::ParsePostMemberExpression(
           auto end = position();
           EXPECT(Expression*, this, cur(), Token::RIGHT_BRACKET, ']');
           auto expr = NewExpressionWithPosition<PropertyAccessExpression>(
-              start, PropertyAccessExpression::AccessType::ELEMENT,
-              receiver_type, current, n);
+              start, PropertyAccessExpression::ELEMENT, receiver_type,
+              Just(current), Just(n));
           expr->set_end_positions(end);
           return Just(current = expr);
         };
@@ -1614,7 +1614,8 @@ Maybe<Expression*> Parser::ParsePostMemberExpression(
         advance();
         ParseIdentifierReference() >>= [&](auto n) {
           auto expr = NewExpressionWithPosition<PropertyAccessExpression>(
-              start, PropertyAccessExpression::DOT, receiver_type, current, n);
+              start, PropertyAccessExpression::DOT, receiver_type,
+              Just(current), Just(n));
           expr->set_end_positions(n->source_position());
           current = expr;
         };
@@ -1676,7 +1677,8 @@ Maybe<Expression*> Parser::ParseMemberExpression() {
       if (peek() == Token::IDENTIFIER) {
         if (peek_value().IsAsciiEqual("target")) {
           return Just(NewExpression<PropertyAccessExpression>(
-              PropertyAccessExpression::DOT, Receiver::NEW, nullptr, nullptr));
+              PropertyAccessExpression::DOT, Receiver::NEW,
+              Nothing<Expression*>(), Nothing<Expression*>()));
         }
         REPORT_SYNTAX_ERROR(
             Expression*, this,
@@ -1861,18 +1863,33 @@ Maybe<Expression*> Parser::ParseSpreadElement() {
 
 Maybe<Expression*> Parser::ParseObjectLiteral(Parser::Allowance allowance) {
   ENTER_PARSING;
+  auto start = position();
   INVALIDATE(cur() == Token::LEFT_BRACE);
   advance();
-  auto object = NewNode<StructuralLiteral>(StructuralLiteral::OBJECT);
+  auto object =
+      NewNodeWithPosition<StructuralLiteral>(start, StructuralLiteral::OBJECT);
   if (cur() == Token::RIGHT_BRACE) {
-    return Just(object);
+    return Just(object->ToExpression());
   }
 
   while (!Token::OneOf(cur(), {Token::RIGHT_BRACE, Token::INVALID})) {
-    ParseObjectLiteralProperty(allowance) >>= [&](auto o) { object->Push(o); };
+    auto maybe_props = (ParseObjectLiteralProperty(allowance) >>= [&](auto o) {
+      object->Push(o);
+      if (cur() == Token::COMMA) {
+        advance();
+      }
+      return object->ToExpression();
+    });
+
+    if (!maybe_props) {
+      return maybe_props;
+    }
   }
 
-  return Just(object);
+  object->set_end_positions(position());
+  EXPECT(Expression*, this, cur(), Token::RIGHT_BRACE, '}');
+  return Just(object->ToExpression());
+
   EXIT_PARSING;
 }
 
@@ -1881,6 +1898,7 @@ Maybe<Expression*> Parser::ParseObjectLiteralProperty(
   ENTER_PARSING
   auto key = Nothing<Expression*>();
   bool is_computed_property_name = false;
+  auto start = position();
   if (Token::OneOf(cur(), {Token::NUMERIC_LITERAL, Token::IDENTIFIER,
                            Token::STRING_LITERAL, Token::LEFT_BRACKET})) {
     key = cur() == Token::IDENTIFIER ? ParseIdentifierReference()
@@ -1892,10 +1910,9 @@ Maybe<Expression*> Parser::ParseObjectLiteralProperty(
         REPORT_SYNTAX_ERROR(Expression*, this, "Unexpected '=' detected.");
       }
       return ParseIdentifierReference() >>= [&, this](auto key) {
-        advance();
         return ParseAssignmentExpression() >>= [&, this](auto value) {
-          return Just(
-              NewExpression<ObjectPropertyExpression>(key, nullptr, value));
+          return Just(NewExpressionWithPositions<ObjectPropertyExpression>(
+              start, value->source_position(), key, nullptr, Just(value)));
         };
       };
     } else if (Token::OneOf(cur(), {Token::COMMA, Token::RIGHT_BRACE})) {
@@ -1904,7 +1921,7 @@ Maybe<Expression*> Parser::ParseObjectLiteralProperty(
         REPORT_SYNTAX_ERROR(Expression*, this, "':' expected.");
       }
       return ParseIdentifierReference();
-    } else {
+    } else if (cur() != Token::COLON) {
       if (allowance.is_binding_pattern_allowed()) {
         REPORT_SYNTAX_ERROR(Expression*, this, "binding pattern expected.");
       }
@@ -1918,13 +1935,19 @@ Maybe<Expression*> Parser::ParseObjectLiteralProperty(
                             << ToStringCurrentToken());
   }
 
+  if (!key) {
+    REPORT_SYNTAX_ERROR(Expression*, this, "Expression expected.");
+  }
+  auto key_node = key.value();
+
   if (cur() != Token::COLON) {
-    if (!allowance.is_binding_pattern_allowed() || is_computed_property_name) {
-      REPORT_SYNTAX_ERROR(Expression*, this, "':' expected.");
+    if (key_node->IsLiteral() && key_node->ToLiteral()->Is(Token::IDENTIFIER)) {
+      return Just(NewExpressionWithPositions<ObjectPropertyExpression>(
+          start, key_node->source_position(), key_node, key_node));
     }
   }
 
-  advance();
+  EXPECT(Expression*, this, cur(), Token::COLON, ':');
   return ParseAssignmentExpression() >>= [&, this](auto value) {
     if (allowance.is_binding_pattern_allowed()) {
       if (!value->IsStructuralLiteral() && value->IsLiteral()) {
@@ -1936,9 +1959,8 @@ Maybe<Expression*> Parser::ParseObjectLiteralProperty(
       }
     }
 
-    return key >>= [&, this](auto key) {
-      return Just(NewExpression<ObjectPropertyExpression>(key, value));
-    };
+    return Just(NewExpressionWithPositions<ObjectPropertyExpression>(
+        start, value->source_position(), key_node, value));
   };
   EXIT_PARSING;
 }
@@ -2027,10 +2049,14 @@ Maybe<Expression*> Parser::ParsePropertyName() {
     case Token::NUMERIC_LITERAL:
       return ParseLiteral();
     default: {
-      EXPECT(Expression*, this, cur(), Token::RIGHT_BRACKET, '[');
+      auto start = position();
+      EXPECT(Expression*, this, cur(), Token::LEFT_BRACKET, '[');
       return ParseAssignmentExpression() >>= [&, this](auto ret) {
+        auto end = position();
         EXPECT(Expression*, this, cur(), Token::RIGHT_BRACKET, ']');
-        return Just(ret);
+        return Just(NewExpressionWithPositions<PropertyAccessExpression>(
+            start, end, PropertyAccessExpression::ELEMENT, Receiver::NONE,
+            Nothing<Expression*>(), Just(ret)));
       };
     }
   }
@@ -2140,7 +2166,8 @@ Maybe<Expression*> Parser::ParseArguments() {
   ENTER_PARSING;
   auto start = position();
   EXPECT(Expression*, this, cur(), Token::LEFT_PAREN, '(');
-  auto exprs = NewNode<Expressions>();
+  auto exprs = NewNodeWithPosition<Expressions>(start);
+  exprs->as_arguments();
   while (1) {
     if (cur() == Token::SPREAD) {
       advance();
@@ -2164,7 +2191,6 @@ Maybe<Expression*> Parser::ParseArguments() {
   }
   auto end = position();
   EXPECT(Expression*, this, cur(), Token::RIGHT_PAREN, ')');
-  exprs->set_start_positions(start);
   exprs->set_end_positions(end);
   return Just(exprs->ToExpression());
   EXIT_PARSING;
@@ -2211,8 +2237,9 @@ Maybe<Expression*> Parser::ParseArrowParameters() {
 Maybe<Expression*>
 Parser::ParseCoverParenthesizedExpressionAndArrowParameterList() {
   ENTER_PARSING;
+  auto start = position();
   EXPECT(Expression*, this, cur(), Token::LEFT_PAREN, '(');
-  auto exprs = NewNode<Expressions>();
+  auto exprs = NewNodeWithPosition<Expressions>(start);
   if (cur() == Token::RIGHT_PAREN) {
     advance();
     return Just(exprs->ToExpression());
@@ -2220,6 +2247,7 @@ Parser::ParseCoverParenthesizedExpressionAndArrowParameterList() {
 
   while (1) {
     if (cur() == Token::SPREAD) {
+      auto start = position();
       advance();
       auto e = Nothing<Expression*>();
       if (Token::OneOf(cur(), {Token::LEFT_BRACKET, Token::LEFT_BRACE})) {
@@ -2227,9 +2255,10 @@ Parser::ParseCoverParenthesizedExpressionAndArrowParameterList() {
       } else {
         e = ParseSingleNameBinding();
       }
-      e >>= [&, this](auto e) {
-        auto u =
-            NewNode<UnaryExpression>(UnaryExpression::PRE, Token::SPREAD, e);
+      e >>= [&](auto e) {
+        auto u = NewNodeWithPositions<UnaryExpression>(
+            start, e->source_position(), UnaryExpression::PRE, Token::SPREAD,
+            e);
         exprs->Push(u);
       };
     } else {
@@ -2245,7 +2274,8 @@ Parser::ParseCoverParenthesizedExpressionAndArrowParameterList() {
       }
     }
   }
-  EXPECT(Expression*, this, cur(), Token::LEFT_PAREN, ')');
+  exprs->set_end_positions(position());
+  EXPECT(Expression*, this, cur(), Token::RIGHT_PAREN, ')');
   return Just(exprs->ToExpression());
   EXIT_PARSING;
 }

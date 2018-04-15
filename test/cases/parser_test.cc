@@ -142,6 +142,12 @@ inline TestableAst Prop(const char* type, lux::SourcePosition sp,
   return Ast("PropertyAccessExpression", s.c_str(), sp, {callee, prop});
 }
 
+inline TestableAst Computed(const char* type, lux::SourcePosition sp,
+                            const TestableAst& prop) {
+  return Ast("PropertyAccessExpression", "property_access = element", sp,
+             {prop});
+}
+
 inline TestableAst Lit(const char* attr, lux::SourcePosition sp,
                        std::initializer_list<TestableAst> ast = {}) {
   return Ast("Literal", attr, sp, ast);
@@ -156,6 +162,35 @@ inline TestableAst ArrayLit(bool has_spread, lux::SourcePosition sp,
   }
   auto str = st.str();
   return Ast("StructuralLiteral", str.c_str(), sp, ast);
+}
+
+struct ObjectLitFlags {
+  bool has_accessor;
+  bool has_generator;
+  bool has_spread;
+};
+
+inline TestableAst ObjectLit(ObjectLitFlags flags, lux::SourcePosition sp,
+                             std::initializer_list<TestableAst> ast = {}) {
+  std::stringstream st;
+  st << "type = ObjectLiteral";
+
+  if (flags.has_accessor) {
+    st << " spread = true";
+  }
+  if (flags.has_generator) {
+    st << " generator = true";
+  }
+  if (flags.has_spread) {
+    st << " spread = true";
+  }
+  auto str = st.str();
+  return Ast("StructuralLiteral", str.c_str(), sp, ast);
+}
+
+inline TestableAst ObjectProps(lux::SourcePosition sp,
+                               std::initializer_list<TestableAst> ast = {}) {
+  return Ast("ObjectPropertyExpression", "", sp, ast);
 }
 
 inline TestableAst Number(const char* value, lux::SourcePosition sp,
@@ -1283,5 +1318,42 @@ TEST_F(ParserTest, ArrayAssignmentPattern) {
                       Ident("y", {end - 1, end}));
       },
       "[a,b,c] = y");
+}
+
+TEST_F(ParserTest, ObjectLiteral) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Exprs(
+            {start, end},
+            {ObjectLit({false, false, false}, {start + 1, end - 1},
+                       {ObjectProps({start + 2, start + 6},
+                                    {Ident("a", {start + 2, start + 3}),
+                                     Number("1", {start + 5, start + 6})}),
+                        ObjectProps({start + 8, start + 12},
+                                    {Ident("b", {start + 8, start + 9}),
+                                     Number("2", {start + 11, start + 12})}),
+                        ObjectProps({end - 6, end - 2},
+                                    {Ident("c", {end - 6, end - 5}),
+                                     Number("3", {end - 3, end - 2})})})});
+      },
+      "({a: 1, b: 2, c: 3})");
+}
+
+TEST_F(ParserTest, ComputedObjectLiteral) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Exprs(
+            {start, end},
+            {ObjectLit(
+                {false, false, false}, {start + 1, end - 1},
+                {ObjectProps({start + 2, start + 8},
+                             {Computed("element", {start + 2, start + 5},
+                                       Ident("a", {start + 3, start + 4})),
+                              Number("1", {start + 7, start + 8})}),
+                 ObjectProps({start + 10, start + 14},
+                             {Ident("b", {start + 10, start + 11}),
+                              Number("2", {start + 13, start + 14})})})});
+      },
+      "({[a]: 1, b: 2})");
 }
 }  // namespace
