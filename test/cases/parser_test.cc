@@ -1356,4 +1356,36 @@ TEST_F(ParserTest, ComputedObjectLiteral) {
       },
       "({[a]: 1, b: 2})");
 }
+
+TEST_F(ParserTest, OnlyKeyObjectLiteral) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Exprs(
+            {start, end},
+            {ObjectLit({false, false, false}, {start + 1, end - 1},
+                       {ObjectProps({start + 2, start + 3},
+                                    {Ident("a", {start + 2, start + 3}),
+                                     Ident("a", {start + 2, start + 3})}),
+                        ObjectProps({start + 5, start + 6},
+                                    {Ident("b", {start + 5, start + 6}),
+                                     Ident("b", {start + 5, start + 6})})})});
+      },
+      "({a, b})");
+}
+
+TEST_F(ParserTest, MethodObjectLiteral) {
+  SingleExpressionTest(
+      [&](uint32_t start, uint32_t end) {
+        return Exprs(
+            {start, end},
+            {ObjectLit({false, false, false}, {start + 1, end - 1},
+                       {ObjectProps({start + 2, start + 3},
+                                    {Ident("a", {start + 2, start + 3}),
+                                     Ident("a", {start + 2, start + 3})}),
+                        ObjectProps({start + 5, start + 6},
+                                    {Ident("b", {start + 5, start + 6}),
+                                     Ident("b", {start + 5, start + 6})})})});
+      },
+      "({a() {}, b() {}})");
+}
 }  // namespace

@@ -1901,6 +1901,10 @@ Maybe<Expression*> Parser::ParseObjectLiteralProperty(
   auto start = position();
   if (Token::OneOf(cur(), {Token::NUMERIC_LITERAL, Token::IDENTIFIER,
                            Token::STRING_LITERAL, Token::LEFT_BRACKET})) {
+    if (peek() == Token::LEFT_PAREN) {
+      return ParseMethodDefinition();
+    }
+
     key = cur() == Token::IDENTIFIER ? ParseIdentifierReference()
                                      : ParsePropertyName();
 
@@ -1916,16 +1920,9 @@ Maybe<Expression*> Parser::ParseObjectLiteralProperty(
         };
       };
     } else if (Token::OneOf(cur(), {Token::COMMA, Token::RIGHT_BRACE})) {
-      if (!allowance.is_binding_pattern_allowed() ||
-          is_computed_property_name) {
-        REPORT_SYNTAX_ERROR(Expression*, this, "':' expected.");
-      }
-      return ParseIdentifierReference();
-    } else if (cur() != Token::COLON) {
-      if (allowance.is_binding_pattern_allowed()) {
-        REPORT_SYNTAX_ERROR(Expression*, this, "binding pattern expected.");
-      }
-      return ParseMethodDefinition();
+      auto key_node = key.value();
+      return Just(NewExpressionWithPositions<ObjectPropertyExpression>(
+          start, key_node->source_position(), key_node, key_node));
     }
   } else {
     REPORT_SYNTAX_ERROR(Expression*, this,
