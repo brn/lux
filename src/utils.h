@@ -467,6 +467,18 @@ class Double {
  private:
   Value value_;
 };
+
+template <class, class Enable = void>
+struct IsIterator : std::false_type {};
+template <typename T>
+struct IsIterator<T, typename std::enable_if<
+                         std::is_base_of<std::input_iterator_tag,
+                                         typename std::iterator_traits<
+                                             T>::iterator_category>::value ||
+                         std::is_same<std::output_iterator_tag,
+                                      typename std::iterator_traits<
+                                          T>::iterator_category>::value>::type>
+    : std::true_type {};
 }  // namespace lux
 
 #endif  // SRC_UTILS_H_

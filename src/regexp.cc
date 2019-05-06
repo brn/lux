@@ -21,63 +21,78 @@
 // THE SOFTWARE.
 
 #include "./regexp.h"
+#include "./chars.h"
+#include "./maybe.h"
 #include "./objects/jsobject.h"
 #include "./unicode.h"
 
 namespace lux {
 namespace regexp {
-#define ENTER()   printf("%s\n", __FUNCTION__);
+#define ENTER()  // printf("%s\n", __FUNCTION__);
 
-#define BASE_REPORT_SYNTAX_ERROR_(parser)                               \
-  auto e = std::make_shared<lux::ErrorDescriptor>(parser->position());  \
-  (reporter_->ReportSyntaxError(e))                                     \
+#define BASE_REPORT_SYNTAX_ERROR_(parser)                              \
+  auto e = std::make_shared<lux::ErrorDescriptor>(parser->position()); \
+  (reporter_->ReportSyntaxError(e))
 
 #ifdef DEBUG
-#define REPORT_SYNTAX_ERROR(parser, message)                            \
-  JSString::Utf8String str(*source_);                                   \
-  BASE_REPORT_SYNTAX_ERROR_(parser)                                     \
-  << "Invalid regular expression: /"                                    \
-  << str.value()                                                        \
-  << "/: "                                                              \
-  << message                                                            \
-  << " ("                                                               \
-  << std::to_string(parser->position().start_line_number() + 1).c_str() \
-  << ":" << std::to_string(parser->position().start_col() + 1).c_str()  \
-  << "~" << std::to_string(parser->position().end_col() + 1).c_str()    \
-  << ')'                                                                \
-  << "\n[Debug] line:" << __LINE__                                      \
-  << ", function: " << __FUNCTION__;                                    \
-  return nullptr;
+#define __BASE_DEBUG_REPORT_SYNTAX_ERROR(parser, message)                   \
+  JSString::Utf8String str(*source_);                                       \
+  BASE_REPORT_SYNTAX_ERROR_(parser)                                         \
+      << "Invalid regular expression: /" << str.value() << "/: " << message \
+      << " ("                                                               \
+      << std::to_string(parser->position().start_line_number() + 1).c_str() \
+      << ":" << std::to_string(parser->position().start_col() + 1).c_str()  \
+      << "~" << std::to_string(parser->position().end_col() + 1).c_str()    \
+      << ')' << "\n[Debug] line:" << __LINE__                               \
+      << ", function: " << __FUNCTION__;
+#define REPORT_SYNTAX_ERROR(parser, message)        \
+  __BASE_DEBUG_REPORT_SYNTAX_ERROR(parser, message) \
+  return Nothing<Ast*>();
+#define REPORT_SYNTAX_ERROR_NO_RETURN(parser, message) \
+  __BASE_DEBUG_REPORT_SYNTAX_ERROR(parser, message)
+#define REPORT_SYNTAX_ERROR_WITH_RETURN(parser, message, retVal) \
+  __BASE_DEBUG_REPORT_SYNTAX_ERROR(parser, message)              \
+  return retVal;
 #else
-#define REPORT_SYNTAX_ERROR(parser, message)    \
-  BASE_REPORT_SYNTAX_ERROR_(parser) << message  \
-  return nullptr;
+#define REPORT_SYNTAX_ERROR(parser, message) \
+  BASE_REPORT_SYNTAX_ERROR_(parser) << message return nullptr;
+#define REPORT_SYNTAX_ERROR_WITH_RETURN(parser, message, retVal) \
+  BASE_REPORT_SYNTAX_ERROR_(parser) << message return retVal;
+#define REPORT_SYNTAX_ERROR_NO_RETURN(parser, message) \
+  __BASE_DEBUG_REPORT_SYNTAX_ERROR(parser, message)
 #endif
 
-#define EXPECT_NOT_ADVANCE(parser, n, expect)         \
-  if (n != expect) {                                  \
-    REPORT_SYNTAX_ERROR(                              \
-        parser, "'" << expect << "' expected");       \
+#define EXPECT_NOT_ADVANCE(parser, n, expect)                   \
+  if (n != expect) {                                            \
+    REPORT_SYNTAX_ERROR(parser, "'" << expect << "' expected"); \
   }
 
-#define EXPECT(parser, n, expect)               \
-  EXPECT_NOT_ADVANCE(parser, n, expect)         \
+#define EXPECT_NOT_ADVANCE_WITH_RETURN(parser, n, expect, retVal)          \
+  if (n != expect) {                                                       \
+    REPORT_SYNTAX_ERROR_WITH_RETURN(parser, "'" << expect << "' expected", \
+                                    retVal);                               \
+  }
+
+#define EXPECT(parser, n, expect)       \
+  EXPECT_NOT_ADVANCE(parser, n, expect) \
+  advance();
+
+#define EXPECT_WITH_RETURN(parser, n, expect, retVal)       \
+  EXPECT_NOT_ADVANCE_WITH_RETURN(parser, n, expect, retVal) \
   advance();
 
 const char* Ast::kNodeTypeStringList[] = {
 #define AST_STRING_DEF(V, v) #V,
-  REGEXP_AST_TYPES(AST_STRING_DEF)
+    REGEXP_AST_TYPES(AST_STRING_DEF)
 #undef AST_STRING_DEF
 };
 
-#define AST_VISIT(Name)                           \
-  void Visitor::Visit##Name(Name* node)
+#define AST_VISIT(Name) void Visitor::Visit##Name(Name* node)
 
 #define __ builder()->
 using Label = BytecodeLabel;
 
-Visitor::Visitor(uint16_t captured_count,
-                 BytecodeBuilder* bytecode_builder,
+Visitor::Visitor(uint16_t captured_count, BytecodeBuilder* bytecode_builder,
                  ZoneAllocator* zone_allocator)
     : captured_count_(captured_count),
       bytecode_builder_(bytecode_builder),
@@ -108,7 +123,7 @@ AST_VISIT(Root) {
 
 AST_VISIT(Conjunction) {
   __ RegexComment("Conjunction");
-  for (auto &a : *node) {
+  for (auto& a : *node) {
     a->Visit(this);
   }
 }
@@ -120,7 +135,7 @@ AST_VISIT(Group) {
     __ RegexStartCapture(node->captured_index());
   }
 
-  for (auto &a : *node) {
+  for (auto& a : *node) {
     a->Visit(this);
   }
 
@@ -139,9 +154,7 @@ AST_VISIT(CharClass) {
   __ RegexBranch(&ok, &pop);
 
   __ Bind(&pop);
-  {
-    __ RegexPopThread();
-  }
+  { __ RegexPopThread(); }
 
   __ Bind(&ok);
 }
@@ -149,18 +162,22 @@ AST_VISIT(CharClass) {
 AST_VISIT(Alternate) {
   __ RegexComment("Alternate");
 
-  Label next, exit;
+  Label next, exit, pop;
+
+  __ RegexPushThread(&next);
+  jump_point_ = Just(&pop);
   node->left()->Visit(this);
-  __ RegexBranch(&exit, &next);
+  __ RegexBranch(&exit, &pop);
+
+  __ Bind(&pop);
+  { __ RegexPopThread(); }
 
   __ Bind(&next);
   {
     Label pop;
+    jump_point_ = Just(&exit);
     node->right()->Visit(this);
-    __ RegexBranch(&exit, &pop);
-
-    __ Bind(&pop);
-    __ RegexPopThread();
+    __ RegexJump(&exit);
   }
 
   __ Bind(&exit);
@@ -180,26 +197,27 @@ AST_VISIT(Repeat) {
   __ RegexCheckPosition(&next);
   if (node->type() == Repeat::GREEDY) {
     __ RegexPushThread(&next);
+    jump_point_ = Just(&pop);
     node->target()->Visit(this);
     __ RegexJumpIfMatched(&loop);
   } else {
     INVALIDATE(node->type() == Repeat::SHORTEST);
     Label push;
+    jump_point_ = Just(&pop);
     node->target()->Visit(this);
     __ Branch(&push, &next);
     __ Bind(&push);
-    {
-      __ RegexPushThread(&loop);
-    }
+    { __ RegexPushThread(&loop); }
   }
+
+  __ Bind(&pop);
+  __ RegexPopThread();
+
   __ Bind(&next);
   if (count == 1) {
     Label ok;
     __ RegexJumpIfMatchedCountLT(count, &pop);
     __ RegexJump(&ok);
-
-    __ Bind(&pop);
-    __ RegexPopThread();
 
     __ Bind(&ok);
   }
@@ -222,8 +240,12 @@ AST_VISIT(RepeatRange) {
     __ RegexJumpIfMatchedCountEqual(max_count, &next);
     __ RegexCheckPosition(&next);
     __ RegexPushThread(&next);
+    jump_point_ = Just(&pop);
     node->target()->Visit(this);
     __ RegexJumpIfMatched(&loop);
+
+    __ Bind(&pop);
+    __ RegexPopThread();
 
     __ Bind(&next);
     {
@@ -232,9 +254,6 @@ AST_VISIT(RepeatRange) {
         __ RegexJumpIfMatchedCountLT(least_count, &pop);
         __ RegexResetMatchedCount();
         __ RegexJump(&ok);
-
-        __ Bind(&pop);
-        __ RegexPopThread();
 
         __ Bind(&ok);
       }
@@ -259,12 +278,7 @@ AST_VISIT(CharSequence) {
   Label ok, pop;
 
   __ RegexEvery(node->value());
-  __ RegexBranch(&ok, &pop);
-
-  __ Bind(&pop);
-  {
-    __ RegexPopThread();
-  }
+  jump_point_ >>= [&](auto point) { __ RegexBranch(&ok, point); };
 
   __ Bind(&ok);
 }
@@ -293,10 +307,8 @@ AST_VISIT(Any) {
       __ Bind(&loop);
       __ RegexCheckPosition(&next);
       __ RegexMatchAny();
-      __ RegexPushThread(&loop);
       __ Bind(&next);
-    }
-      break;
+    } break;
     case Any::EAT_GREEDY_L1: {
       fall_through = true;
       __ RegexComment("Any-Greedy-L1");
@@ -311,12 +323,10 @@ AST_VISIT(Any) {
 
       __ Bind(&loop);
       __ RegexCheckPosition(&next);
-      __ RegexPushThread(&next);
       __ RegexMatchAny();
       __ RegexJump(&loop);
       __ Bind(&next);
-    }
-      break;
+    } break;
     default:
       UNREACHABLE();
   }
@@ -334,10 +344,13 @@ void Visitor::EmitCompare(u16 code) {
 }
 
 void Visitor::EnableSearchIf() {
-  if (first_op() && is_retryable()) {
+  if (is_retryable()) {
     __ RegexEnableSearch();
-    set_first_op();
   }
+}
+
+bool IsRepeatChar(u16 ch) {
+  return ch == '*' || ch == '+' || ch == '{' || ch == '?';
 }
 
 void Parser::Parse() {
@@ -359,39 +372,56 @@ void Parser::Parse() {
 
 Ast* Parser::ParseRegExp() {
   ENTER();
-  auto cj = new(zone()) Conjunction();
-  while (has_more() && cur() != '$') {
-    auto a = ParseRoot();
-    if (!a) {
-      return cj;
-    }
-    cj->Push(a);
+  auto cj = new (zone()) Conjunction();
+  while (has_more() && cur() != '$' && !has_pending_error()) {
+    ParseDisjunction() >>= [&](Ast* a) { cj->Push(a); };
   }
   return cj;
 }
 
-Ast* Parser::ParseRoot() {
+Maybe<Ast*> Parser::ParseDisjunction() {
   ENTER();
   update_start_pos();
+  auto atom = ParseAtom() >>= [&](Ast* node) {
+    if (IsRepeatChar(cur().code())) {
+      return ParseRepeat(node) >>=
+             [&](Ast* repeat) { return ParseRepeat(repeat); };
+    }
+
+    return Just(node);
+  };
+
+  return atom >>= [&](Ast* node) {
+    while (cur() == '|' && !has_pending_error()) {
+      advance();
+      ParseDisjunction() >>=
+          [&](Ast* n) { node = new (zone()) Alternate(node, n); };
+    }
+
+    return node;
+  };
+}  // namespace regexp
+
+Maybe<Ast*> Parser::ParseAtom() {
   switch (cur()) {
     case '(':
       return ParseGroup();
     case '[':
       return ParseCharClass();
     case '.':
-      advance();
-      return ParseSelection(new(zone()) Any());
+      return Just(new (zone()) Any());
     default:
       return ParseChar();
   }
 }
 
-Ast* Parser::ParseGroup() {
+Maybe<Ast*> Parser::ParseGroup() {
   ENTER();
   update_start_pos();
   INVALIDATE(cur() == '(');
   advance();
   Group::Type t = Group::CAPTURE;
+  auto group_specifier_names = Nothing<JSString*>();
 
   if (cur() == '?') {
     advance();
@@ -408,25 +438,100 @@ Ast* Parser::ParseGroup() {
         advance();
         t = Group::NEGATIVE_LOOKAHEAD;
         break;
+      case '<':
+        group_specifier_names = ParseGroupSpecifierName();
+        if (!group_specifier_names) {
+          return Nothing<Ast*>();
+        }
+        update_start_pos();
       default:
         break;  // TODO(Taketoshi Aono): Report Error.
     }
   }
 
-  auto ret = new(zone()) Group(t, capture_count());
+  auto ret = new (zone())
+      Group(t, capture_count(),
+            group_specifier_names ? group_specifier_names.value() : nullptr);
   if (t != Group::UNCAPTURE) {
     Capture();
   }
-  while (cur() != ')' && cur() != '$') {
-    auto p = ParseRoot();
-    ret->Push(p);
+  while (has_more() && cur() != ')' && cur() != '$' && !has_pending_error()) {
+    ParseDisjunction() >>= [&](Ast* n) { ret->Push(n); };
   }
   update_start_pos();
   EXPECT(this, cur(), ')');
-  return ParseSelection(ret);
+  return Just(ret);
 }
 
-Ast* Parser::ParseCharClass() {
+Utf16CodePoint Parser::DecodeHexEscape(bool* ok, int len) {
+  auto unicode_hex_start = cur();
+  u32 ret = 0;
+  if (unicode_hex_start == '{') {
+    advance();
+    while (cur() != '}' && cur() != Unicode::InvalidCodePoint()) {
+      ret = ret * 16 + Chars::ToHexValue(cur());
+      advance();
+    }
+    if (cur() != '}') {
+      REPORT_SYNTAX_ERROR_NO_RETURN(this, "'}' expected.");
+    } else {
+      advance();
+    }
+  } else {
+    for (int i = 0; i < len; i++) {
+      if (Chars::IsHexDigit(cur())) {
+        ret = ret * 16 + Chars::ToHexValue(cur());
+      } else {
+        *ok = false;
+        return Utf16CodePoint(0);
+      }
+      advance();
+    }
+  }
+
+  return Utf16CodePoint(ret);
+}
+
+Maybe<JSString*> Parser::ParseGroupSpecifierName() {
+  EXPECT_WITH_RETURN(this, cur(), '<', Nothing<JSString*>());
+  if (!Chars::IsIdentifierStart(cur())) {
+    REPORT_SYNTAX_ERROR_WITH_RETURN(this, "Invalid Group specifier name found.",
+                                    Nothing<JSString*>());
+  }
+  std::vector<Utf16CodePoint> buf;
+  auto value = cur();
+  while (has_more() && Chars::IsIdentifierPart(cur(), false) && value != '>') {
+    value = cur();
+    if (value == '\\') {
+      std::vector<Utf16CodePoint> unicode_identifier;
+      advance();
+      auto unicode_keyword = value;
+      if (unicode_keyword == 'u') {
+        advance();
+        bool ok = true;
+        value = DecodeHexEscape(&ok);
+        if (!ok) {
+          REPORT_SYNTAX_ERROR_WITH_RETURN(this, "Invalid Unicode sequence.",
+                                          Nothing<JSString*>());
+        }
+      }
+    } else {
+      advance();
+    }
+    buf.push_back(value);
+  }
+
+  if (cur() == '>') {
+    advance();
+  } else {
+    REPORT_SYNTAX_ERROR_WITH_RETURN(this, "'>' expected.",
+                                    Nothing<JSString*>());
+  }
+
+  return Just(*JSString::New(isolate_, buf.data(), buf.size()));
+}
+
+Maybe<Ast*> Parser::ParseCharClass() {
   ENTER();
   update_start_pos();
   INVALIDATE(cur() == '[');
@@ -455,27 +560,20 @@ Ast* Parser::ParseCharClass() {
     advance();
   }
   Handle<JSString> js_str = JSString::New(isolate_, v.data(), v.size());
-  auto cc = new(zone()) CharClass(exclude, *js_str);
+  auto cc = new (zone()) CharClass(exclude, *js_str);
   update_start_pos();
   if (!success) {
     REPORT_SYNTAX_ERROR(this, "] expected.");
   }
 
-  return ParseSelection(cc);
+  return Just(cc);
 }
 
-bool IsRepeatChar(u16 ch) {
-  return ch == '*'
-    || ch == '+'
-    || ch == '{';
-}
-
-Ast* Parser::ParseChar(bool allow_selection) {
+Maybe<Ast*> Parser::ParseChar(bool allow_selection) {
   ENTER();
   bool escaped = false;
   std::vector<Utf16CodePoint> buf;
-  while (has_more()
-         && (!IsSpecialChar(cur()) || escaped)) {
+  while (has_more() && (!IsSpecialChar(cur()) || escaped)) {
     if (cur() == '\\') {
       escaped = !escaped;
     } else {
@@ -487,87 +585,100 @@ Ast* Parser::ParseChar(bool allow_selection) {
 
   if (buf.size() == 0 && IsRepeatChar(cur().code())) {
     advance();
+    update_start_pos();
     REPORT_SYNTAX_ERROR(this, "Nothing to repeat.");
   }
 
-  Ast* node = nullptr;
   if (buf.size() == 1) {
-    node = new(zone()) Char(buf.back());
-  } else {
-    auto str = JSString::New(isolate_, buf.data(), buf.size());
-    node = new(zone()) CharSequence(*str);
+    return Just(new (zone()) Char(buf.back()));
   }
-
-  return allow_selection? ParseSelection(node): node;
+  auto str = JSString::New(isolate_, buf.data(), buf.size());
+  return Just(new (zone()) CharSequence(*str));
 }
 
-Ast* Parser::ParseSelection(Ast* node) {
+Maybe<Ast*> Parser::ParseRepeat(Ast* node) {
   ENTER();
   update_start_pos();
-  while (has_more()) {
-    switch (cur()) {
-      case '?': {
-        advance();
-        node = new(zone()) RepeatRange(0, 1, node);
-        break;
-      }
-      case '{': {
-        node = ParseRangeRepeat(node);
-        break;
-      }
-      case '|': {
-        advance();
-        auto n = ParseChar();
-        node = new(zone()) Alternate(node, n);
-        break;
-      }
-      case '*': {
-        advance();
-        if (node->IsAny()) {
-          if (cur() == '?') {
-            advance();
-            node = new(zone()) Any(Any::EAT_MINIMUM);
-            break;
-          }
-          node = new(zone()) Any(Any::EAT_GREEDY);
-          break;
-        }
 
-        auto type = Repeat::GREEDY;
-        if (cur() == '?') {
-          advance();
-          type = Repeat::SHORTEST;
+  switch (cur()) {
+    case '?': {
+      if (node->IsRepeat()) {
+        node->UncheckedCastToRepeat()->set_type(Repeat::Type::SHORTEST);
+      } else if (node->IsAny()) {
+        auto any = node->UncheckedCastToAny();
+        if (any->Is(Any::Type::EAT_GREEDY)) {
+          any->set_type(Any::Type::EAT_MINIMUM);
+        } else {
+          any->set_type(Any::Type::EAT_MINIMUM_L1);
         }
-        node = new(zone()) Repeat(type, 0, node);
-        break;
       }
-      case '+': {
-        advance();
-        if (node->IsAny()) {
-          if (cur() == '?') {
-            advance();
-            node = new(zone()) Any(Any::EAT_MINIMUM_L1);
-            break;
-          }
-          node = new(zone()) Any(Any::EAT_GREEDY_L1);
-          break;
-        }
-
-        auto type = Repeat::GREEDY;
-        if (cur() == '?') {
-          advance();
-          type = Repeat::SHORTEST;
-        }
-        node = new(zone()) Repeat(type, 1, node);
-        break;
-      }
-      default:
-        return node;
+      advance();
+      return SplitCharSequenceIf(node, [&](Ast* c) {
+        return Just(new (zone()) RepeatRange(0, 1, c));
+      });
     }
-    if (!node) { return node; }
+    case '{': {
+      if (IsRepeat(node)) {
+        advance();
+        update_start_pos();
+        REPORT_SYNTAX_ERROR(this, "Nothing to repeat");
+      }
+      return SplitCharSequenceIf(node,
+                                 [&](Ast* c) { return ParseRangeRepeat(c); });
+    }
+    case '*': {
+      advance();
+      if (IsRepeat(node)) {
+        update_start_pos();
+        REPORT_SYNTAX_ERROR(this, "Nothing to repeat");
+      }
+      if (node->IsAny()) {
+        return Just(new (zone()) Any(Any::EAT_GREEDY));
+      }
+      return SplitCharSequenceIf(node, [&](Ast* c) -> Maybe<Ast*> {
+        return Just(new (zone()) Repeat(Repeat::GREEDY, 0, c));
+      });
+    }
+    case '+': {
+      advance();
+      if (IsRepeat(node)) {
+        update_start_pos();
+        REPORT_SYNTAX_ERROR(this, "Nothing to repeat");
+      }
+      if (node->IsAny()) {
+        return Just(new (zone()) Any(Any::EAT_GREEDY_L1));
+      }
+      return SplitCharSequenceIf(node, [&](Ast* a) -> Maybe<Ast*> {
+        return Just(new (zone()) Repeat(Repeat::GREEDY, 1, a));
+      });
+    }
+    default:
+      return Just(node);
   }
 
-  return node;
+  return Just(node);
+}
+
+template <typename T>
+Maybe<Ast*> Parser::SplitCharSequenceIf(Ast* node, T factory) {
+  if (!node->IsCharSequence()) {
+    return factory(node);
+  }
+  auto char_sequence = node->UncheckedCastToCharSequence();
+  auto value = char_sequence->value();
+  auto last_char = value->Slice(isolate_, value->length() - 1, value->length());
+  auto conjunction = new (zone()) Conjunction();
+  auto start = value->Slice(isolate_, 0, value->length() - 1);
+  auto char_item = new (zone()) Char(last_char->at(0));
+  if (start->length() == 1) {
+    conjunction->Push(new (zone()) Char(start->at(0)));
+  } else {
+    conjunction->Push(new (zone()) CharSequence(*start));
+  }
+  return factory(char_item) >>= [&](Ast* ast) {
+    conjunction->Push(ast);
+    return Just(conjunction);
+  };
 }
 
 Utf16String::ParseIntResult Parser::ToInt() {
@@ -582,7 +693,7 @@ Utf16String::ParseIntResult Parser::ToInt() {
   return Utf16String::ParseIntResult::Failure();
 }
 
-Ast* Parser::ParseRangeRepeat(Ast* node) {
+Maybe<Ast*> Parser::ParseRangeRepeat(Ast* node) {
   ENTER()
   update_start_pos();
   INVALIDATE(cur() == '{');
@@ -590,10 +701,7 @@ Ast* Parser::ParseRangeRepeat(Ast* node) {
   uint32_t start = 0;
   uint32_t end = 0;
 
-  while (cur() == ' ') {
-    update_start_pos();
-    advance();
-  }
+  SkipWhiteSpace();
 
   auto ret = ToInt();
   if (ret.IsNaN()) {
@@ -601,24 +709,26 @@ Ast* Parser::ParseRangeRepeat(Ast* node) {
   }
   start = ret.value();
 
-  while (cur() == ' ') {
-    update_start_pos();
-    advance();
-  }
+  SkipWhiteSpace();
 
   bool has_end_range = false;
   if (cur() == ',') {
     update_start_pos();
     advance();
+    SkipWhiteSpace();
+    if (cur() == '}') {
+      advance();
+      update_start_pos();
+      return Just(new (zone()) Repeat(
+          cur() == '?' ? Repeat::Type::SHORTEST : Repeat::Type::GREEDY, start,
+          node));
+    }
     ret = ToInt();
     if (ret.IsNaN()) {
       REPORT_SYNTAX_ERROR(this, "number expected.");
     }
     end = ret.value();
-    while (cur() == ' ') {
-      update_start_pos();
-      advance();
-    }
+    SkipWhiteSpace();
     has_end_range = true;
   }
 
@@ -628,25 +738,20 @@ Ast* Parser::ParseRangeRepeat(Ast* node) {
   if (!has_end_range) {
     end = start;
   }
+  return Just(new (zone()) RepeatRange(start, end, node));
+}
 
-  return new(zone()) RepeatRange(start, end, node);
+void Parser::SkipWhiteSpace() {
+  while (Chars::IsWhiteSpace(cur())) {
+    advance();
+    update_start_pos();
+  }
 }
 
 bool Parser::IsSpecialChar(Utf16CodePoint cp) const {
-  return cp == '^'
-    || cp == '$'
-    || cp == '['
-    || cp == ']'
-    || cp == '{'
-    || cp == '}'
-    || cp == '*'
-    || cp == '+'
-    || cp == '{'
-    || cp == '.'
-    || cp == '?'
-    || cp == '|'
-    || cp == '('
-    || cp == ')';
+  return cp == '^' || cp == '$' || cp == '[' || cp == ']' || cp == '{' ||
+         cp == '}' || cp == '*' || cp == '+' || cp == '{' || cp == '.' ||
+         cp == '?' || cp == '|' || cp == '(' || cp == ')';
 }
 
 Handle<JSRegExp> Compiler::Compile(const char* source, uint8_t flag) {
@@ -656,8 +761,7 @@ Handle<JSRegExp> Compiler::Compile(const char* source, uint8_t flag) {
   parser.Parse();
   ZoneAllocator zone_allocator;
   BytecodeBuilder bytecode_builder(isolate_, &zone_allocator);
-  Visitor visitor(parser.capture_count(),
-                  &bytecode_builder, &zone_allocator);
+  Visitor visitor(parser.capture_count(), &bytecode_builder, &zone_allocator);
   parser.node()->Visit(&visitor);
   auto executable = bytecode_builder.flush();
   return JSRegExp::New(isolate_, *scope.Return(executable), flag);

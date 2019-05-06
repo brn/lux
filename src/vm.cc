@@ -33,44 +33,38 @@ using VM = VirtualMachine;
 #define VM_OP(Name, ...) exec->Name(__VA_ARGS__)
 
 #ifdef DEBUG
-#define COLLECT_EXECUTION_LOG(pos, bc) \
+#define COLLECT_EXECUTION_LOG(pos, bc)                \
   CollectExecutionLog(pos, static_cast<Bytecode>(bc))
 #else
 #define COLLECT_EXECUTION_LOG(pos, bc)
 #endif
 
 
-#define HANDLER(Name)                                   \
-  struct Name##BytecodeHandler {                        \
-    inline void Execute(                                \
-        Isolate* isolate,                               \
-        VM::Executor* exec,                             \
-        Bytecode bc,                                    \
-        BytecodeFetcher* fetcher,                       \
-        BytecodeConstantArray* constant);               \
-  };                                                    \
-  void Name##BytecodeHandler::Execute(                  \
-      Isolate* isolate,                                 \
-      VM::Executor* exec,                               \
-      Bytecode bytecode,                                \
-      BytecodeFetcher* fetcher,                         \
+#define HANDLER(Name)                           \
+  struct Name##BytecodeHandler {                \
+    inline void Execute(                        \
+        Isolate* isolate,                       \
+        VM::Executor* exec,                     \
+        Bytecode bc,                            \
+        BytecodeFetcher* fetcher,               \
+        BytecodeConstantArray* constant);       \
+  };                                            \
+  void Name##BytecodeHandler::Execute(          \
+      Isolate* isolate,                         \
+      VM::Executor* exec,                       \
+      Bytecode bytecode,                        \
+      BytecodeFetcher* fetcher,                 \
       BytecodeConstantArray* constant)
 
-#define REGEX_HANDLER(Name)                     \
-    struct Name##BytecodeHandler {              \
-      LUX_INLINE void Execute(                  \
-          Isolate* isolate,                     \
-          VM::RegexExecutor* exec,              \
-          Bytecode bc,                          \
-          BytecodeFetcher* fetcher,             \
-          BytecodeConstantArray* constant);     \
-    };                                          \
-    void Name##BytecodeHandler::Execute(        \
-        Isolate* isolate,                       \
-        VM::RegexExecutor* exec,                \
-        Bytecode bytecode,                      \
-        BytecodeFetcher* fetcher,               \
-        BytecodeConstantArray* constant)
+#define REGEX_HANDLER(Name)                                            \
+  struct Name##BytecodeHandler {                                       \
+    LUX_INLINE void Execute(Isolate* isolate, VM::RegexExecutor* exec, \
+                            Bytecode bc, BytecodeFetcher* fetcher,     \
+                            BytecodeConstantArray* constant);          \
+  };                                                                   \
+  void Name##BytecodeHandler::Execute(                                 \
+      Isolate* isolate, VM::RegexExecutor* exec, Bytecode bytecode,    \
+      BytecodeFetcher* fetcher, BytecodeConstantArray* constant)
 
 REGEX_HANDLER(RegexStartCapture) {
   auto index = fetcher->FetchNextDoubleOperand();
@@ -184,33 +178,20 @@ REGEX_HANDLER(RegexSome) {
       reinterpret_cast<Object*>(fetcher->FetchNextWordOperand()));
   INVALIDATE(chars->shape()->IsJSString());
 
-  do {
-    auto p = exec->current_thread()->position();
-    auto subject = exec->input();
-    if (subject->length() > p) {
-      auto code = subject->at(p);
-      for (auto &ch : *chars) {
-        if (ch == code) {
-          exec->current_thread()->Matched();
-          exec->Advance();
-          return exec->store_flag(Smi::FromInt(1));
-        }
+  auto p = exec->current_thread()->position();
+  auto subject = exec->input();
+  if (subject->length() > p) {
+    auto code = subject->at(p);
+    for (auto &ch : *chars) {
+      if (ch == code) {
+        exec->current_thread()->Matched();
+        exec->Advance();
+        return exec->store_flag(Smi::FromInt(1));
       }
-
-      if (exec->is_search_enabled()) {
-        exec->current_thread()->Advance();
-        exec->ResetCurrentCapturedStartPosition();
-        continue;
-      }
-
-      return exec->store_flag(Smi::FromInt(0));
     }
 
-    return exec->store_flag(Smi::FromInt(1));
-  } while (exec->is_advanceable()
-           && exec->is_search_enabled());
-
-  exec->store_flag(Smi::FromInt(0));
+    return exec->store_flag(Smi::FromInt(0));
+  }
 }
 
 REGEX_HANDLER(RegexEvery) {
@@ -220,41 +201,28 @@ REGEX_HANDLER(RegexEvery) {
       reinterpret_cast<Object*>(fetcher->FetchNextWordOperand()));
   INVALIDATE(chars->shape()->IsJSString());
   auto subject = exec->input();
-  auto subject_length = (subject->length() - 1);
+  auto subject_length = subject->length();
 
   int matched = 0;
-  do {
-    auto p = exec->current_thread()->position();
-    for (auto &ch : *chars) {
-      if (subject_length < p) {
-        return exec->store_flag(Smi::FromInt(0));
-      }
-      auto code = subject->at(p);
-      if (ch == code) {
-        matched++;
-        exec->Advance();
-        p++;
-      } else {
-        if (exec->is_search_enabled()) {
-          exec->ResetCurrentCapturedStartPosition();
-          if (matched == 0) {
-            exec->Advance();
-          } else {
-            matched = 0;
-          }
-          goto NEXT;
-        }
-        exec->current_thread()->set_matched_count(matched);
-        return exec->store_flag(Smi::FromInt(0));
-      }
+  auto p = exec->current_thread()->position();
+  for (auto &ch : *chars) {
+    if (subject_length == p) {
+      return exec->store_flag(Smi::FromInt(0));
     }
-    goto RET;
- NEXT:
-    USE(0);
-  } while (exec->is_advanceable()
-          && exec->is_search_enabled());
+    auto code = subject->at(p);
+    if (ch == code) {
+      if (matched == 0 && exec->current_captured()) {
+        exec->current_captured()->set_start(p);
+      }
+      matched++;
+      exec->Advance();
+      p++;
+    } else {
+      exec->current_thread()->set_matched_count(matched);
+      return exec->store_flag(Smi::FromInt(0));
+    }
+  }
 
-RET:
   exec->store_flag(Smi::FromInt(1));
 }
 
@@ -277,6 +245,16 @@ REGEX_HANDLER(RegexPopThread) {
   auto r = exec->PopThread();
   if (!r) {
     fetcher->UpdatePCToRegexFailed();
+  }
+}
+
+REGEX_HANDLER(RegexPopThreadWithPC) {
+  auto pc = fetcher->FetchNextWideOperand();
+  auto r = exec->PopThread();
+  if (!r) {
+    fetcher->UpdatePCToRegexFailed();
+  } else {
+    exec->current_thread()->set_pc(pc);
   }
 }
 
@@ -551,13 +529,13 @@ Object* VirtualMachine::Execute(BytecodeExecutable* bytecode_executable,
 }
 
 void VirtualMachine::Executor::Execute() {
-#define VM_STATIC_HANDLER(Name, Layout, size, n, ...)        \
+#define VM_STATIC_HANDLER(Name, Layout, size, n, ...)   \
   static Name##BytecodeHandler Name##_bytecode_handler;
   BYTECODE_LIST_WITHOUT_RETURN(VM_STATIC_HANDLER)
 #undef VM_STATIC_HANDLER
 
-  static const std::array<
-    void*,
+    static const std::array<
+      void*,
     static_cast<uint8_t>(Bytecode::kExit)
     - static_cast<uint8_t>(Bytecode::kRegexMatched) + 1> kDispatchTable = {{
 #define VM_JMP_TABLES(Name, Layout, size, n, ...) &&Label_##Name,
@@ -569,25 +547,25 @@ void VirtualMachine::Executor::Execute() {
 
   auto bc = fetcher_->FetchBytecodeAsInt();
   goto *kDispatchTable[bc];
-#define VM_EXECUTE(Name, Layout, size, n, ...)        \
-  Label_##Name: {                                     \
-    Name##_bytecode_handler.Execute(                  \
-        isolate_,                                     \
-        this,                                         \
-        static_cast<Bytecode>(bc),                    \
-        fetcher_.Get(),                               \
-        constant_pool_);                              \
-    auto next = fetcher_->FetchBytecodeAsInt();       \
-    goto *kDispatchTable[next];                       \
+#define VM_EXECUTE(Name, Layout, size, n, ...)  \
+  Label_##Name: {                               \
+    Name##_bytecode_handler.Execute(            \
+        isolate_,                               \
+        this,                                   \
+        static_cast<Bytecode>(bc),              \
+        fetcher_.Get(),                         \
+        constant_pool_);                        \
+    auto next = fetcher_->FetchBytecodeAsInt(); \
+    goto *kDispatchTable[next];                 \
   }
   BYTECODE_LIST_WITHOUT_RETURN(VM_EXECUTE)
 #undef VM_EXECUTE
-  Label_Return: {
+    Label_Return: {
     auto ret_val = fetcher_->FetchNextShortOperand();
     return_value_ = load_register_value_at(ret_val);
     //  DO NOTHING
   }
-  Label_Exit: {
+Label_Exit: {
     return;
     //  DO NOTHING
   }
@@ -602,13 +580,15 @@ JSString* VirtualMachine::RegexExecutor::SliceMatchedInput(uint32_t start) {
 }
 
 void VirtualMachine::RegexExecutor::FixInterCaptured() {
-  if (is_global()) {
+  if (!is_global()) {
     matched_words_.push_back(
         SliceMatchedInput(current_thread()->start_position()));
   } else {
     for (auto &c : captured_stack_) {
-      auto str = input_->Slice(isolate_, c->start(), c->end());
-      matched_words_.push_back(*str);
+      if (c->IsCaptured()) {
+        auto str = input_->Slice(isolate_, c->start(), c->end());
+        matched_words_.push_back(*str);
+      }
     }
   }
 }
@@ -620,8 +600,10 @@ Handle<JSArray> VirtualMachine::RegexExecutor::FixCaptured() {
   }
   if (matched_words_.size() == 0) {
     for (auto &c : captured_stack_) {
-      auto str = input_->Slice(isolate_, c->start(), c->end());
-      arr->Push(isolate_, *str);
+      if (c->IsCaptured()) {
+        auto str = input_->Slice(isolate_, c->start(), c->end());
+        arr->Push(isolate_, *str);
+      }
     }
   } else {
     for (auto &str : matched_words_) {
@@ -657,38 +639,41 @@ Object* VirtualMachine::ExecuteRegex(BytecodeExecutable* executable,
     : exec.captured_array();
 }
 
-bool VirtualMachine::RegexExecutor::PrepareNextMatch() {
-  auto is_advanceable
-    = input_->length() > (current_thread()->position() - 1);
-  if (is_global() && is_advanceable) {
-    if (load_flag()->value() && collect_matched_word()) {
-      FixInterCaptured();
+bool VirtualMachine::RegexExecutor::PrepareNextMatch(bool round_matched) {
+  if (is_global() && load_flag()->value() && collect_matched_word()) {
+    FixInterCaptured();
+  }
+
+  auto has_more = is_advanceable();
+  if (has_more) {
+    if (is_global()) {
+      if (!round_matched) {
+        current_thread()->set_position(
+            current_thread()->position() + 1);
+      }
+      Reset();
+      return true;
+    } else if (!is_matched()
+               && (is_retryable() || is_multiline())) {
+      auto next = FindNextPosition();
+      if (next == -1) {
+        return false;
+      }
+      Reset();
+      current_thread()->set_position(next);
     }
-    current_thread()->set_position(
-        current_thread()->position() + 1);
-    Reset();
-    return true;
-  } else if (!is_matched()
-             && (is_retryable() || is_multiline())
-             && is_advanceable) {
-    auto next = FindNextPosition();
-    if (next == -1) {
-      return false;
-    }
-    Reset();
-    current_thread()->set_position(next);
   }
   return false;
 }
 
 void VirtualMachine::RegexExecutor::Execute() {
-#define VM_STATIC_HANDLER(Name, Layout, size, n, ...)        \
+#define VM_STATIC_HANDLER(Name, Layout, size, n, ...)   \
   static Name##BytecodeHandler Name##_bytecode_handler;
   REGEX_BYTECODE_LIST_WITOUT_MATCHED(VM_STATIC_HANDLER)
 #undef VM_STATIC_HANDLER
 
-  static const std::array<
-    void*,
+    static const std::array<
+      void*,
     static_cast<uint8_t>(Bytecode::kRegexMatched) + 1> kDispatchTable = {{
 #define VM_JMP_TABLES(Name, Layout, size, n, ...) &&Label_##Name,
       REGEX_BYTECODE_LIST_WITOUT_MATCHED(VM_JMP_TABLES)
@@ -704,30 +689,27 @@ Label_Retry:
   auto bc = fetcher_->FetchBytecodeAsInt();
   COLLECT_EXECUTION_LOG(fetcher_->pc() - 1, bc);
   goto *kDispatchTable[bc];
-#define VM_EXECUTE(Name, Layout, size, n, ...)        \
-  Label_##Name: {                                     \
-    Name##_bytecode_handler.Execute(                  \
-        isolate_,                                     \
-        this,                                         \
-        static_cast<Bytecode>(bc),                    \
-        fetcher_.Get(),                               \
-        constant_pool_);                              \
-    auto next = fetcher_->FetchBytecodeAsInt();       \
-    COLLECT_EXECUTION_LOG(fetcher_->pc() - 1, next);  \
-    printf("%s\n", BytecodeUtil::ToStringOpecode(static_cast<Bytecode>(next))); \
-    goto *kDispatchTable[next];                       \
+#define VM_EXECUTE(Name, Layout, size, n, ...)                                 \
+  Label_##Name : {                                                             \
+    Name##_bytecode_handler.Execute(isolate_, this, static_cast<Bytecode>(bc), \
+                                    fetcher_.Get(), constant_pool_);           \
+    auto next = fetcher_->FetchBytecodeAsInt();                                \
+    COLLECT_EXECUTION_LOG(fetcher_->pc() - 1, next);                           \
+    printf("%s\n",                                                             \
+           BytecodeUtil::ToStringOpecode(static_cast<Bytecode>(next)));        \
+    goto* kDispatchTable[next];                                                \
   }
   REGEX_BYTECODE_LIST_WITOUT_MATCHED(VM_EXECUTE)
 #undef VM_EXECUTE
-  Label_Failed: {
-    if (PrepareNextMatch()) {
+    Label_Failed: {
+    if (PrepareNextMatch(false)) {
       goto Label_Retry;
     }
     return;
   }
-  Label_Matched: {
+Label_Matched: {
     set_matched();
-    if (PrepareNextMatch()) {
+    if (PrepareNextMatch(true)) {
       goto Label_Retry;
     }
     captured_array_ = *FixCaptured();

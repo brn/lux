@@ -31,7 +31,8 @@
 class RegExpBytecodeTest: public lux::IsolateSetup {
  protected:
   template <bool error = false, bool show_error = false>
-  void RunTest(const char* regexp, const char* input, uint8_t flag) {
+  void RunTest(const char* regexp, const char* input, uint8_t flag,
+               const char* expectation) {
     lux::HandleScope scope;
     lux::ErrorReporter er;
     lux::SourcePosition sp;
@@ -39,14 +40,47 @@ class RegExpBytecodeTest: public lux::IsolateSetup {
     auto jsregexp = compiler.Compile(regexp, flag);
     printf("%s\n", jsregexp->code()->ToString().c_str());
     auto ret = jsregexp->Match(isolate_, *lux::JSString::New(isolate_, input));
-    printf("%s\n", ret->ToString().c_str());
+    ASSERT_TRUE(
+        lux::testing::CompareNode(regexp,
+                                  ret->ToString().c_str(), expectation));
+    //    printf("%s\n", ret->ToString().c_str());
   }
 };
 
 
 namespace {
 TEST_F(RegExpBytecodeTest, Simple) {
-  RunTest("abc(abc)", "abcabcabc", lux::regexp::Flag::kNone);
-  //  RunTest("<.*?>", "<<<foo>>>", lux::regexp::Flag::kNone);
+  RunTest("abc(abc)", "abcabcabc", lux::regexp::Flag::kNone,
+          "JSArray[String(\"abcabc\"), String(\"abc\")]");
+}
+
+TEST_F(RegExpBytecodeTest, SimpleAlternate) {
+  RunTest("(abc)|(efg)", "abcdefg", lux::regexp::Flag::kNone,
+          "JSArray[String(\"abc\"), String(\"abc\")]");
+}
+
+TEST_F(RegExpBytecodeTest, SimpleAlternateGlobal) {
+  RunTest("(abc)|(efg)", "abcdefg", lux::regexp::Flag::kGlobal,
+          "JSArray[String(\"abc\"), String(\"efg\")]");
+}
+
+TEST_F(RegExpBytecodeTest, SimpleAlternateGlobal2) {
+  RunTest("(abc)|(efg)", "abcdefgdabc", lux::regexp::Flag::kGlobal,
+          "JSArray[String(\"abc\"), String(\"efg\"), String(\"abc\")]");
+}
+
+TEST_F(RegExpBytecodeTest, SimpleCharClass) {
+  RunTest("([ae][bf][cg])", "abcdefgdabc", lux::regexp::Flag::kNone,
+          "JSArray[String(\"abc\"), String(\"abc\")]");
+}
+
+TEST_F(RegExpBytecodeTest, SimpleCharClassGlobal) {
+  RunTest("([ae][bf][cg])", "abcdefgdabc", lux::regexp::Flag::kGlobal,
+          "JSArray[String(\"abc\"), String(\"efg\"), String(\"abc\")]");
+}
+
+TEST_F(RegExpBytecodeTest, SimpleCharClassGlobal2) {
+  RunTest("([ae][bx][cg])", "abcdefgdabc", lux::regexp::Flag::kGlobal,
+          "JSArray[String(\"abc\"), String(\"abc\")]");
 }
 }

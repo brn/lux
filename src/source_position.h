@@ -59,6 +59,15 @@ class SourcePosition : private Unmovable {
         start_line_number_(source_position.start_line_number_),
         end_line_number_(source_position.end_line_number_) {}
 
+  inline friend std::ostream& operator<<(
+      std::ostream& stream, const SourcePosition& source_position) {
+    stream << "{\n  start_col: " << source_position.start_col_ << ","
+           << "\n  end_col: " << source_position.end_col_ << ","
+           << "\n  start_line: " << source_position.start_line_number_ << ","
+           << "\n  end_line: " << source_position.end_line_number_ << "\n}";
+    return stream;
+  }
+
   inline void operator=(const SourcePosition& source_position) {
     start_col_ = source_position.start_col_;
     end_col_ = source_position.end_col_;

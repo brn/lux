@@ -149,6 +149,10 @@ class VirtualMachine {
       LUX_CONST_PROPERTY(uint32_t, start, start_)
       LUX_CONST_PROPERTY(uint32_t, end, end_)
 
+      bool IsCaptured() const {
+        return start_ < end_;
+      }
+
      private:
       uint32_t start_;
       uint32_t end_;
@@ -198,7 +202,7 @@ class VirtualMachine {
     LUX_CONST_GETTER(bool, is_matched, vm_flag_.get(1))
 
     LUX_INLINE bool is_advanceable() {
-      return input()->length() > current_thread()->position();
+      return input()->length() > (current_thread()->position() + 1);
     }
 
     void enable_search() {
@@ -326,6 +330,7 @@ class VirtualMachine {
       INVALIDATE(current_capture_);
       current_capture_->set_end(
           current_thread()->position());
+      current_capture_ = nullptr;
     }
 
     inline Captured* current_captured() {
@@ -365,18 +370,22 @@ class VirtualMachine {
       PopThread();
     }
 
-    bool PrepareNextMatch();
+    bool PrepareNextMatch(bool round_matched);
 
 #ifdef DEBUG
     struct ExecutionLog {
+      u8 value;
       uint32_t position;
       uint32_t start_position;
+      bool matched;
       Bytecode bytecode;
     };
 
     void CollectExecutionLog(uint32_t start_position,
                              Bytecode bytecode) {
-      ExecutionLog e = {current_thread_->position(), start_position, bytecode};
+      u8 value = current_thread_->position() >= input_->length()?
+        '?': input_->at(current_thread_->position()).ToAscii();
+      ExecutionLog e = {value, current_thread_->position(), start_position, JSSpecials::ToBoolean(load_flag()), bytecode};
       exec_log_list_.push_back(e);
     }
 
@@ -386,8 +395,9 @@ class VirtualMachine {
 
     void PrintLog() const {
       for (auto &log : exec_log_list_) {
-        printf("%d %d %s\n", log.position,
+        printf("%c %d %d %s %s\n", log.value, log.position,
                log.start_position,
+               log.matched? "matched": "unmatched",
                BytecodeUtil::ToStringOpecode(static_cast<Bytecode>(
                    log.bytecode)));
       }

@@ -183,53 +183,13 @@ bool IsSucceeding(Utf16String::iterator* it, char ch) {
   return ((*it) + 1)->code() == ch;
 }
 
-bool IsIdentifierStart(Utf16CodePoint value) {
-  return (value >= 97 && value <= 122) || (value >= 65 && value <= 90) ||
-         (value == '_' || value == '$') || value == 92;
-}
-
-bool IsIdentifierChar(Utf16CodePoint value) {
-  return IsIdentifierStart(value) || (value >= 48 && value <= 57);
-}
-
-bool IsDecimalDigit(Utf16CodePoint value) {
-  return (value >= 48 && value <= 57);
-}
-
-bool IsHexDigit(Utf16CodePoint value) {
-  return (value >= '0' && value <= '9') || (value >= 'a' && value <= 'z') ||
-         (value >= 'A' && value <= 'Z');
-}
-
-bool IsBinaryDigit(Utf16CodePoint value) {
-  return (value >= '0' && value <= '1');
-}
-
-bool IsOctalDigit(Utf16CodePoint value) {
-  return (value >= '0' && value <= '7');
-}
-
-u32 ToHexValue(Utf16CodePoint uchar) {
-  int ret = 0;
-  if (uchar >= '0' && uchar <= '9') {
-    ret = static_cast<int>(uchar.code() - '0');
-  } else if (uchar >= 'a' && uchar.code() <= 'f') {
-    ret = static_cast<int>(uchar.code() - 'a' + 10);
-  } else if (uchar >= 'A' && uchar.code() <= 'F') {
-    ret = static_cast<int>(uchar.code() - 'A' + 10);
-  } else {
-    return -1;
-  }
-  return ret;
-}
-
 Utf16CodePoint Parser::Tokenizer::DecodeHexEscape(bool* ok, int len) {
   auto unicode_hex_start = *it_;
   u32 ret = 0;
   if (unicode_hex_start == '{') {
     Advance();
     while (*it_ != '}' && *it_ != Unicode::InvalidCodePoint()) {
-      ret = ret * 16 + ToHexValue(*it_);
+      ret = ret * 16 + Chars::ToHexValue(*it_);
       Advance();
     }
     if (*it_ != '}') {
@@ -239,8 +199,8 @@ Utf16CodePoint Parser::Tokenizer::DecodeHexEscape(bool* ok, int len) {
     }
   } else {
     for (int i = 0; i < len; i++) {
-      if (IsHexDigit(*it_)) {
-        ret = ret * 16 + ToHexValue(*it_);
+      if (Chars::IsHexDigit(*it_)) {
+        ret = ret * 16 + Chars::ToHexValue(*it_);
       } else {
         *ok = false;
         return Utf16CodePoint(0);
@@ -436,7 +396,7 @@ Token::Type Parser::Tokenizer::Tokenize() {
       return Token::OP_XOR;
     case '.':
       Advance();
-      if (IsDecimalDigit(*it_)) {
+      if (Chars::IsDecimalDigit(*it_)) {
         return TokenizeNumericLiteral(true);
       }
       if (*it_ == '.') {
@@ -483,10 +443,10 @@ Token::Type Parser::Tokenizer::Tokenize() {
         }
       }
     default:
-      if (IsDecimalDigit(*it_)) {
+      if (Chars::IsDecimalDigit(*it_)) {
         return TokenizeNumericLiteral(false);
       }
-      if (IsIdentifierStart(*it_)) {
+      if (Chars::IsIdentifierStart(it_->ucs4_code())) {
         return TokenizeIdentifier();
       }
   }
@@ -494,23 +454,15 @@ Token::Type Parser::Tokenizer::Tokenize() {
   return Token::INVALID;
 }
 
-bool IsStartUnicodeEscapeSequence(Utf16CodePoint u) { return u == 'u'; }
-
-bool IsStartAsciiEscapeSequence(Utf16CodePoint u) { return u == 'x'; }
-
-bool IsStartEscapeSequence(Utf16String::iterator* it) {
-  return IsStartUnicodeEscapeSequence(**it) || IsStartAsciiEscapeSequence(**it);
-}
-
 Utf16CodePoint Parser::Tokenizer::DecodeEscapeSequence(bool* ok) {
   INVALIDATE(*it_ == '\\');
   Advance();  // Consume backslash
 
   Utf16CodePoint result = Unicode::InvalidCodePoint();
-  if (IsStartUnicodeEscapeSequence(*it_)) {
+  if (Chars::IsStartUnicodeEscapeSequence(*it_)) {
     Advance();
     result = DecodeHexEscape(ok);
-  } else if (IsStartAsciiEscapeSequence(*it_)) {
+  } else if (Chars::IsStartAsciiEscapeSequence(*it_)) {
     Advance();
     result = DecodeAsciiEscapeSequence(ok);
   } else {
@@ -533,7 +485,7 @@ Token::Type Parser::Tokenizer::TokenizeStringLiteral() {
       case '\\':
         if (!escaped) {
           auto lookahead = it_ + 1;
-          if (IsStartEscapeSequence(&lookahead)) {
+          if (Chars::IsStartEscapeSequence(lookahead->ucs4_code())) {
             bool ok = true;
             value = DecodeEscapeSequence(&ok);
             if (!ok) {
@@ -582,9 +534,9 @@ Label_Failed:
 Token::Type Parser::Tokenizer::TokenizeIdentifier() {
   current_buffer_->clear();
   auto value = *it_;
-  INVALIDATE(IsIdentifierStart(value));
+  INVALIDATE(Chars::IsIdentifierStart(value));
 
-  while (HasMore() && IsIdentifierChar(value)) {
+  while (HasMore() && Chars::IsIdentifierPart(value, false)) {
     if (value == '\\') {
       std::vector<Utf16CodePoint> unicode_identifier;
       Advance();
@@ -613,7 +565,7 @@ void Parser::Tokenizer::AdvanceAndPushBuffer() {
 Token::Type Parser::Tokenizer::TokenizeNumericLiteral(bool period_seen) {
   current_buffer_->clear();
   auto value = *it_;
-  INVALIDATE(IsDecimalDigit(value));
+  INVALIDATE(Chars::Chars::IsDecimalDigit(value));
   bool leading_zeros = false;
 
   enum {
@@ -627,7 +579,7 @@ Token::Type Parser::Tokenizer::TokenizeNumericLiteral(bool period_seen) {
 
   if (period_seen) {
     current_buffer_->push_back(Utf16CodePoint('.'));
-    while (IsDecimalDigit(*it_)) {
+    while (Chars::IsDecimalDigit(*it_)) {
       AdvanceAndPushBuffer();
     }
     return Token::NUMERIC_LITERAL;
@@ -637,49 +589,49 @@ Token::Type Parser::Tokenizer::TokenizeNumericLiteral(bool period_seen) {
     if (*it_ == 'x') {
       AdvanceAndPushBuffer();
       kind = HEX;
-      if (!IsHexDigit(*it_)) {
+      if (!Chars::IsHexDigit(*it_)) {
         REPORT_TOKENIZER_ERROR(this, "Expected hex digit.");
       }
-      while (IsHexDigit(*it_)) {
+      while (Chars::IsHexDigit(*it_)) {
         AdvanceAndPushBuffer();
       }
     } else if (*it_ == 'b') {
       kind = BINARY;
       AdvanceAndPushBuffer();
-      if (!IsBinaryDigit(*it_)) {
+      if (!Chars::IsBinaryDigit(*it_)) {
         REPORT_TOKENIZER_ERROR(this, "Expected binary digit.");
       }
-      while (IsBinaryDigit(*it_)) {
+      while (Chars::IsBinaryDigit(*it_)) {
         AdvanceAndPushBuffer();
       }
       return Token::NUMERIC_LITERAL;
     } else if (*it_ == 'o') {
       kind = OCTAL;
       AdvanceAndPushBuffer();
-      if (!IsOctalDigit(*it_)) {
+      if (!Chars::IsOctalDigit(*it_)) {
         REPORT_TOKENIZER_ERROR(this, "Expected octal digit.");
       }
-      while (IsOctalDigit(*it_)) {
+      while (Chars::IsOctalDigit(*it_)) {
         AdvanceAndPushBuffer();
       }
       return Token::NUMERIC_LITERAL;
     } else if (*it_ >= '0' && *it_ <= '7') {
       kind = IMPLICIT_OCTAL;
       current_state_->Set(TokenizerState::IMPLICIT_OCTAL);
-      while (IsOctalDigit(*it_)) {
+      while (Chars::IsOctalDigit(*it_)) {
         AdvanceAndPushBuffer();
       }
     } else if (*it_ == '8' || *it_ == '9') {
       kind = DECIMAL_LEADING_ZERO;
-      while (IsDecimalDigit(*it_)) {
+      while (Chars::IsDecimalDigit(*it_)) {
         AdvanceAndPushBuffer();
       }
     }
 
     if (kind == IMPLICIT_OCTAL) {
-      if (IsDecimalDigit(*it_) && *it_ > '7') {
+      if (Chars::IsDecimalDigit(*it_) && *it_ > '7') {
         current_state_->Unset(TokenizerState::IMPLICIT_OCTAL);
-        while (IsDecimalDigit(*it_)) {
+        while (Chars::IsDecimalDigit(*it_)) {
           AdvanceAndPushBuffer();
         }
         kind = DECIMAL_LEADING_ZERO;
@@ -694,7 +646,7 @@ Token::Type Parser::Tokenizer::TokenizeNumericLiteral(bool period_seen) {
     AdvanceAndPushBuffer();
   }
 
-  while (IsDecimalDigit(*it_)) {
+  while (Chars::IsDecimalDigit(*it_)) {
     AdvanceAndPushBuffer();
   }
 
@@ -705,14 +657,14 @@ Token::Type Parser::Tokenizer::TokenizeNumericLiteral(bool period_seen) {
     AdvanceAndPushBuffer();
     if (*it_ == '+' || *it_ == '-') {
       AdvanceAndPushBuffer();
-      if (!IsDecimalDigit(*it_)) {
+      if (!Chars::IsDecimalDigit(*it_)) {
         REPORT_TOKENIZER_ERROR(this, "Expected exponent digit.");
       }
     }
-    if (!IsDecimalDigit(*it_)) {
+    if (!Chars::IsDecimalDigit(*it_)) {
       REPORT_TOKENIZER_ERROR(this, "Expected exponent digit.");
     }
-    while (IsDecimalDigit(*it_)) {
+    while (Chars::IsDecimalDigit(*it_)) {
       AdvanceAndPushBuffer();
     }
   }
@@ -778,7 +730,7 @@ Token::Type Parser::Tokenizer::TokenizeTemplateCharacters() {
         auto value = *it_;
         if (!escaped) {
           auto lookahead = it_ + 1;
-          if (IsStartEscapeSequence(&lookahead)) {
+          if (Chars::IsStartEscapeSequence(lookahead->ucs4_code())) {
             bool ok = true;
             value = DecodeEscapeSequence(&ok);
             if (!ok) {
@@ -1235,7 +1187,7 @@ Maybe<Expression*> Parser::ParseAssignmentExpressionLhs() {
   return ParseLeftHandSideExpression() >>= [this](auto left) {
     if (cur() == Token::OP_ASSIGN || IsAssignmentOperator(cur())) {
       advance();
-      return ParseAssignmentExpression() >>= [&, this](auto right) {
+      return ParseAssignmentExpression() >>= [&](auto right) {
         return NewExpression<BinaryExpression>(Token::OP_ASSIGN, left, right);
       };
     }
@@ -1254,7 +1206,7 @@ Maybe<Expression*> Parser::ParseConditionalExpression() {
           REPORT_SYNTAX_ERROR(Expression*, this, "':' expected.");
         }
         advance();
-        return ParseAssignmentExpression() >>= [&, this](auto rhs) {
+        return ParseAssignmentExpression() >>= [&](auto rhs) {
           auto ret = NewExpressionWithPosition<ConditionalExpression>(
               binary_expr->source_position(), binary_expr->ToExpression(),
               lhs->ToExpression(), rhs->ToExpression());
@@ -1651,7 +1603,7 @@ Maybe<Expression*> Parser::ParseCoverCallExpressionAndAsyncArrowHead() {
   ENTER_PARSING;
   return ParseMemberExpression() >>= [&, this](auto n) {
     if (cur() == Token::LEFT_PAREN) {
-      return ParseArguments() >>= [&, this](auto a) {
+      return ParseArguments() >>= [&](auto a) {
         return Just(reinterpret_cast<Expression*>(
             NewNode<Expressions>({n->ToExpression(), a->ToExpression()})));
       };
@@ -1914,7 +1866,7 @@ Maybe<Expression*> Parser::ParseObjectLiteralProperty(
         REPORT_SYNTAX_ERROR(Expression*, this, "Unexpected '=' detected.");
       }
       return ParseIdentifierReference() >>= [&, this](auto key) {
-        return ParseAssignmentExpression() >>= [&, this](auto value) {
+        return ParseAssignmentExpression() >>= [&](auto value) {
           return Just(NewExpressionWithPositions<ObjectPropertyExpression>(
               start, value->source_position(), key, nullptr, Just(value)));
         };

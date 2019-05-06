@@ -130,7 +130,7 @@ class FixedArrayIterator:
   }
 
   LUX_INLINE const bool operator !=(const FixedArrayIterator& it) {
-    return !this->operator==(it);
+    return !(this->operator==(it));
   }
 
   LUX_INLINE FixedArrayIterator& operator++() {
