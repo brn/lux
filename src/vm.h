@@ -37,9 +37,7 @@ class VirtualMachine {
  public:
   class Registers {
    public:
-    void store(int index, Object* value) {
-      reg_[index] = value;
-    }
+    void store(int index, Object* value) { reg_[index] = value; }
 
     Object* load(int index) {
       INVALIDATE(index < 256);
@@ -47,7 +45,7 @@ class VirtualMachine {
     }
 
     void Clear() {
-      for (int i = 0; i< 256; i++) {
+      for (int i = 0; i < 256; i++) {
         reg_[i] = nullptr;
       }
     }
@@ -58,14 +56,11 @@ class VirtualMachine {
 
   class Executor {
    public:
-    Executor(Isolate* isolate,
-             size_t argc,
-             std::initializer_list<Object*> argv,
+    Executor(Isolate* isolate, size_t argc, std::initializer_list<Object*> argv,
              BytecodeExecutable* executable)
-        : isolate_(isolate),
-          constant_pool_(executable->constant_pool()) {
+        : isolate_(isolate), constant_pool_(executable->constant_pool()) {
       int i = RegisterAllocator::kParameter1;
-      for (auto &r : argv) {
+      for (auto& r : argv) {
         store_register_value_at(i++, r);
       }
       for (; i <= RegisterAllocator::kParameter10; i++) {
@@ -77,8 +72,7 @@ class VirtualMachine {
     }
 
     LUX_INLINE Smi* load_flag() {
-      return Smi::Cast(
-          registers_.load(RegisterAllocator::kFlag));
+      return Smi::Cast(registers_.load(RegisterAllocator::kFlag));
     }
 
     LUX_INLINE void store_flag(Smi* value) {
@@ -93,9 +87,7 @@ class VirtualMachine {
       registers_.store(index, value);
     }
 
-    Object* return_value() const {
-      return return_value_;
-    }
+    Object* return_value() const { return return_value_; }
 
     void Execute();
 
@@ -122,9 +114,7 @@ class VirtualMachine {
 
   class RegexExecutor {
    public:
-    RegexExecutor(Isolate* isolate,
-                  JSString* input,
-                  bool collect_matched_word,
+    RegexExecutor(Isolate* isolate, JSString* input, bool collect_matched_word,
                   BytecodeExecutable* executable)
         : captured_array_(isolate->jsval_null()),
           current_capture_(nullptr),
@@ -135,33 +125,28 @@ class VirtualMachine {
       if (collect_matched_word) {
         vm_flag_.set(kCollectWords);
       }
-      current_thread_ = new(zone()) Thread(0, 0, 0, 0, Smi::FromInt(0));
+      current_thread_ = new (zone()) Thread(0, 0, 0, 0, Smi::FromInt(0));
       unset_matched();
       fetcher_(executable->bytecode_array());
     }
 
-    class Captured: public Zone {
+    class Captured : public Zone {
      public:
-      explicit Captured(uint32_t start)
-          : start_(start),
-            end_(0) {}
+      explicit Captured(uint32_t start) : start_(start), end_(0) {}
 
       LUX_CONST_PROPERTY(uint32_t, start, start_)
       LUX_CONST_PROPERTY(uint32_t, end, end_)
 
-      bool IsCaptured() const {
-        return start_ < end_;
-      }
+      bool IsCaptured() const { return start_ < end_; }
 
      private:
       uint32_t start_;
       uint32_t end_;
     };
 
-    class Thread: public Zone {
+    class Thread : public Zone {
      public:
-      Thread(uint32_t pc, uint32_t position,
-             uint32_t matched_count,
+      Thread(uint32_t pc, uint32_t position, uint32_t matched_count,
              uint16_t capture_index, Smi* flag)
           : start_position_(position),
             pc_(pc),
@@ -170,7 +155,7 @@ class VirtualMachine {
             capture_index_(0),
             flag_(flag) {}
 
-      LUX_CONST_GETTER(uint32_t, start_position, start_position_)
+      LUX_CONST_PROPERTY(uint32_t, start_position, start_position_)
       LUX_CONST_PROPERTY(uint32_t, pc, pc_)
       LUX_CONST_PROPERTY(uint32_t, position, position_)
       LUX_CONST_PROPERTY(uint32_t, matched_count, matched_count_)
@@ -178,9 +163,7 @@ class VirtualMachine {
       LUX_CONST_PROPERTY(uint16_t, capture_index, capture_index_)
       void Matched() { matched_count_++; }
       void Advance() { position_++; }
-      void ResetMatchedCount() {
-        matched_count_ = 0;
-      }
+      void ResetMatchedCount() { matched_count_ = 0; }
 
      private:
       uint32_t start_position_;
@@ -193,102 +176,59 @@ class VirtualMachine {
 
     LUX_CONST_GETTER(Object*, captured_array, captured_array_)
     LUX_CONST_GETTER(bool, collect_matched_word, vm_flag_.get(0))
-    LUX_INLINE void set_matched() {
-      vm_flag_.set(kMatched);
-    }
-    LUX_INLINE void unset_matched() {
-      vm_flag_.unset(kMatched);
-    }
+    LUX_INLINE void set_matched() { vm_flag_.set(kMatched); }
+    LUX_INLINE void unset_matched() { vm_flag_.unset(kMatched); }
     LUX_CONST_GETTER(bool, is_matched, vm_flag_.get(1))
 
     LUX_INLINE bool is_advanceable() {
       return input()->length() > (current_thread()->position() + 1);
     }
 
-    void enable_search() {
-      vm_flag_.set(kSearch);
-    }
+    void enable_search() { vm_flag_.set(kSearch); }
 
-    bool is_search_enabled() {
-      return vm_flag_.get(kSearch);
-    }
+    bool is_search_enabled() { return vm_flag_.get(kSearch); }
 
-    void disable_search() {
-      vm_flag_.unset(kSearch);
-    }
+    void disable_search() { vm_flag_.unset(kSearch); }
 
-    void disable_retry() {
-      vm_flag_.set(kRetry);
-    }
+    void disable_retry() { vm_flag_.set(kRetry); }
 
-    bool is_retryable() {
-      return !vm_flag_.get(kRetry);
-    }
+    bool is_retryable() { return !vm_flag_.get(kRetry); }
 
-    void set_multiline() {
-      vm_flag_.set(kMultiline);
-    }
+    void set_multiline() { vm_flag_.set(kMultiline); }
 
-    bool is_multiline() {
-      return vm_flag_.get(kMultiline);
-    }
+    bool is_multiline() { return vm_flag_.get(kMultiline); }
 
-    void set_global() {
-      vm_flag_.set(kGlobal);
-    }
+    void set_global() { vm_flag_.set(kGlobal); }
 
-    bool is_global() {
-      return vm_flag_.get(kGlobal);
-    }
+    bool is_global() { return vm_flag_.get(kGlobal); }
 
-    void set_ignore_case() {
-      vm_flag_.set(kIgnoreCase);
-    }
+    void set_ignore_case() { vm_flag_.set(kIgnoreCase); }
 
-    bool is_ignore_case() {
-      return vm_flag_.get(kIgnoreCase);
-    }
+    bool is_ignore_case() { return vm_flag_.get(kIgnoreCase); }
 
-    void set_sticky() {
-      vm_flag_.set(kSticky);
-    }
+    void set_sticky() { vm_flag_.set(kSticky); }
 
-    bool is_sticky() {
-      return vm_flag_.get(kSticky);
-    }
+    bool is_sticky() { return vm_flag_.get(kSticky); }
 
-    LUX_INLINE Smi* load_flag() {
-      return flag_;
-    }
+    LUX_INLINE Smi* load_flag() { return flag_; }
 
-    LUX_INLINE void store_flag(Smi* value) {
-      flag_ = value;
-    }
+    LUX_INLINE void store_flag(Smi* value) { flag_ = value; }
 
     LUX_GETTER(JSString*, input, input_);
-    inline void Advance() {
-      current_thread_->Advance();
-    }
+    inline void Advance() { current_thread_->Advance(); }
 
     void Execute();
 
-    inline bool HasThread() const {
-      return thread_stack_.size() > 0;
-    }
+    inline bool HasThread() const { return thread_stack_.size() > 0; }
 
-    inline Thread* current_thread() {
-      return current_thread_;
-    }
+    inline Thread* current_thread() { return current_thread_; }
 
-    inline void ClearAllThread() {
-      thread_stack_.clear();
-    }
+    inline void ClearAllThread() { thread_stack_.clear(); }
 
     inline void NewThread(uint32_t pc) {
-      auto t = new(zone()) Thread(pc, current_thread_->position(),
-                                  current_thread_->matched_count(),
-                                  current_thread_->capture_index(),
-                                  flag_);
+      auto t = new (zone()) Thread(pc, current_thread_->position(),
+                                   current_thread_->matched_count(),
+                                   current_thread_->capture_index(), flag_);
       thread_stack_.push_back(t);
     }
 
@@ -308,7 +248,7 @@ class VirtualMachine {
     void FixInterCaptured();
     Handle<JSArray> FixCaptured();
 
-    JSString* SliceMatchedInput(uint32_t start = 0);
+    JSString* SliceMatchedInput(uint32_t start);
 
     inline void StartCapture(uint16_t index, bool set_start = true) {
       if (captured_stack_.size()) {
@@ -328,30 +268,25 @@ class VirtualMachine {
 
     inline void UpdateCapture() {
       INVALIDATE(current_capture_);
-      current_capture_->set_end(
-          current_thread()->position());
+      current_capture_->set_end(current_thread()->position());
       current_capture_ = nullptr;
     }
 
-    inline Captured* current_captured() {
-      return current_capture_;
-    }
+    inline Captured* current_captured() { return current_capture_; }
 
     inline void ReserveCapture(uint16_t size) {
       captured_stack_.resize(size);
       for (auto i = 0; i < size; i++) {
-        captured_stack_[i] = new(zone()) Captured(0);
+        captured_stack_[i] = new (zone()) Captured(0);
       }
     }
 
-    inline void ClearCapture() {
-      captured_stack_.clear();
-    }
+    inline void ClearCapture() { captured_stack_.clear(); }
 
     int FindNextPosition() {
       if (!is_retryable() && is_multiline()) {
         int i = -1;
-        for (auto &c : *input()) {
+        for (auto& c : *input()) {
           if (c == '\n') {
             break;
           }
@@ -381,33 +316,29 @@ class VirtualMachine {
       Bytecode bytecode;
     };
 
-    void CollectExecutionLog(uint32_t start_position,
-                             Bytecode bytecode) {
-      u8 value = current_thread_->position() >= input_->length()?
-        '?': input_->at(current_thread_->position()).ToAscii();
-      ExecutionLog e = {value, current_thread_->position(), start_position, JSSpecials::ToBoolean(load_flag()), bytecode};
+    void CollectExecutionLog(uint32_t start_position, Bytecode bytecode) {
+      u8 value = current_thread_->position() >= input_->length()
+                     ? '?'
+                     : input_->at(current_thread_->position()).ToAscii();
+      ExecutionLog e = {value, current_thread_->position(), start_position,
+                        JSSpecials::ToBoolean(load_flag()), bytecode};
       exec_log_list_.push_back(e);
     }
 
-    const std::vector<ExecutionLog>& exec_log() const {
-      return exec_log_list_;
-    }
+    const std::vector<ExecutionLog>& exec_log() const { return exec_log_list_; }
 
     void PrintLog() const {
-      for (auto &log : exec_log_list_) {
-        printf("%c %d %d %s %s\n", log.value, log.position,
-               log.start_position,
-               log.matched? "matched": "unmatched",
-               BytecodeUtil::ToStringOpecode(static_cast<Bytecode>(
-                   log.bytecode)));
+      for (auto& log : exec_log_list_) {
+        printf(
+            "%c %d %d %s %s\n", log.value, log.position, log.start_position,
+            log.matched ? "matched" : "unmatched",
+            BytecodeUtil::ToStringOpecode(static_cast<Bytecode>(log.bytecode)));
       }
     }
 #endif
 
    private:
-    ZoneAllocator* zone() {
-      return &zone_allocator_;
-    }
+    ZoneAllocator* zone() { return &zone_allocator_; }
 
     std::vector<Captured*> captured_stack_;
     std::vector<Thread*> thread_stack_;
@@ -428,17 +359,13 @@ class VirtualMachine {
 #endif
   };
 
-  explicit VirtualMachine(Isolate* isolate)
-          : isolate_(isolate) {}
+  explicit VirtualMachine(Isolate* isolate) : isolate_(isolate) {}
 
   Object* Execute(BytecodeExecutable* executable,
                   std::initializer_list<Object*> argv);
 
-  Object* ExecuteRegex(BytecodeExecutable* executable,
-                       JSString* input,
-                       uint8_t flag,
-                       bool collect_matched_word);
-
+  Object* ExecuteRegex(BytecodeExecutable* executable, JSString* input,
+                       uint8_t flag, bool collect_matched_word);
 
  private:
   Isolate* isolate_;

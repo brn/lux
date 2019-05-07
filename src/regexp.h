@@ -41,17 +41,18 @@ namespace lux {
 class Isolate;
 class JSString;
 namespace regexp {
-#define REGEXP_AST_TYPES(A)        \
-  A(GROUP, Group)                  \
-  A(BACK_REFERENCE, BackReference) \
-  A(CHAR_CLASS, CharClass)         \
-  A(ALTERNATE, Alternate)          \
-  A(REPEAT, Repeat)                \
-  A(REPEAT_RANGE, RepeatRange)     \
-  A(CHAR_SEQUENCE, CharSequence)   \
-  A(CHAR, Char)                    \
-  A(ANY, Any)                      \
-  A(CONJUNCTION, Conjunction)      \
+#define REGEXP_AST_TYPES(A)          \
+  A(GROUP, Group)                    \
+  A(BACK_REFERENCE, BackReference)   \
+  A(CHAR_CLASS, CharClass)           \
+  A(ALTERNATE, Alternate)            \
+  A(REPEAT, Repeat)                  \
+  A(REPEAT_RANGE, RepeatRange)       \
+  A(CHAR_SEQUENCE, CharSequence)     \
+  A(CHAR, Char)                      \
+  A(ESCAPE_SEQUENCE, EscapeSequence) \
+  A(ANY, Any)                        \
+  A(CONJUNCTION, Conjunction)        \
   A(ROOT, Root)
 
 #define RE_AST_FORWARD_DECL(_, Name) class Name;
@@ -456,6 +457,55 @@ class Char : public Ast {
   Utf16CodePoint value_;
 };
 
+#define REGEXP_ESCAPE_SEQUENCES(A) \
+  A(WORDS, 0x001, 'w')             \
+  A(NOT_WORDS, 0x002, 'W')         \
+  A(NOT_WORDCHAR, 0x004, 'b')      \
+  A(DIGIT, 0x008, 'd')             \
+  A(NOT_DIGIT, 0x010, 'D')         \
+  A(WHITE_SPACE, 0x020, 's')       \
+  A(NOT_WHITE_SPACE, 0x040, 'S')
+
+enum class RegexSpecialCharType : uint8_t {
+#define DEF_REGEXP_ESCAPE_SEQUENCE_ENUM(NAME, value, _) NAME = value,
+  REGEXP_ESCAPE_SEQUENCES(DEF_REGEXP_ESCAPE_SEQUENCE_ENUM)
+#undef DEF_REGEXP_ESCAPE_SEQUENCE_ENUM
+      __SENTINEL = 0
+};
+
+class EscapeSequence : public Ast {
+ public:
+  explicit EscapeSequence(RegexSpecialCharType type)
+      : Ast(Ast::ESCAPE_SEQUENCE), type_(type) {}
+
+  LUX_CONST_PROPERTY(RegexSpecialCharType, type, type_)
+
+#ifdef DEBUG
+  std::string ToString(std::string* indent = nullptr) const {
+    std::stringstream st;
+    st << (indent == nullptr ? "" : *indent) << "[EscapeSequence type = '"
+       << GetTypeString() << "']\n";
+    return st.str();
+  }
+  const char* GetTypeString() const {
+    switch (type_) {
+#define DEF_REGEXP_ESCAPE_SEQUENCE_CASES(NAME, value, _) \
+  case RegexSpecialCharType::NAME:                       \
+    return #NAME;
+      REGEXP_ESCAPE_SEQUENCES(DEF_REGEXP_ESCAPE_SEQUENCE_CASES)
+#undef DEF_REGEXP_ESCAPE_SEQUENCE_CASES
+      default:
+        return "";
+    }
+  }
+#endif
+
+ private:
+  REGEXP_VISIT_INTERNAL_METHOD_DECL(EscapeSequence);
+
+  RegexSpecialCharType type_;
+};
+
 class Any : public Ast {
  public:
   enum Type {
@@ -525,6 +575,8 @@ class Parser {
   Maybe<JSString*> ParseGroupSpecifierName();
 
   Utf16CodePoint DecodeHexEscape(bool* ok, int len = 4);
+
+  Utf16CodePoint DecodeAsciiEscapeSequence(bool* ok);
 
   Utf16String::ParseIntResult ToInt();
 

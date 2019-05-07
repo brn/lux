@@ -20,14 +20,14 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include <sstream>
 #include "./jsobject.h"
-#include "./shape.h"
-#include "./string.h"
+#include <sstream>
+#include "../bytecode.h"
 #include "../isolate.h"
 #include "../unicode.h"
-#include "../bytecode.h"
 #include "../vm.h"
+#include "./shape.h"
+#include "./string.h"
 
 namespace lux {
 const size_t JSObject::kSize = HeapObject::kSize + kPointerSize;
@@ -35,13 +35,11 @@ const size_t JSString::kSize = HeapObject::kSize + kPointerSize;
 const size_t JSSpecials::kSize = HeapObject::kSize + sizeof(uint8_t);
 const size_t BytecodeExecutable::kSize = HeapObject::kSize + (kPointerSize * 2);
 
-
 Handle<BytecodeExecutable> BytecodeExecutable::New(
-    Isolate* isolate,
-    BytecodeArray* bytecode_array,
+    Isolate* isolate, BytecodeArray* bytecode_array,
     BytecodeConstantArray* constant_pool) {
-  auto heap_obj = HeapObject::New(isolate,
-                                  isolate->bytecode_executable_shape());
+  auto heap_obj =
+      HeapObject::New(isolate, isolate->bytecode_executable_shape());
   auto array = reinterpret_cast<BytecodeArray**>(
       FIELD_ADDR(heap_obj, kBytecodeArrayOffset));
   *array = bytecode_array;
@@ -60,10 +58,10 @@ std::string BytecodeExecutable::ToString() {
 FixedArrayBase* FixedArrayBase::NewArray(Isolate* isolate, uint32_t size) {
   auto required_size = kFixedArrayLengthSize + size;
   auto aligned_size = LUX_ALIGN_OFFSET(required_size, kAlignment);
-  auto arr = HeapObject::New(isolate, isolate->fixed_array_shape(),
-                             aligned_size);
-  auto length = reinterpret_cast<uint32_t*>(
-      FIELD_ADDR(arr, kFixedArrayLengthOffset));
+  auto arr =
+      HeapObject::New(isolate, isolate->fixed_array_shape(), aligned_size);
+  auto length =
+      reinterpret_cast<uint32_t*>(FIELD_ADDR(arr, kFixedArrayLengthOffset));
   *length = size;
   return reinterpret_cast<FixedArrayBase*>(arr);
 }
@@ -87,12 +85,9 @@ Object* JSObject::GetLength(Isolate* isolate, Object* o) {
   }
 }
 
-Handle<JSFunction> JSFunction::New(Isolate* isolate,
-                                   JSString* name,
-                                   uint8_t length,
-                                   BytecodeExecutable* be) {
-  auto heap_obj = HeapObject::New(isolate,
-                                  isolate->function_shape());
+Handle<JSFunction> JSFunction::New(Isolate* isolate, JSString* name,
+                                   uint8_t length, BytecodeExecutable* be) {
+  auto heap_obj = HeapObject::New(isolate, isolate->function_shape());
   auto length_ptr = FIELD_PROPERTY(uint8_t*, heap_obj, kLengthOffset);
   *length_ptr = length;
   auto name_ptr = FIELD_PROPERTY(JSString**, heap_obj, kNameOffset);
@@ -102,23 +97,20 @@ Handle<JSFunction> JSFunction::New(Isolate* isolate,
   return make_handle(reinterpret_cast<JSFunction*>(heap_obj));
 }
 
-Object* JSFunction::Call(
-    Isolate* isolate, std::initializer_list<Object*> parameters) {
+Object* JSFunction::Call(Isolate* isolate,
+                         std::initializer_list<Object*> parameters) {
   lux::VirtualMachine vm(isolate);
   return vm.Execute(code(), parameters);
 }
 
-Handle<JSRegExp> JSRegExp::New(Isolate* isolate,
-                               BytecodeExecutable* executable,
+Handle<JSRegExp> JSRegExp::New(Isolate* isolate, BytecodeExecutable* executable,
                                uint8_t flag) {
   return make_handle(NewWithoutHandle(isolate, executable, flag));
 }
 
-JSRegExp* JSRegExp::NewWithoutHandle(Isolate* isolate,
-                                     BytecodeExecutable* be,
+JSRegExp* JSRegExp::NewWithoutHandle(Isolate* isolate, BytecodeExecutable* be,
                                      uint8_t flag) {
-  auto heap_obj = HeapObject::New(isolate,
-                                  isolate->regexp_shape());
+  auto heap_obj = HeapObject::New(isolate, isolate->regexp_shape());
   auto flag_ptr = FIELD_PROPERTY(uint8_t*, heap_obj, kFlagOffset);
   *flag_ptr = flag;
   auto be_ptr = FIELD_PROPERTY(BytecodeExecutable**, heap_obj, kCodeOffset);
@@ -128,8 +120,8 @@ JSRegExp* JSRegExp::NewWithoutHandle(Isolate* isolate,
 
 JSSpecials* JSRegExp::Test(Isolate* isolate, JSString* input) {
   lux::VirtualMachine vm(isolate);
-  return reinterpret_cast<JSSpecials*>(vm.ExecuteRegex(
-      code(), input, flag(), false));
+  return reinterpret_cast<JSSpecials*>(
+      vm.ExecuteRegex(code(), input, flag(), false));
 }
 
 JSArray* JSRegExp::Match(Isolate* isolate, JSString* input) {
@@ -137,8 +129,7 @@ JSArray* JSRegExp::Match(Isolate* isolate, JSString* input) {
   return JSArray::Cast(vm.ExecuteRegex(code(), input, flag(), true));
 }
 
-Handle<JSArray> JSArray::NewEmptyArray(Isolate* isolate,
-                                       uint32_t length,
+Handle<JSArray> JSArray::NewEmptyArray(Isolate* isolate, uint32_t length,
                                        size_t initial_capacity) {
   auto fixed_array = FixedArray::New(isolate, initial_capacity);
   for (int i = 0; i < length; i++) {
@@ -147,15 +138,14 @@ Handle<JSArray> JSArray::NewEmptyArray(Isolate* isolate,
   return NewWithElement(isolate, length, *fixed_array);
 }
 
-Handle<JSArray> JSArray::NewWithElement(Isolate* isolate,
-                                        uint32_t length,
+Handle<JSArray> JSArray::NewWithElement(Isolate* isolate, uint32_t length,
                                         FixedArray* element) {
   auto heap_obj = HeapObject::New(isolate, isolate->array_shape());
-  auto length_ptr = reinterpret_cast<uint32_t*>(
-      FIELD_ADDR(heap_obj, kLengthOffset));
+  auto length_ptr =
+      reinterpret_cast<uint32_t*>(FIELD_ADDR(heap_obj, kLengthOffset));
   *length_ptr = length;
-  auto element_ptr = reinterpret_cast<FixedArray**>(
-      FIELD_ADDR(heap_obj, kElementOffset));
+  auto element_ptr =
+      reinterpret_cast<FixedArray**>(FIELD_ADDR(heap_obj, kElementOffset));
   *element_ptr = element;
   return make_handle(reinterpret_cast<JSArray*>(heap_obj));
 }
@@ -169,21 +159,20 @@ Handle<JSString> JSString::New(Isolate* isolate, size_t length) {
   return New(isolate, nullptr, length);
 }
 
-Handle<JSString> JSString::New(
-    Isolate* isolate, const Utf16CodePoint* cp, size_t length) {
+Handle<JSString> JSString::New(Isolate* isolate, const Utf16CodePoint* cp,
+                               size_t length) {
   auto required_size = kStringLengthSize + kPointerSize;
-  auto backing_store_size =  sizeof(u32) * (length + 1);
+  auto backing_store_size = sizeof(u32) * (length + 1);
   auto aligned_size = LUX_ALIGN_OFFSET(required_size, kAlignment);
-  auto aligned_backing_store_size = LUX_ALIGN_OFFSET(
-      backing_store_size, kAlignment);
-  auto str = HeapObject::New(isolate, isolate->string_shape(),
-                             aligned_size);
+  auto aligned_backing_store_size =
+      LUX_ALIGN_OFFSET(backing_store_size, kAlignment);
+  auto str = HeapObject::New(isolate, isolate->string_shape(), aligned_size);
   auto store = U32FixedArray::New(isolate, aligned_backing_store_size);
-  auto size_field = reinterpret_cast<uint32_t*>(
-      FIELD_ADDR(str, kStringLengthOffset));
+  auto size_field =
+      reinterpret_cast<uint32_t*>(FIELD_ADDR(str, kStringLengthOffset));
   *size_field = length;
-  auto store_field = reinterpret_cast<U32FixedArray**>(
-      FIELD_ADDR(str, kStringPtrOffset));
+  auto store_field =
+      reinterpret_cast<U32FixedArray**>(FIELD_ADDR(str, kStringPtrOffset));
   if (cp) {
     for (int i = 0; i < length; i++) {
       store->write(i, cp[i]);
@@ -193,8 +182,7 @@ Handle<JSString> JSString::New(
   return make_handle(reinterpret_cast<JSString*>(str));
 }
 
-JSString::Utf8String::Utf8String(JSString* str)
-    : length_(str->length()) {
+JSString::Utf8String::Utf8String(JSString* str) : length_(str->length()) {
   auto cp = str->data();
   std::stringstream st;
   for (int i = 0; i < length_; i++) {
@@ -208,7 +196,7 @@ void JSString::Append(Isolate* isolate, u32 v) {
   if (next_size >= data()->length()) {
     auto capacity = data()->length();
     auto next = U32FixedArray::NewWithoutHandle(
-        isolate, (capacity < 10? 10: capacity) * 2);
+        isolate, (capacity < 10 ? 10 : capacity) * 2);
     next->Copy(data());
     *FIELD_PROPERTY(U32FixedArray**, this, kStringPtrOffset) = next;
   }
@@ -232,7 +220,7 @@ bool JSString::Equals(const JSString* js_string) const {
 
 bool JSString::GreaterThan(const JSString* js_string) const {
   auto bigger = length() > js_string->length();
-  auto len = bigger? length(): js_string->length();
+  auto len = bigger ? length() : js_string->length();
 
   for (auto i = 0; i < len; i++) {
     if (at(i) > js_string->at(i)) {
@@ -240,14 +228,13 @@ bool JSString::GreaterThan(const JSString* js_string) const {
     }
   }
 
-  return bigger? true: false;
+  return bigger ? true : false;
 }
 
 JSNumber* JSNumber::NewWithoutHandle(Isolate* isolate, double value) {
   auto required_size = kValueSize;
   auto aligned_size = LUX_ALIGN_OFFSET(required_size, kAlignment);
-  auto n = HeapObject::New(isolate, isolate->number_shape(),
-                           aligned_size);
+  auto n = HeapObject::New(isolate, isolate->number_shape(), aligned_size);
   auto d = FIELD_PROPERTY(double*, n, kValueOffset);
   *d = value;
   return reinterpret_cast<JSNumber*>(n);
@@ -264,11 +251,11 @@ Handle<JSSpecials> JSSpecials::New(Isolate* isolate, JSSpecials::Type type) {
   return make_handle(NewWithoutHandle(isolate, type));
 }
 
-JSSpecials* JSSpecials::NewWithoutHandle(
-    Isolate* isolate, JSSpecials::Type type) {
+JSSpecials* JSSpecials::NewWithoutHandle(Isolate* isolate,
+                                         JSSpecials::Type type) {
   auto heap_obj = HeapObject::New(isolate, isolate->specials_shape());
-  auto flag = reinterpret_cast<uint8_t*>(
-      FIELD_ADDR(heap_obj, kSpecialsStartOffset));
+  auto flag =
+      reinterpret_cast<uint8_t*>(FIELD_ADDR(heap_obj, kSpecialsStartOffset));
   *flag = type;
   return reinterpret_cast<JSSpecials*>(heap_obj);
 }

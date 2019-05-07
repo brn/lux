@@ -283,6 +283,16 @@ AST_VISIT(CharSequence) {
   __ Bind(&ok);
 }
 
+AST_VISIT(EscapeSequence) {
+  __ RegexComment("EscapeSequence");
+  __ RegexEscapeSequence(static_cast<uint8_t>(node->type()));
+
+  Label ok;
+
+  jump_point_ >>= [&](auto point) { __ RegexBranch(&ok, point); };
+  __ Bind(&ok);
+}
+
 AST_VISIT(Any) {
   EnableSearchIf();
   bool fall_through = false;
@@ -492,6 +502,15 @@ Utf16CodePoint Parser::DecodeHexEscape(bool* ok, int len) {
   return Utf16CodePoint(ret);
 }
 
+Utf16CodePoint Parser::DecodeAsciiEscapeSequence(bool* ok) {
+  auto u = DecodeHexEscape(ok, 2);
+  if (u > 127) {
+    *ok = false;
+  }
+
+  return u;
+}
+
 Maybe<JSString*> Parser::ParseGroupSpecifierName() {
   EXPECT_WITH_RETURN(this, cur(), '<', Nothing<JSString*>());
   if (!Chars::IsIdentifierStart(cur())) {
@@ -500,13 +519,15 @@ Maybe<JSString*> Parser::ParseGroupSpecifierName() {
   }
   std::vector<Utf16CodePoint> buf;
   auto value = cur();
-  while (has_more() && Chars::IsIdentifierPart(cur(), false) && value != '>') {
+  while (has_more() &&
+         (Chars::IsIdentifierPart(cur(), false) || value == '\\') &&
+         value != '>') {
     value = cur();
     if (value == '\\') {
       std::vector<Utf16CodePoint> unicode_identifier;
       advance();
-      auto unicode_keyword = value;
-      if (unicode_keyword == 'u') {
+      auto unicode_keyword = cur();
+      if (Chars::IsStartUnicodeEscapeSequence(unicode_keyword)) {
         advance();
         bool ok = true;
         value = DecodeHexEscape(&ok);
@@ -573,27 +594,84 @@ Maybe<Ast*> Parser::ParseChar(bool allow_selection) {
   ENTER();
   bool escaped = false;
   std::vector<Utf16CodePoint> buf;
+  auto conj = new (zone()) Conjunction();
   while (has_more() && (!IsSpecialChar(cur()) || escaped)) {
-    if (cur() == '\\') {
+    Maybe<EscapeSequence*> special = Nothing<EscapeSequence*>();
+    auto current = advance();
+    if (escaped) {
+      switch (current) {
+        case 'c': {
+          if (Chars::IsCtrlSuccessor(current)) {
+            current = Utf16CodePoint(Chars::GetAsciiCodeFromCarretWord(cur()));
+            advance();
+          } else {
+            buf.push_back(Utf16CodePoint(0x005c));
+          }
+          break;
+        }
+        case 'x': {
+          bool ok = true;
+          current = DecodeAsciiEscapeSequence(&ok);
+          if (!ok) {
+            REPORT_SYNTAX_ERROR(this, "Invalid escape sequence.");
+          }
+          break;
+        }
+#define DEF_REGEXP_ESCAPE_SEQUENCE_AST_BUILDER(NAME, value, ch)              \
+  case ch:                                                                   \
+    special = Just(new (zone()) EscapeSequence(RegexSpecialCharType::NAME)); \
+    break;
+          REGEXP_ESCAPE_SEQUENCES(DEF_REGEXP_ESCAPE_SEQUENCE_AST_BUILDER)
+#undef DEF_REGEXP_ESCAPE_SEQUENCE_AST_BUILDER
+        default:
+          auto code = Chars::GetAsciiCtrlCodeFromWord(current.code());
+          if (code) {
+            current = Utf16CodePoint(code);
+          }
+      }
+      special >>= [&](EscapeSequence* special) {
+        if (buf.size() == 1) {
+          conj->Push(new (zone()) Char(buf.back()));
+        } else if (buf.size() > 1) {
+          auto str = JSString::New(isolate_, buf.data(), buf.size());
+          conj->Push(new (zone()) CharSequence(*str));
+        }
+        conj->Push(special);
+      };
+    }
+    if (current == '\\') {
       escaped = !escaped;
+      if (escaped) {
+        continue;
+      }
     } else {
       escaped = false;
     }
-    auto n = advance();
-    buf.push_back(n);
+    if (!special) {
+      buf.push_back(current);
+    } else {
+      buf.clear();
+    }
   }
 
-  if (buf.size() == 0 && IsRepeatChar(cur().code())) {
+  if (buf.size() == 0 && conj->size() == 0 && IsRepeatChar(cur().code())) {
     advance();
     update_start_pos();
     REPORT_SYNTAX_ERROR(this, "Nothing to repeat.");
   }
 
-  if (buf.size() == 1) {
-    return Just(new (zone()) Char(buf.back()));
+  if (conj->size() == 0) {
+    if (buf.size() == 1) {
+      return Just(new (zone()) Char(buf.back()));
+    }
+    auto str = JSString::New(isolate_, buf.data(), buf.size());
+    return Just(new (zone()) CharSequence(*str));
   }
-  auto str = JSString::New(isolate_, buf.data(), buf.size());
-  return Just(new (zone()) CharSequence(*str));
+
+  if (conj->size() == 1) {
+    return Just(conj->at(0));
+  }
+  return Just(conj);
 }
 
 Maybe<Ast*> Parser::ParseRepeat(Ast* node) {

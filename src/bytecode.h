@@ -25,10 +25,10 @@
 
 #include <string>
 #include <vector>
+#include "./objects/jsobject.h"
 #include "./unicode.h"
 #include "./utils.h"
 #include "./zone.h"
-#include "./objects/jsobject.h"
 
 namespace lux {
 class Isolate;
@@ -109,7 +109,7 @@ class BytecodeExecutable;
 //          +------------------------------------+
 //
 
-enum class BytecodeLayout: uint8_t {
+enum class BytecodeLayout : uint8_t {
   kNone,
   kShort1,
   kShort2,
@@ -129,125 +129,118 @@ struct BytecodeOperand {
   uint64_t mask;
 };
 
-#define REGEX_BYTECODE_LIST_WITOUT_MATCHED(A)                 \
-  A(RegexComment, Word1, (kPointerSize + 1), 1, const char*)  \
-  A(RegexReserveCapture, Double3, 3, 1, uint16_t)             \
-  A(RegexStartCapture, Double3, 3, 1, uint16_t)               \
-  A(RegexDisableRetry, None, 1, 0)                            \
-  A(RegexCheckEnd, None, 1, 0)                                \
-  A(RegexEnableSearch, None, 1, 0)                            \
-  A(RegexUpdateCapture, None, 1, 0)                           \
-  A(RegexMatchAny, None, 1, 0)                                \
-  A(RegexPopThread, None, 1, 0)                               \
-  A(RegexResetMatchedCount, None, 1, 0)                       \
-  A(RegexRune, Double3, 3, 1, u16)                            \
-  A(RegexCheckPosition, Wide1, 5, 1, BytecodeLabel*)          \
-  A(RegexJumpIfMatchedCountLT, Wide4, 7, 2, uint16_t, BytecodeLabel*) \
+#define REGEX_BYTECODE_LIST_WITOUT_MATCHED(A)                            \
+  A(RegexComment, Word1, (kPointerSize + 1), 1, const char*)             \
+  A(RegexReserveCapture, Double3, 3, 1, uint16_t)                        \
+  A(RegexStartCapture, Double3, 3, 1, uint16_t)                          \
+  A(RegexDisableRetry, None, 1, 0)                                       \
+  A(RegexCheckEnd, None, 1, 0)                                           \
+  A(RegexEnableSearch, None, 1, 0)                                       \
+  A(RegexUpdateCapture, None, 1, 0)                                      \
+  A(RegexMatchAny, None, 1, 0)                                           \
+  A(RegexPopThread, None, 1, 0)                                          \
+  A(RegexResetMatchedCount, None, 1, 0)                                  \
+  A(RegexRune, Double3, 3, 1, u16)                                       \
+  A(RegexCheckPosition, Wide1, 5, 1, BytecodeLabel*)                     \
+  A(RegexJumpIfMatchedCountLT, Wide4, 7, 2, uint16_t, BytecodeLabel*)    \
   A(RegexJumpIfMatchedCountEqual, Wide4, 7, 2, uint16_t, BytecodeLabel*) \
-  A(RegexPushThread, Wide1, 5, 1, BytecodeLabel*)             \
-  A(RegexSome, Word1, (kPointerSize + 1), 1, JSString*)       \
-  A(RegexEvery, Word1, (kPointerSize + 1), 1, JSString*)      \
-  A(RegexBranch, Wide3, 9, 1, BytecodeLabel*, BytecodeLabel*) \
-  A(RegexJump, Wide1, 5, 1, BytecodeLabel*)                   \
-  A(RegexJumpIfMatched, Wide1, 5, 1, BytecodeLabel*)          \
-  A(RegexJumpIfFailed, Wide1, 5, 1, BytecodeLabel*)
+  A(RegexPushThread, Wide1, 5, 1, BytecodeLabel*)                        \
+  A(RegexSome, Word1, (kPointerSize + 1), 1, JSString*)                  \
+  A(RegexEvery, Word1, (kPointerSize + 1), 1, JSString*)                 \
+  A(RegexBranch, Wide3, 9, 1, BytecodeLabel*, BytecodeLabel*)            \
+  A(RegexJump, Wide1, 5, 1, BytecodeLabel*)                              \
+  A(RegexJumpIfMatched, Wide1, 5, 1, BytecodeLabel*)                     \
+  A(RegexJumpIfFailed, Wide1, 5, 1, BytecodeLabel*)                      \
+  A(RegexEscapeSequence, Short1, 2, 1, uint8_t)
 
-#define REGEX_BYTECODE_LIST(A)                  \
-  REGEX_BYTECODE_LIST_WITOUT_MATCHED(A)         \
-  A(RegexFailed, None, 1, 0)                    \
+#define REGEX_BYTECODE_LIST(A)          \
+  REGEX_BYTECODE_LIST_WITOUT_MATCHED(A) \
+  A(RegexFailed, None, 1, 0)            \
   A(RegexMatched, None, 1, 0)
 
-#define BYTECODE_LIST_WITHOUT_RETURN(A)                                 \
-  A(ExecIf, None, 0, 0)                                                 \
-  /*=========================== Short1 ===========================*/    \
-  /* Compare Reg1 < Reg2 to Acc. */                                     \
-  A(Print, Short1, 2, 1, Var*)  /* Increment Reg. */                    \
-  A(Inc, Short1, 2, 1, Var*)  /* Increment Reg. */                      \
-  A(Dec, Short1, 2, 1, Var*)  /* Increment Reg. */                      \
-  A(NewEmptyJSArray, Short1, 2, 1, Var*)                                \
-  A(NewEmptyJSString, Short1, 2, 1, Var*)                               \
-  /*=========================== Short2 3 ===========================*/  \
-  /* Move register to register. */                                      \
-  A(Mov, Short2, 3, 2, Var*, Var*)                                      \
-  /* Store Imm to Reg */                                                \
-  A(I8Constant, Short2, 3, 2, int8_t, Var*)                             \
-  /* Compare both registers and store result to flag register */        \
-  A(Cmp, Short2, 3, 2, Var*, Var*)                                      \
-  /* Compare Reg1 > Reg2 to flag register. */                           \
-  A(Gt, Short2, 3, 2, Var*, Var*)                                       \
-  A(GtEq, Short2, 3, 2, Var*, Var*)                                     \
-  /* Add Reg and out Acc. */                                            \
-  A(Add, Short2, 3, 2, Var*, Var*)                                      \
-  /* Sub Reg and out Acc. */                                            \
-  A(Sub, Short2, 3, 2, Var*, Var*)                                      \
-  /* Mul Reg and out Acc. */                                            \
-  A(Mul, Short2, 3, 2, Var*, Var*)                                      \
-  /* Div Reg and out Acc. */                                            \
-  A(Div, Short2, 3, 2, Var*, Var*)                                      \
-  A(Append, Short2, 3, 2, Var*, Var*)                                   \
-  /*=========================== Short3 ===========================*/    \
-  /* Call Fast builtin property */                                      \
-  A(CallFastPropertyA, Short3, 4, 1, FastProperty, Var*, Var*)          \
-  /* Load Reg index to Reg */                                           \
-  A(LoadIx, Short3, 4, 3,                                               \
-    Var*, Var*, Var*)                                                   \
-  /*=========================== Word ===========================*/      \
-  A(Comment, Word1, (kPointerSize + 1), 1, const char*)                 \
-  /*=========================== Double1 ===========================*/   \
-  /* Store Constant to Reg */                                           \
-  A(LoadConstant, Double1, 4, 2, uint16_t, Var*)                        \
-  /*=========================== Wide1 ===========================*/     \
+#define BYTECODE_LIST_WITHOUT_RETURN(A)                                   \
+  A(ExecIf, None, 0, 0)                                                   \
+  /*=========================== Short1 ===========================*/      \
+  /* Compare Reg1 < Reg2 to Acc. */                                       \
+  A(Print, Short1, 2, 1, Var*) /* Increment Reg. */                       \
+  A(Inc, Short1, 2, 1, Var*)   /* Increment Reg. */                       \
+  A(Dec, Short1, 2, 1, Var*)   /* Increment Reg. */                       \
+  A(NewEmptyJSArray, Short1, 2, 1, Var*)                                  \
+  A(NewEmptyJSString, Short1, 2, 1, Var*)                                 \
+  /*=========================== Short2 3 ===========================*/    \
+  /* Move register to register. */                                        \
+  A(Mov, Short2, 3, 2, Var*, Var*)                                        \
+  /* Store Imm to Reg */                                                  \
+  A(I8Constant, Short2, 3, 2, int8_t, Var*)                               \
+  /* Compare both registers and store result to flag register */          \
+  A(Cmp, Short2, 3, 2, Var*, Var*)                                        \
+  /* Compare Reg1 > Reg2 to flag register. */                             \
+  A(Gt, Short2, 3, 2, Var*, Var*)                                         \
+  A(GtEq, Short2, 3, 2, Var*, Var*)                                       \
+  /* Add Reg and out Acc. */                                              \
+  A(Add, Short2, 3, 2, Var*, Var*)                                        \
+  /* Sub Reg and out Acc. */                                              \
+  A(Sub, Short2, 3, 2, Var*, Var*)                                        \
+  /* Mul Reg and out Acc. */                                              \
+  A(Mul, Short2, 3, 2, Var*, Var*)                                        \
+  /* Div Reg and out Acc. */                                              \
+  A(Div, Short2, 3, 2, Var*, Var*)                                        \
+  A(Append, Short2, 3, 2, Var*, Var*)                                     \
+  /*=========================== Short3 ===========================*/      \
+  /* Call Fast builtin property */                                        \
+  A(CallFastPropertyA, Short3, 4, 1, FastProperty, Var*, Var*)            \
+  /* Load Reg index to Reg */                                             \
+  A(LoadIx, Short3, 4, 3, Var*, Var*, Var*)                               \
+  /*=========================== Word ===========================*/        \
+  A(Comment, Word1, (kPointerSize + 1), 1, const char*)                   \
+  /*=========================== Double1 ===========================*/     \
+  /* Store Constant to Reg */                                             \
+  A(LoadConstant, Double1, 4, 2, uint16_t, Var*)                          \
+  /*=========================== Wide1 ===========================*/       \
   A(Jmp, Wide1, 5, 1, BytecodeLabel*) /* Jump if Acc == true to offset */ \
-  /* Jump if Acc == true to offset */                                   \
-  A(JmpIfTrue, Wide1, 5, 1, BytecodeLabel*)                             \
-  /* Jump if Acc == false to offset */                                  \
-  A(JmpIfFalse, Wide1, 5, 1, BytecodeLabel*)                            \
-  /*=========================== Wide2 ===========================*/     \
-  /* Store Imm to Reg */                                                \
+  /* Jump if Acc == true to offset */                                     \
+  A(JmpIfTrue, Wide1, 5, 1, BytecodeLabel*)                               \
+  /* Jump if Acc == false to offset */                                    \
+  A(JmpIfFalse, Wide1, 5, 1, BytecodeLabel*)                              \
+  /*=========================== Wide2 ===========================*/       \
+  /* Store Imm to Reg */                                                  \
   A(I32Constant, Wide2, 6, 2, int32_t, Var*)
 
-#define BYTECODE_LIST(A)                                            \
-  /*=========================== None ===========================*/  \
-  REGEX_BYTECODE_LIST(A)                                            \
-  BYTECODE_LIST_WITHOUT_RETURN(A)                                   \
+#define BYTECODE_LIST(A)                                           \
+  /*=========================== None ===========================*/ \
+  REGEX_BYTECODE_LIST(A)                                           \
+  BYTECODE_LIST_WITHOUT_RETURN(A)                                  \
   A(Return, Short1, 2, 1, Var*)
 
-enum class Bytecode: uint8_t {
+enum class Bytecode : uint8_t {
 #define BYTECODE_DEF(Name, Layout, size, num, ...) k##Name,
   BYTECODE_LIST(BYTECODE_DEF)
 #undef BYTECODE_DEF
-  kLastSentinel__,
+      kLastSentinel__,
   kExit,
 };
 
-enum class AddressingMode: uint8_t {
+enum class AddressingMode : uint8_t {
   kPointer,
   kImmediate,
 };
 
-enum class FastProperty: uint8_t {
-  kLength,
-  kAppendChar
-};
+enum class FastProperty : uint8_t { kLength, kAppendChar };
 
 class Var {
  public:
-  explicit Var(AddressingMode mode
-                       = AddressingMode::kImmediate)
+  explicit Var(AddressingMode mode = AddressingMode::kImmediate)
       : mode_(mode), register_id_(-1) {}
 
   LUX_GETTER(AddressingMode, mode, mode_)
   LUX_CONST_PROPERTY(uint8_t, id, register_id_)
-  bool has_id() const {
-    return register_id_ != -1;
-  }
+  bool has_id() const { return register_id_ != -1; }
 
   static Var kFlag;
   static Var kAcc;
 
  private:
-  explicit Var(int id, AddressingMode mode
-               = AddressingMode::kImmediate)
+  explicit Var(int id, AddressingMode mode = AddressingMode::kImmediate)
       : mode_(mode), register_id_(id) {}
   AddressingMode mode_;
   int32_t register_id_;
@@ -271,9 +264,7 @@ class RegisterAllocator {
     kImmRange = 128
   };
 
-  RegisterAllocator() {
-    use_1.assign(1023);
-  }
+  RegisterAllocator() { use_1.assign(1023); }
 
   static Var Parameter(int id) {
     auto r = Var();
@@ -283,9 +274,9 @@ class RegisterAllocator {
 
   int32_t use(AddressingMode mode) {
     bool imm = mode == AddressingMode::kImmediate;
-    auto ret = DoUse(imm? &use_1: &addr_1);
+    auto ret = DoUse(imm ? &use_1 : &addr_1);
     if (ret == -1) {
-      ret = DoUse(imm? &use_2: &addr_2);
+      ret = DoUse(imm ? &use_2 : &addr_2);
       if (ret > -1) {
         if (imm) {
           ret += 64;
@@ -330,9 +321,8 @@ class RegisterAllocator {
   Bitset<uint64_t> addr_2;
 };
 
-class BytecodeConstantArray:
-      public GenericFixedArray<
-  Object*, BytecodeConstantArray, kPointerSize> {
+class BytecodeConstantArray
+    : public GenericFixedArray<Object*, BytecodeConstantArray, kPointerSize> {
  public:
 #ifdef DEBUG
   std::string ToString() const;
@@ -340,9 +330,8 @@ class BytecodeConstantArray:
 };
 
 class BytecodeFetcher;
-class BytecodeArray:
-      public GenericFixedArray<
-  uint8_t, BytecodeArray, sizeof(uint8_t)> {
+class BytecodeArray
+    : public GenericFixedArray<uint8_t, BytecodeArray, sizeof(uint8_t)> {
  public:
 #ifdef DEBUG
   std::string ToString(BytecodeConstantArray* constant_pool);
@@ -351,20 +340,15 @@ class BytecodeArray:
 
 class BytecodeFetcher {
  public:
-  explicit BytecodeFetcher(BytecodeArray* array)
-      : pc_(0), array_(array) {}
+  explicit BytecodeFetcher(BytecodeArray* array) : pc_(0), array_(array) {}
 
   inline Bytecode FetchBytecode() {
     return static_cast<Bytecode>(FetchBytecodeAsInt());
   }
 
-  inline uint8_t FetchBytecodeAsInt() {
-    return array_->at(pc_++);
-  }
+  inline uint8_t FetchBytecodeAsInt() { return array_->at(pc_++); }
 
-  inline int8_t FetchNextShortOperand() {
-    return array_->at(pc_++);
-  }
+  inline int8_t FetchNextShortOperand() { return array_->at(pc_++); }
 
   inline int16_t FetchNextDoubleOperand() {
     auto a = array_->at(pc_++);
@@ -389,9 +373,8 @@ class BytecodeFetcher {
     auto f = static_cast<uint64_t>(array_->at(pc_++));
     auto g = static_cast<uint64_t>(array_->at(pc_++));
     auto h = static_cast<uint64_t>(array_->at(pc_++));
-    return (a | (b << 8) | (c << 16) | (d << 24)
-            | (e << 32) | (f << 40) | (g << 48)
-            | (h << 56));
+    return (a | (b << 8) | (c << 16) | (d << 24) | (e << 32) | (f << 40) |
+            (g << 48) | (h << 56));
   }
 
 #ifdef PLATFORM_64BIT
@@ -406,29 +389,17 @@ class BytecodeFetcher {
   }
 #endif
 
-  inline void UpdatePCToRegexFailed() {
-    pc_ = length() - 3;
-  }
+  inline void UpdatePCToRegexFailed() { pc_ = length() - 3; }
 
-  inline void UpdatePCToRegexMatched() {
-    pc_ = length() - 4;
-  }
+  inline void UpdatePCToRegexMatched() { pc_ = length() - 4; }
 
-  inline void UpdatePC(uint32_t jmp) {
-    pc_ = jmp;
-  }
+  inline void UpdatePC(uint32_t jmp) { pc_ = jmp; }
 
-  inline bool HasMore() const {
-    return pc_ <= array_->length() - 3;
-  }
+  inline bool HasMore() const { return pc_ <= array_->length() - 3; }
 
-  inline uint32_t pc() const {
-    return pc_;
-  }
+  inline uint32_t pc() const { return pc_; }
 
-  inline uint32_t length() {
-    return array_->length();
-  }
+  inline uint32_t length() { return array_->length(); }
 
  private:
   uint32_t pc_;
@@ -473,36 +444,33 @@ class BytecodeUtil {
 
 #ifdef DEBUG
   static const char* ToStringOpecode(Bytecode bc) {
-    static std::array<
-      const char*,
-      (static_cast<uint8_t>(Bytecode::kExit) + 1)> kOpecodeStr = {{
+    static std::array<const char*, (static_cast<uint8_t>(Bytecode::kExit) + 1)>
+        kOpecodeStr = {{
 #define BYTECODE_CASE(Name, Layout, size, n, ...) #Name,
-        BYTECODE_LIST(BYTECODE_CASE)
+            BYTECODE_LIST(BYTECODE_CASE)
 #undef BYTECODE_CASE
-        "Sentinel",
-        "Exit"
-      }};
+                "Sentinel",
+            "Exit"}};
     return kOpecodeStr[static_cast<uint8_t>(bc)];
   }
 
   static std::string ToString(BytecodeFetcher* fetcher);
 
-  static std::string ToStringField(Bytecode bc,
-                                   BytecodeFetcher* fetcher,
+  static std::string ToStringField(Bytecode bc, BytecodeFetcher* fetcher,
                                    size_t len);
 #endif
 
  private:
-  static const std::array<
-   BytecodeLayout,
-   static_cast<uint8_t>(Bytecode::kLastSentinel__)> kLayout;
+  static const std::array<BytecodeLayout,
+                          static_cast<uint8_t>(Bytecode::kLastSentinel__)>
+      kLayout;
 
-  static const std::array<
-   uint8_t,
-    static_cast<uint8_t>(Bytecode::kLastSentinel__)> kSize;
+  static const std::array<uint8_t,
+                          static_cast<uint8_t>(Bytecode::kLastSentinel__)>
+      kSize;
 };
 
-class BytecodeNode: public Zone {
+class BytecodeNode : public Zone {
  public:
   explicit BytecodeNode(Bytecode bytecode, int64_t operands)
       : operands_(operands),
@@ -511,25 +479,21 @@ class BytecodeNode: public Zone {
         jmp2_(nullptr),
         next_(nullptr) {}
 
-  explicit BytecodeNode(Bytecode bytecode,
-                        BytecodeNode* jmp)
+  explicit BytecodeNode(Bytecode bytecode, BytecodeNode* jmp)
       : operands_(0),
         bytecode_(bytecode),
         jmp_(jmp),
         jmp2_(nullptr),
         next_(nullptr) {}
 
-  explicit BytecodeNode(Bytecode bytecode,
-                        int64_t operands,
-                        BytecodeNode* jmp)
+  explicit BytecodeNode(Bytecode bytecode, int64_t operands, BytecodeNode* jmp)
       : operands_(operands),
         bytecode_(bytecode),
         jmp_(jmp),
         jmp2_(nullptr),
         next_(nullptr) {}
 
-  explicit BytecodeNode(Bytecode bytecode,
-                        BytecodeNode* jmp1,
+  explicit BytecodeNode(Bytecode bytecode, BytecodeNode* jmp1,
                         BytecodeNode* jmp2)
       : operands_(0),
         bytecode_(bytecode),
@@ -572,8 +536,7 @@ class BytecodeLabel {
  public:
   using NodeList = std::vector<BytecodeNode*>;
 
-  BytecodeLabel()
-      : jmps_(nullptr) {}
+  BytecodeLabel() : jmps_(nullptr) {}
 
   LUX_PROPERTY(BytecodeNode*, to, to_)
 
@@ -599,13 +562,9 @@ class BytecodeLabel {
     }
   }
 
-  const NodeList& from_list() const {
-    return from_;
-  }
+  const NodeList& from_list() const { return from_; }
 
-  const NodeList& from2_list() const {
-    return from2_;
-  }
+  const NodeList& from2_list() const { return from2_; }
 
  private:
   NodeList from_;
@@ -617,12 +576,12 @@ class BytecodeLabel {
 
 class BytecodeArrayWriter;
 
-class BytecodeConstantNode: public Zone {
+class BytecodeConstantNode : public Zone {
  public:
-  explicit BytecodeConstantNode(Object* obj)
-      : ptr_(obj), next_(nullptr) {}
+  explicit BytecodeConstantNode(Object* obj) : ptr_(obj), next_(nullptr) {}
   LUX_CONST_PROPERTY(BytecodeConstantNode*, next, next_);
   LUX_CONST_PROPERTY(Object*, ptr, ptr_);
+
  private:
   Object* ptr_;
   BytecodeConstantNode* next_;
@@ -630,8 +589,7 @@ class BytecodeConstantNode: public Zone {
 
 class BytecodeArrayWriter {
  public:
-  explicit BytecodeArrayWriter(Isolate* isolate,
-                               ZoneAllocator* zone_alloc)
+  explicit BytecodeArrayWriter(Isolate* isolate, ZoneAllocator* zone_alloc)
       : current_offset_(0),
         constant_length_(0),
         isolate_(isolate),
@@ -650,9 +608,7 @@ class BytecodeArrayWriter {
 
  private:
   void Append(BytecodeNode* node);
-  LUX_INLINE ZoneAllocator* zone() const {
-    return zone_allocator_;
-  }
+  LUX_INLINE ZoneAllocator* zone() const { return zone_allocator_; }
   int32_t current_offset_;
   int32_t constant_length_;
   std::vector<BytecodeNode*> jmps_;
@@ -669,9 +625,7 @@ class BytecodeScope {
  public:
   explicit BytecodeScope(BytecodeBuilder* builder);
 
-  BytecodeNode* start() {
-    return start_;
-  }
+  BytecodeNode* start() { return start_; }
 
   BytecodeNode* end();
 
@@ -682,8 +636,7 @@ class BytecodeScope {
 
 class BytecodeBuilder {
  public:
-  explicit BytecodeBuilder(Isolate* isolate,
-                           ZoneAllocator* zone_allocator)
+  explicit BytecodeBuilder(Isolate* isolate, ZoneAllocator* zone_allocator)
       : zone_allocator_(zone_allocator) {
     bytecode_array_writer_(isolate, zone_allocator);
   }
@@ -709,18 +662,14 @@ class BytecodeBuilder {
     return register_allocator_.use(mode);
   }
 
-  LUX_INLINE void free_regiseter(uint32_t r) {
-    register_allocator_.unuse(r);
-  }
+  LUX_INLINE void free_regiseter(uint32_t r) { register_allocator_.unuse(r); }
 
   LUX_INLINE BytecodeNode* last_bytecode() {
     return bytecode_array_writer_->last_bytecode();
   }
 
  private:
-  ZoneAllocator* zone() const {
-    return zone_allocator_;
-  }
+  ZoneAllocator* zone() const { return zone_allocator_; }
 
   ZoneAllocator* zone_allocator_;
   LazyInitializer<BytecodeArrayWriter> bytecode_array_writer_;

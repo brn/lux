@@ -21,14 +21,15 @@
 // THE SOFTWARE.
 
 #include <gtest/gtest.h>
-#include "../utils/compare_node.h"
 #include "../../src/heap.h"
-#include "../utils/isolate_setup.h"
+#include "../../src/platform/os.h"
 #include "../../src/regexp.h"
 #include "../../src/unicode.h"
 #include "../../src/vm.h"
+#include "../utils/compare_node.h"
+#include "../utils/isolate_setup.h"
 
-class RegExpBytecodeTest: public lux::IsolateSetup {
+class RegExpBytecodeTest : public lux::IsolateSetup {
  protected:
   template <bool error = false, bool show_error = false>
   void RunTest(const char* regexp, const char* input, uint8_t flag,
@@ -40,13 +41,11 @@ class RegExpBytecodeTest: public lux::IsolateSetup {
     auto jsregexp = compiler.Compile(regexp, flag);
     printf("%s\n", jsregexp->code()->ToString().c_str());
     auto ret = jsregexp->Match(isolate_, *lux::JSString::New(isolate_, input));
-    ASSERT_TRUE(
-        lux::testing::CompareNode(regexp,
-                                  ret->ToString().c_str(), expectation));
+    ASSERT_TRUE(lux::testing::CompareNode(regexp, ret->ToString().c_str(),
+                                          expectation));
     //    printf("%s\n", ret->ToString().c_str());
   }
 };
-
 
 namespace {
 TEST_F(RegExpBytecodeTest, Simple) {
@@ -83,4 +82,68 @@ TEST_F(RegExpBytecodeTest, SimpleCharClassGlobal2) {
   RunTest("([ae][bx][cg])", "abcdefgdabc", lux::regexp::Flag::kGlobal,
           "JSArray[String(\"abc\"), String(\"abc\")]");
 }
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_10_A1_1_T1) {
+  RunTest("\\t", "	", lux::regexp::Flag::kNone,
+          "JSArray[String(\"	\")]");
+  RunTest("\\t\\t", "a		b", lux::regexp::Flag::kNone,
+          "JSArray[String(\"		\")]");
 }
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_10_A1_2_T1) {
+  RunTest("\\n", "\n", lux::regexp::Flag::kNone, "JSArray[String(\"\n\")]");
+  RunTest("\\n\\n", "a\n\nb", lux::regexp::Flag::kNone,
+          "JSArray[String(\"\n\n\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_10_A1_3_T1) {
+  RunTest("\\v", "", lux::regexp::Flag::kNone, "JSArray[String(\"\")]");
+  RunTest("\\v\\v", "ab", lux::regexp::Flag::kNone,
+          "JSArray[String(\"\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_10_A1_4_T1) {
+  RunTest("\\f", "", lux::regexp::Flag::kNone, "JSArray[String(\"\")]");
+  RunTest("\\f\\f", "ab", lux::regexp::Flag::kNone,
+          "JSArray[String(\"\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_10_A1_5_T1) {
+  RunTest("\\r", "\r", lux::regexp::Flag::kNone, "JSArray[String(\"\r\")]");
+  RunTest("\\r\\r", "a\r\rb", lux::regexp::Flag::kNone,
+          "JSArray[String(\"\r\r\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_10_A2_1_T1) {
+  for (int i = 0x0041; i <= 0x005a; i++) {
+    auto alpha = i;
+    std::string str;
+    lux::SPrintf(&str, false, "%c", alpha % 32);
+    std::string reg;
+    lux::SPrintf(&reg, false, "\\c%c", alpha);
+    std::string result;
+    printf("%d\n", str.at(0));
+    lux::SPrintf(&result, false, "JSArray[String(\"%s\")]", str.c_str());
+    RunTest(reg.c_str(), str.c_str(), lux::regexp::Flag::kNone, result.c_str());
+  }
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_10_A2_1_T2) {
+  for (int i = 0x0061; i <= 0x007A; i++) {
+    auto alpha = i;
+    std::string str;
+    lux::SPrintf(&str, false, "%c", alpha % 32);
+    std::string reg;
+    lux::SPrintf(&reg, false, "\\c%c", alpha);
+    std::string result;
+    printf("%d\n", str.at(0));
+    lux::SPrintf(&result, false, "JSArray[String(\"%s\")]", str.c_str());
+    RunTest(reg.c_str(), str.c_str(), lux::regexp::Flag::kNone, result.c_str());
+  }
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_10_A3_1_T1) {
+  RunTest("\\x01", u8"'\U00000001'", lux::regexp::Flag::kNone,
+          u8"JSArray[String(\"\U00000001\")]");
+}
+}  // namespace

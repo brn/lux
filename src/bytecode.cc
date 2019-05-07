@@ -21,81 +21,106 @@
 // THE SOFTWARE.
 
 #include "./bytecode.h"
-#include "./isolate.h"
 #include "./heap.h"
+#include "./isolate.h"
 
 namespace lux {
 
 using bu = BytecodeUtil;
 
-const BytecodeOperand BytecodeUtil::kOperandA = { 0, 0xFF };
-const BytecodeOperand BytecodeUtil::kOperandB = { 8, 0xFF };
-const BytecodeOperand BytecodeUtil::kOperandC = { 16, 0xFF };
-const BytecodeOperand BytecodeUtil::kOperandD = { 24, 0xFF };
-const BytecodeOperand BytecodeUtil::kOperandE = { 32, 0xFF };
-const BytecodeOperand BytecodeUtil::kOperandF = { 40, 0xFF };
-const BytecodeOperand BytecodeUtil::kOperandG = { 48, 0xFF };
-const BytecodeOperand BytecodeUtil::kOperandH = {
-    56, ~static_cast<uint64_t>(0) };
+const BytecodeOperand BytecodeUtil::kOperandA = {0, 0xFF};
+const BytecodeOperand BytecodeUtil::kOperandB = {8, 0xFF};
+const BytecodeOperand BytecodeUtil::kOperandC = {16, 0xFF};
+const BytecodeOperand BytecodeUtil::kOperandD = {24, 0xFF};
+const BytecodeOperand BytecodeUtil::kOperandE = {32, 0xFF};
+const BytecodeOperand BytecodeUtil::kOperandF = {40, 0xFF};
+const BytecodeOperand BytecodeUtil::kOperandG = {48, 0xFF};
+const BytecodeOperand BytecodeUtil::kOperandH = {56, ~static_cast<uint64_t>(0)};
 
-const BytecodeOperand BytecodeUtil::kOperandAx = { 0, 0xFFFF };
-const BytecodeOperand BytecodeUtil::kOperandBx = { 16, 0xFFFF };
-const BytecodeOperand BytecodeUtil::kOperandCx = { 32, 0xFFFF };
-const BytecodeOperand BytecodeUtil::kOperandDx = {
-    48, ~static_cast<uint64_t>(0) };
+const BytecodeOperand BytecodeUtil::kOperandAx = {0, 0xFFFF};
+const BytecodeOperand BytecodeUtil::kOperandBx = {16, 0xFFFF};
+const BytecodeOperand BytecodeUtil::kOperandCx = {32, 0xFFFF};
+const BytecodeOperand BytecodeUtil::kOperandDx = {48,
+                                                  ~static_cast<uint64_t>(0)};
 
-const BytecodeOperand BytecodeUtil::kOperandEax = { 0, 0xFFFFFFFF };
-const BytecodeOperand BytecodeUtil::kOperandEbx = {
-    32, ~static_cast<uint64_t>(0) };
+const BytecodeOperand BytecodeUtil::kOperandEax = {0, 0xFFFFFFFF};
+const BytecodeOperand BytecodeUtil::kOperandEbx = {32,
+                                                   ~static_cast<uint64_t>(0)};
 
-const BytecodeOperand BytecodeUtil::kOperandRax = {
-    0,  ~static_cast<uint64_t>(0) };
+const BytecodeOperand BytecodeUtil::kOperandRax = {0,
+                                                   ~static_cast<uint64_t>(0)};
 
-#define BYTECODE_CHECK(Name, Layout, size, argc, ...)                   \
-  static_assert(                                                        \
-      BytecodeLayout::k##Layout == BytecodeLayout::kNone? size == 1     \
-      : BytecodeLayout::k##Layout == BytecodeLayout::kShort1? size == 2 \
-      : BytecodeLayout::k##Layout == BytecodeLayout::kShort2? size == 3 \
-      : BytecodeLayout::k##Layout == BytecodeLayout::kShort3? size == 4 \
-      : BytecodeLayout::k##Layout == BytecodeLayout::kDouble1? size == 4 \
-      : BytecodeLayout::k##Layout == BytecodeLayout::kDouble2? size == 5 \
-      : BytecodeLayout::k##Layout == BytecodeLayout::kDouble3? size == 3 \
-      : BytecodeLayout::k##Layout == BytecodeLayout::kWord1? size == 9  \
-      : BytecodeLayout::k##Layout == BytecodeLayout::kWide1? size == 5  \
-      : BytecodeLayout::k##Layout ==                                    \
-      BytecodeLayout::kWide2? size == 6                                 \
-      :BytecodeLayout::k##Layout ==                                     \
-      BytecodeLayout::kWide3? size == 9                                 \
-      :BytecodeLayout::k##Layout ==                                     \
-      BytecodeLayout::kWide4? size == 7: false,                         \
-      "Bytecode "#Name" size is incorrect.");
+#define BYTECODE_CHECK(Name, Layout, size, argc, ...)                                            \
+  static_assert(                                                                                 \
+      BytecodeLayout::k##Layout == BytecodeLayout::kNone                                         \
+          ? size == 1                                                                            \
+          : BytecodeLayout::k##Layout == BytecodeLayout::kShort1                                 \
+                ? size == 2                                                                      \
+                : BytecodeLayout::k##Layout == BytecodeLayout::kShort2                           \
+                      ? size == 3                                                                \
+                      : BytecodeLayout::k##Layout == BytecodeLayout::kShort3                     \
+                            ? size == 4                                                          \
+                            : BytecodeLayout::k##Layout ==                                       \
+                                      BytecodeLayout::kDouble1                                   \
+                                  ? size == 4                                                    \
+                                  : BytecodeLayout::k##Layout ==                                 \
+                                            BytecodeLayout::kDouble2                             \
+                                        ? size == 5                                              \
+                                        : BytecodeLayout::k##Layout ==                           \
+                                                  BytecodeLayout::kDouble3                       \
+                                              ? size == 3                                        \
+                                              : BytecodeLayout::k##Layout ==                     \
+                                                        BytecodeLayout::kWord1                   \
+                                                    ? size == 9                                  \
+                                                    : BytecodeLayout::                           \
+                                                                  k##Layout ==                   \
+                                                              BytecodeLayout::                   \
+                                                                  kWide1                         \
+                                                          ? size == 5                            \
+                                                          : BytecodeLayout::                     \
+                                                                        k##Layout ==             \
+                                                                    BytecodeLayout::             \
+                                                                        kWide2                   \
+                                                                ? size == 6                      \
+                                                                : BytecodeLayout::               \
+                                                                              k##Layout ==       \
+                                                                          BytecodeLayout::       \
+                                                                              kWide3             \
+                                                                      ? size ==                  \
+                                                                            9                    \
+                                                                      : BytecodeLayout::         \
+                                                                                    k##Layout == \
+                                                                                BytecodeLayout:: \
+                                                                                    kWide4       \
+                                                                            ? size ==            \
+                                                                                  7              \
+                                                                            : false,             \
+      "Bytecode " #Name " size is incorrect.");
 REGEX_BYTECODE_LIST(BYTECODE_CHECK)
 #undef BYTECODE_CHECK
 
-const std::array<
-  BytecodeLayout,
-  static_cast<uint8_t>(Bytecode::kLastSentinel__)> bu::kLayout = {{
+const std::array<BytecodeLayout,
+                 static_cast<uint8_t>(Bytecode::kLastSentinel__)>
+    bu::kLayout = {{
 #define BYTECODE_LAYOUT_DEF(Name, Layout, size, num, ...) \
-    BytecodeLayout::k##Layout,
-    BYTECODE_LIST(BYTECODE_LAYOUT_DEF)
+  BytecodeLayout::k##Layout,
+        BYTECODE_LIST(BYTECODE_LAYOUT_DEF)
 #undef BYTECODE_LAYOUT_DEF
-  }};
+    }};
 
-const std::array<
-  uint8_t,
-  static_cast<uint8_t>(Bytecode::kLastSentinel__)> bu::kSize = {{
+const std::array<uint8_t, static_cast<uint8_t>(Bytecode::kLastSentinel__)>
+    bu::kSize = {{
 #define BYTECODE_LAYOUT_DEF(Name, Layout, size, num, ...) \
-    static_cast<uint8_t>(size),
-    BYTECODE_LIST(BYTECODE_LAYOUT_DEF)
+  static_cast<uint8_t>(size),
+        BYTECODE_LIST(BYTECODE_LAYOUT_DEF)
 #undef BYTECODE_LAYOUT_DEF
-  }};
+    }};
 
 #ifdef DEBUG
 std::string bu::ToString(BytecodeFetcher* fetcher) {
   std::stringstream st;
   auto bc = fetcher->FetchBytecode();
-  if (bc == Bytecode::kComment ||
-      bc == Bytecode::kRegexComment) {
+  if (bc == Bytecode::kComment || bc == Bytecode::kRegexComment) {
     st << ";;" << fetcher->FetchNextPtrOperand<const char*>();
     return st.str();
   } else if (bc == Bytecode::kExit) {
@@ -103,20 +128,19 @@ std::string bu::ToString(BytecodeFetcher* fetcher) {
   }
 
   switch (bc) {
-#define BYTECODE_CASE(Name, Layout, size, n, ...)     \
-    case Bytecode::k##Name: {                         \
-      size_t len = sizeof(#Name) - 1;                 \
-      st << #Name << ToStringField(bc, fetcher, len); \
-      return st.str();                                \
-    }
+#define BYTECODE_CASE(Name, Layout, size, n, ...)   \
+  case Bytecode::k##Name: {                         \
+    size_t len = sizeof(#Name) - 1;                 \
+    st << #Name << ToStringField(bc, fetcher, len); \
+    return st.str();                                \
+  }
     BYTECODE_LIST(BYTECODE_CASE)
 #undef BYTECODE_CASE
     default:
       UNREACHABLE();
-    return "";
+      return "";
   }
 }
-
 
 std::string BytecodeConstantArray::ToString() const {
   std::stringstream st;
@@ -140,22 +164,21 @@ std::string BytecodeArray::ToString(BytecodeConstantArray* constant_pool) {
     auto size = std::to_string(i).size();
     auto start = fetcher.pc();
     auto start_size = std::to_string(start).size();
-    auto detail = BytecodeUtil::ToString(&fetcher);;
+    auto detail = BytecodeUtil::ToString(&fetcher);
+    ;
     auto end = fetcher.pc() - 1;
     auto end_size = std::to_string(end).size();
     std::string indent((max - size) + 1, ' ');
     std::string indent2((max - start_size) + 1, ' ');
     std::string indent3((max - end_size) + 1, ' ');
-    st << (i > 0? "\n": "") << start << indent2 << "- " << end << indent3
-       << indent <<  i << ": "
-       << detail;
+    st << (i > 0 ? "\n" : "") << start << indent2 << "- " << end << indent3
+       << indent << i << ": " << detail;
   }
   st << "\n\n" << constant_pool->ToString();
   return st.str();
 }
 
-std::string BytecodeUtil::ToStringField(Bytecode bc,
-                                        BytecodeFetcher* fetcher,
+std::string BytecodeUtil::ToStringField(Bytecode bc, BytecodeFetcher* fetcher,
                                         size_t len) {
   std::stringstream st;
   std::string indent(28 - len, ' ');
@@ -166,74 +189,56 @@ std::string BytecodeUtil::ToStringField(Bytecode bc,
       return "";
     }
     case BytecodeLayout::kShort1: {
-      st << "  " << "A = "
-         << +fetcher->FetchNextShortOperand();
+      st << "  "
+         << "A = " << +fetcher->FetchNextShortOperand();
       return st.str();
     }
     case BytecodeLayout::kShort2: {
-      st << "  A = "
-         << +fetcher->FetchNextShortOperand()
-         << "  B = "
-         << +fetcher->FetchNextShortOperand();
+      st << "  A = " << +fetcher->FetchNextShortOperand()
+         << "  B = " << +fetcher->FetchNextShortOperand();
       return st.str();
     }
     case BytecodeLayout::kShort3: {
-      st << "  A = "
-         << +fetcher->FetchNextShortOperand()
-         << "  B = "
-         << +fetcher->FetchNextShortOperand()
-         << "  C = "
-         << +fetcher->FetchNextShortOperand();
+      st << "  A = " << +fetcher->FetchNextShortOperand()
+         << "  B = " << +fetcher->FetchNextShortOperand()
+         << "  C = " << +fetcher->FetchNextShortOperand();
       return st.str();
     }
     case BytecodeLayout::kDouble1: {
-      st << "  Ax = "
-         << +fetcher->FetchNextDoubleOperand()
-         << "  C = "
-         << +fetcher->FetchNextShortOperand();
+      st << "  Ax = " << +fetcher->FetchNextDoubleOperand()
+         << "  C = " << +fetcher->FetchNextShortOperand();
       return st.str();
     }
     case BytecodeLayout::kDouble2: {
-      st << "  Ax = "
-         << +fetcher->FetchNextDoubleOperand()
-         << "  Bx = "
-         << +fetcher->FetchNextDoubleOperand();
+      st << "  Ax = " << +fetcher->FetchNextDoubleOperand()
+         << "  Bx = " << +fetcher->FetchNextDoubleOperand();
       return st.str();
     }
     case BytecodeLayout::kDouble3: {
-      st << "  Ax = "
-         << +fetcher->FetchNextDoubleOperand();
+      st << "  Ax = " << +fetcher->FetchNextDoubleOperand();
       return st.str();
     }
     case BytecodeLayout::kWord1: {
-      st << "  Rax = "
-         << +fetcher->FetchNextWordOperand();
+      st << "  Rax = " << +fetcher->FetchNextWordOperand();
       return st.str();
     }
     case BytecodeLayout::kWide1: {
-      st << "  Eax = "
-         << +fetcher->FetchNextWideOperand();
+      st << "  Eax = " << +fetcher->FetchNextWideOperand();
       return st.str();
     }
     case BytecodeLayout::kWide2: {
-      st << "  Eax = "
-         << +fetcher->FetchNextWideOperand()
-         << "  E = "
-         << +fetcher->FetchNextShortOperand();
+      st << "  Eax = " << +fetcher->FetchNextWideOperand()
+         << "  E = " << +fetcher->FetchNextShortOperand();
       return st.str();
     }
     case BytecodeLayout::kWide3: {
-      st << "  Eax = "
-         << +fetcher->FetchNextWideOperand()
-         << "  Ebx = "
-         << +fetcher->FetchNextWideOperand();
+      st << "  Eax = " << +fetcher->FetchNextWideOperand()
+         << "  Ebx = " << +fetcher->FetchNextWideOperand();
       return st.str();
     }
     case BytecodeLayout::kWide4: {
-      st << "  Eax = "
-         << +fetcher->FetchNextWideOperand()
-         << "  Cx = "
-         << +fetcher->FetchNextDoubleOperand();
+      st << "  Eax = " << +fetcher->FetchNextWideOperand()
+         << "  Cx = " << +fetcher->FetchNextDoubleOperand();
       return st.str();
     }
     default:
@@ -245,9 +250,7 @@ std::string BytecodeUtil::ToStringField(Bytecode bc,
 Var Var::kAcc = Var(RegisterAllocator::kAcc);
 Var Var::kFlag = Var(RegisterAllocator::kFlag);
 
-void BytecodeArrayWriter::Emit(BytecodeNode* bytecode) {
-  Append(bytecode);
-}
+void BytecodeArrayWriter::Emit(BytecodeNode* bytecode) { Append(bytecode); }
 
 void BytecodeArrayWriter::EmitJump(BytecodeLabel* label,
                                    BytecodeNode* bytecode) {
@@ -279,11 +282,11 @@ void BytecodeArrayWriter::Bind(BytecodeLabel* label) {
   auto to = last_bytecode();
   label->set_to(to);
   label->set_bound_node(to);
-  for (auto &from : label->from_list()) {
+  for (auto& from : label->from_list()) {
     from->set_jmp(to);
     jmps_.push_back(from);
   }
-  for (auto &from : label->from2_list()) {
+  for (auto& from : label->from2_list()) {
     from->set_jmp2(to);
     jmps_.push_back(from);
   }
@@ -378,23 +381,19 @@ Handle<BytecodeExecutable> BytecodeArrayWriter::Flush() {
     node = node->next();
   }
 
-  for (auto &from : jmps_) {
+  for (auto& from : jmps_) {
     auto to = from->jmp();
-    auto target = to->next()? to->next()->offset(): to->offset() + 1;
+    auto target = to->next() ? to->next()->offset() : to->offset() + 1;
     INVALIDATE(bu::size(from->bytecode()) >= 5);
-    array->write(from->offset() + 1,
-                 bu::DecodeOperand(bu::kOperandA, target));
-    array->write(from->offset() + 2,
-                 bu::DecodeOperand(bu::kOperandB, target));
-    array->write(from->offset() + 3,
-                 bu::DecodeOperand(bu::kOperandC, target));
-    array->write(from->offset() + 4,
-                 bu::DecodeOperand(bu::kOperandD, target));
+    array->write(from->offset() + 1, bu::DecodeOperand(bu::kOperandA, target));
+    array->write(from->offset() + 2, bu::DecodeOperand(bu::kOperandB, target));
+    array->write(from->offset() + 3, bu::DecodeOperand(bu::kOperandC, target));
+    array->write(from->offset() + 4, bu::DecodeOperand(bu::kOperandD, target));
 
     to = from->jmp2();
     if (to != nullptr) {
       INVALIDATE(bu::size(from->bytecode()) == 9);
-      auto target = to->next()? to->next()->offset(): to->offset() + 1;
+      auto target = to->next() ? to->next()->offset() : to->offset() + 1;
       array->write(from->offset() + 5,
                    bu::DecodeOperand(bu::kOperandA, target));
       array->write(from->offset() + 6,
@@ -413,15 +412,14 @@ Handle<BytecodeExecutable> BytecodeArrayWriter::Flush() {
     pool->write(index++, obj);
     bcn = bcn->next();
   }
-  return BytecodeExecutable::New(isolate_,
-                                 *scope.Return(array),
+  return BytecodeExecutable::New(isolate_, *scope.Return(array),
                                  *scope.Return(pool));
 }
 
 BytecodeNode* BytecodeBuilder::RegexComment(const char* comment) {
 #ifdef DEBUG
-  auto n = new(zone()) BytecodeNode(Bytecode::kRegexComment,
-                                    reinterpret_cast<uintptr_t>(comment));
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexComment,
+                                     reinterpret_cast<uintptr_t>(comment));
   bytecode_array_writer_->Emit(n);
   return n;
 #endif
@@ -429,71 +427,61 @@ BytecodeNode* BytecodeBuilder::RegexComment(const char* comment) {
 }
 
 BytecodeNode* BytecodeBuilder::RegexMatched() {
-  auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexMatched);
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexMatched);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexFailed() {
-  auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexFailed);
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexFailed);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexReserveCapture(uint16_t v) {
-  auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexReserveCapture, v);
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexReserveCapture, v);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexStartCapture(uint16_t v) {
-  auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexStartCapture, v);
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexStartCapture, v);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexUpdateCapture() {
-  auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexUpdateCapture);
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexUpdateCapture);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexEnableSearch() {
-  auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexEnableSearch);
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexEnableSearch);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexDisableRetry() {
-  auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexDisableRetry);
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexDisableRetry);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexCheckEnd() {
-  auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexCheckEnd);
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexCheckEnd);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexMatchAny() {
-  auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexMatchAny);
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexMatchAny);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexResetMatchedCount() {
-  auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexResetMatchedCount);
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexResetMatchedCount);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -501,71 +489,68 @@ BytecodeNode* BytecodeBuilder::RegexResetMatchedCount() {
 BytecodeNode* BytecodeBuilder::RegexJumpIfMatchedCountEqual(
     uint16_t count, BytecodeLabel* label) {
   auto operand = bu::EncodeOperand(bu::kOperandCx, count);
-  auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexJumpIfMatchedCountEqual, operand, label->to());
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexJumpIfMatchedCountEqual,
+                                     operand, label->to());
   label->AddFrom(n);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexJumpIfMatchedCountLT(
-    uint16_t count, BytecodeLabel* label) {
+BytecodeNode* BytecodeBuilder::RegexJumpIfMatchedCountLT(uint16_t count,
+                                                         BytecodeLabel* label) {
   auto operand = bu::EncodeOperand(bu::kOperandCx, count);
-  auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexJumpIfMatchedCountLT, operand, label->to());
+  auto n = new (zone())
+      BytecodeNode(Bytecode::kRegexJumpIfMatchedCountLT, operand, label->to());
   label->AddFrom(n);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexCheckPosition(BytecodeLabel* label) {
-  auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexCheckPosition, label->to());
+  auto n =
+      new (zone()) BytecodeNode(Bytecode::kRegexCheckPosition, label->to());
   label->AddFrom(n);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexPushThread(BytecodeLabel* label) {
-  auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexPushThread, label->to());
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexPushThread, label->to());
   label->AddFrom(n);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexPopThread() {
-  auto n = new(zone()) BytecodeNode(
-      Bytecode::kRegexPopThread);
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexPopThread);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexRune(u16 u) {
-  auto n = new(zone()) BytecodeNode(Bytecode::kRegexRune, u);
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexRune, u);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexSome(JSString* input) {
-  auto n = new(zone()) BytecodeNode(Bytecode::kRegexSome,
-                                    reinterpret_cast<uintptr_t>(input));
+  auto n = new (zone())
+      BytecodeNode(Bytecode::kRegexSome, reinterpret_cast<uintptr_t>(input));
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexEvery(JSString* input) {
-  auto n = new(zone()) BytecodeNode(Bytecode::kRegexEvery,
-                                    reinterpret_cast<uintptr_t>(input));
+  auto n = new (zone())
+      BytecodeNode(Bytecode::kRegexEvery, reinterpret_cast<uintptr_t>(input));
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexBranch(BytecodeLabel* label,
                                            BytecodeLabel* label2) {
-  auto n = new(zone()) BytecodeNode(Bytecode::kRegexBranch,
-                                    label->to(),
-                                    label2->to());
+  auto n = new (zone())
+      BytecodeNode(Bytecode::kRegexBranch, label->to(), label2->to());
   label->AddFrom(n);
   label2->AddFrom(n, true);
   bytecode_array_writer_->Emit(n);
@@ -573,28 +558,35 @@ BytecodeNode* BytecodeBuilder::RegexBranch(BytecodeLabel* label,
 }
 
 BytecodeNode* BytecodeBuilder::RegexJump(BytecodeLabel* label) {
-  auto n = new(zone()) BytecodeNode(Bytecode::kRegexJump, label->to());
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexJump, label->to());
   label->AddFrom(n);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexJumpIfMatched(BytecodeLabel* label) {
-  auto n = new(zone()) BytecodeNode(Bytecode::kRegexJumpIfMatched, label->to());
+  auto n =
+      new (zone()) BytecodeNode(Bytecode::kRegexJumpIfMatched, label->to());
   label->AddFrom(n);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::RegexJumpIfFailed(BytecodeLabel* label) {
-  auto n = new(zone()) BytecodeNode(Bytecode::kRegexJumpIfFailed, label->to());
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexJumpIfFailed, label->to());
   label->AddFrom(n);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
+BytecodeNode* BytecodeBuilder::RegexEscapeSequence(uint8_t type) {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexEscapeSequence, type);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
 BytecodeNode* BytecodeBuilder::ExecIf() {
-  auto n = new(zone()) BytecodeNode(Bytecode::kExecIf);
+  auto n = new (zone()) BytecodeNode(Bytecode::kExecIf);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -603,7 +595,7 @@ BytecodeNode* BytecodeBuilder::NewEmptyJSArray(Var* var) {
   if (!var->has_id()) {
     var->set_id(allocate_regiseter(var->mode()));
   }
-  auto n = new(zone()) BytecodeNode(Bytecode::kNewEmptyJSArray, var->id());
+  auto n = new (zone()) BytecodeNode(Bytecode::kNewEmptyJSArray, var->id());
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -612,7 +604,7 @@ BytecodeNode* BytecodeBuilder::NewEmptyJSString(Var* var) {
   if (!var->has_id()) {
     var->set_id(allocate_regiseter(var->mode()));
   }
-  auto n = new(zone()) BytecodeNode(Bytecode::kNewEmptyJSString, var->id());
+  auto n = new (zone()) BytecodeNode(Bytecode::kNewEmptyJSString, var->id());
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -621,7 +613,7 @@ BytecodeNode* BytecodeBuilder::Return(Var* var) {
   if (!var->has_id()) {
     var->set_id(allocate_regiseter(var->mode()));
   }
-  auto n = new(zone()) BytecodeNode(Bytecode::kReturn, var->id());
+  auto n = new (zone()) BytecodeNode(Bytecode::kReturn, var->id());
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -633,15 +625,15 @@ BytecodeNode* BytecodeBuilder::LoadConstant(uint16_t index, Var* reg1) {
 
   auto operand = bu::EncodeOperand(bu::kOperandAx, index);
   operand |= bu::EncodeOperand(bu::kOperandC, reg1->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kLoadConstant, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kLoadConstant, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::Comment(const char* comment) {
 #ifdef DEBUG
-  auto n = new(zone()) BytecodeNode(Bytecode::kComment,
-                                    reinterpret_cast<uintptr_t>(comment));
+  auto n = new (zone())
+      BytecodeNode(Bytecode::kComment, reinterpret_cast<uintptr_t>(comment));
   bytecode_array_writer_->Emit(n);
   return n;
 #endif
@@ -654,7 +646,7 @@ BytecodeNode* BytecodeBuilder::I8Constant(int8_t v, Var* reg1) {
   }
   auto operand = bu::EncodeOperand(bu::kOperandA, v);
   operand |= bu::EncodeOperand(bu::kOperandB, reg1->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kI8Constant, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kI8Constant, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -665,7 +657,7 @@ BytecodeNode* BytecodeBuilder::I32Constant(int32_t t, Var* reg1) {
   }
   auto operand = bu::EncodeOperand(bu::kOperandEax, t);
   operand |= bu::EncodeOperand(bu::kOperandE, reg1->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kI32Constant, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kI32Constant, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -679,29 +671,28 @@ BytecodeNode* BytecodeBuilder::Append(Var* var_value, Var* reg1) {
   }
   auto operand = bu::EncodeOperand(bu::kOperandA, var_value->id());
   operand |= bu::EncodeOperand(bu::kOperandB, reg1->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kAppend, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kAppend, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::CallFastPropertyA(FastProperty t,
-                                                 Var* input, Var* out) {
-if (!input->has_id()) {
+BytecodeNode* BytecodeBuilder::CallFastPropertyA(FastProperty t, Var* input,
+                                                 Var* out) {
+  if (!input->has_id()) {
     input->set_id(allocate_regiseter(input->mode()));
   }
-if (!out->has_id()) {
+  if (!out->has_id()) {
     out->set_id(allocate_regiseter(out->mode()));
   }
   auto operand = bu::EncodeOperand(bu::kOperandA, static_cast<uint8_t>(t));
   operand |= bu::EncodeOperand(bu::kOperandB, input->id());
   operand |= bu::EncodeOperand(bu::kOperandC, out->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kCallFastPropertyA, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kCallFastPropertyA, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::LoadIx(Var* var_input,
-                                      Var* var_index,
+BytecodeNode* BytecodeBuilder::LoadIx(Var* var_input, Var* var_index,
                                       Var* var_output) {
   if (!var_input->has_id()) {
     var_input->set_id(allocate_regiseter(var_input->mode()));
@@ -716,7 +707,7 @@ BytecodeNode* BytecodeBuilder::LoadIx(Var* var_input,
   auto operand = bu::EncodeOperand(bu::kOperandA, var_input->id());
   operand |= bu::EncodeOperand(bu::kOperandB, var_index->id());
   operand |= bu::EncodeOperand(bu::kOperandC, var_output->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kLoadIx, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kLoadIx, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -731,7 +722,7 @@ BytecodeNode* BytecodeBuilder::Mov(Var* reg1, Var* reg2) {
 
   auto operand = bu::EncodeOperand(bu::kOperandA, reg1->id());
   operand |= bu::EncodeOperand(bu::kOperandB, reg2->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kMov, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kMov, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -746,7 +737,7 @@ BytecodeNode* BytecodeBuilder::Cmp(Var* reg1, Var* reg2) {
 
   auto operand = bu::EncodeOperand(bu::kOperandA, reg1->id());
   operand |= bu::EncodeOperand(bu::kOperandB, reg2->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kCmp, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kCmp, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -761,7 +752,7 @@ BytecodeNode* BytecodeBuilder::Gt(Var* reg1, Var* reg2) {
 
   auto operand = bu::EncodeOperand(bu::kOperandA, reg1->id());
   operand |= bu::EncodeOperand(bu::kOperandB, reg2->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kGt, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kGt, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -776,27 +767,27 @@ BytecodeNode* BytecodeBuilder::GtEq(Var* reg1, Var* reg2) {
 
   auto operand = bu::EncodeOperand(bu::kOperandA, reg1->id());
   operand |= bu::EncodeOperand(bu::kOperandB, reg2->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kGtEq, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kGtEq, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::Jmp(BytecodeLabel* label) {
-  auto n = new(zone()) BytecodeNode(Bytecode::kJmp, label->to());
+  auto n = new (zone()) BytecodeNode(Bytecode::kJmp, label->to());
   label->AddFrom(n);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::JmpIfTrue(BytecodeLabel* label) {
-  auto n = new(zone()) BytecodeNode(Bytecode::kJmpIfTrue, label->to());
+  auto n = new (zone()) BytecodeNode(Bytecode::kJmpIfTrue, label->to());
   label->AddFrom(n);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
 BytecodeNode* BytecodeBuilder::JmpIfFalse(BytecodeLabel* label) {
-  auto n = new(zone()) BytecodeNode(Bytecode::kJmpIfFalse, label->to());
+  auto n = new (zone()) BytecodeNode(Bytecode::kJmpIfFalse, label->to());
   label->AddFrom(n);
   bytecode_array_writer_->Emit(n);
   return n;
@@ -807,7 +798,7 @@ BytecodeNode* BytecodeBuilder::Print(Var* reg1) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
   auto operand = bu::EncodeOperand(bu::kOperandA, reg1->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kPrint, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kPrint, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -817,7 +808,7 @@ BytecodeNode* BytecodeBuilder::Inc(Var* reg1) {
     reg1->set_id(allocate_regiseter(reg1->mode()));
   }
   auto operand = bu::EncodeOperand(bu::kOperandA, reg1->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kInc, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kInc, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -828,7 +819,7 @@ BytecodeNode* BytecodeBuilder::Dec(Var* reg1) {
   }
 
   auto operand = bu::EncodeOperand(bu::kOperandA, reg1->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kDec, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kDec, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -843,7 +834,7 @@ BytecodeNode* BytecodeBuilder::Add(Var* reg1, Var* reg2) {
 
   auto operand = bu::EncodeOperand(bu::kOperandA, reg1->id());
   operand |= bu::EncodeOperand(bu::kOperandB, reg2->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kAdd, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kAdd, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -858,7 +849,7 @@ BytecodeNode* BytecodeBuilder::Sub(Var* reg1, Var* reg2) {
 
   auto operand = bu::EncodeOperand(bu::kOperandA, reg1->id());
   operand |= bu::EncodeOperand(bu::kOperandB, reg2->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kSub, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kSub, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -873,7 +864,7 @@ BytecodeNode* BytecodeBuilder::Mul(Var* reg1, Var* reg2) {
 
   auto operand = bu::EncodeOperand(bu::kOperandA, reg1->id());
   operand |= bu::EncodeOperand(bu::kOperandB, reg2->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kMul, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kMul, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -888,29 +879,25 @@ BytecodeNode* BytecodeBuilder::Div(Var* reg1, Var* reg2) {
 
   auto operand = bu::EncodeOperand(bu::kOperandA, reg1->id());
   operand |= bu::EncodeOperand(bu::kOperandB, reg2->id());
-  auto n = new(zone()) BytecodeNode(Bytecode::kDiv, operand);
+  auto n = new (zone()) BytecodeNode(Bytecode::kDiv, operand);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
-void BytecodeBuilder::Branch(BytecodeLabel* then_jmp,
-                             BytecodeLabel* else_jmp) {
+void BytecodeBuilder::Branch(BytecodeLabel* then_jmp, BytecodeLabel* else_jmp) {
   JmpIfTrue(then_jmp);
   JmpIfFalse(else_jmp);
 }
 
 uint32_t BytecodeBuilder::StringConstant(JSString* str, int32_t index) {
-  auto bcn = new(zone()) BytecodeConstantNode(str);
+  auto bcn = new (zone()) BytecodeConstantNode(str);
   return bytecode_array_writer_->EmitConstant(bcn);
 }
 
-BytecodeScope::BytecodeScope(BytecodeBuilder* builder)
-    : builder_(builder) {
+BytecodeScope::BytecodeScope(BytecodeBuilder* builder) : builder_(builder) {
   start_ = builder->last_bytecode();
 }
 
-BytecodeNode* BytecodeScope::end() {
-  return builder_->last_bytecode();
-}
+BytecodeNode* BytecodeScope::end() { return builder_->last_bytecode(); }
 
 }  // namespace lux

@@ -213,6 +213,22 @@ TEST_F(RegExpTest, GroupSpecifierName) {
           "      [CharSequence <aaa>]\n");
 }
 
+TEST_F(RegExpTest, GroupSpecifierUnicodeName) {
+  RunTest("(?<\\u0041\\u0042\\u0043\\u0044\\u0045>aaa)",
+          "[Root]\n"
+          "  [Conjunction]\n"
+          "    [Group type = CAPTURE name = ABCDE]\n"
+          "      [CharSequence <aaa>]\n");
+}
+
+TEST_F(RegExpTest, GroupSpecifierUnicodeBraceName) {
+  RunTest("(?<\\u{0041}\\u{0042}\\u{0043}\\u{0044}\\u{0045}>aaa)",
+          "[Root]\n"
+          "  [Conjunction]\n"
+          "    [Group type = CAPTURE name = ABCDE]\n"
+          "      [CharSequence <aaa>]\n");
+}
+
 TEST_F(RegExpTest, GroupParenError) {
   RunTest<true>("(aa*|bb*", nullptr, lux::SourcePosition(8, 8, 0, 0));
 }

@@ -419,6 +419,8 @@ Token::Type Parser::Tokenizer::Tokenize() {
         return Token::OP_NOT_EQ;
       }
       return Token::OP_NOT;
+    case Chars::kLS:
+    case Chars::kPS:
     case ';':
       Advance();
       return Token::TERMINATE;
@@ -761,11 +763,11 @@ Token::Type Parser::Tokenizer::TokenizeTemplateCharacters() {
           Advance();
           return Token::TEMPLATE_LITERAL;
         }
-      case '\r':
-        if (*(it_ + 1) == '\n') {
+      case Chars::kCR:
+        if (Chars::IsLF(*(it_ + 1))) {
           Advance();
         }
-      case '\n':
+      case Chars::kLF:
         current_position_->set_end_col(0);
         current_position_->add_end_line_number();
       default:
@@ -797,9 +799,9 @@ Token::Type Parser::Tokenizer::TokenizeRegExp() {
 }
 
 void Parser::Tokenizer::CollectLineBreak() {
-  if (*it_ == '\r') {
+  if (Chars::IsCR(*it_)) {
     AdvanceAndPushBuffer();
-    if (*it_ == '\n') {
+    if (Chars::IsLF(*it_)) {
       AdvanceAndPushBuffer();
     }
   }
@@ -807,10 +809,10 @@ void Parser::Tokenizer::CollectLineBreak() {
 
 bool Parser::Tokenizer::SkipLineBreak() {
   skipped_ = 0;
-  if (*it_ == '\r') {
+  if (Chars::IsCR(*it_)) {
     Advance();
     skipped_ = 1;
-    if (*it_ == '\n') {
+    if (Chars::IsLF(*it_)) {
       Advance();
       skipped_ = 2;
     }
@@ -832,14 +834,14 @@ bool Parser::Tokenizer::SkipWhiteSpace() {
 
 void Parser::Tokenizer::SkipSingleLineComment() {
   while (HasMore()) {
-    if (*it_ == '\r') {
+    if (Chars::IsCR(*it_)) {
       Advance();
-      if (*it_ == '\n') {
+      if (Chars::IsLF(*it_)) {
         Advance();
         break;
       }
     }
-    if (*it_ == '\n') {
+    if (Chars::IsLF(*it_)) {
       Advance();
       break;
     }
