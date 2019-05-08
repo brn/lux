@@ -456,12 +456,6 @@ BytecodeNode* BytecodeBuilder::RegexUpdateCapture() {
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexEnableSearch() {
-  auto n = new (zone()) BytecodeNode(Bytecode::kRegexEnableSearch);
-  bytecode_array_writer_->Emit(n);
-  return n;
-}
-
 BytecodeNode* BytecodeBuilder::RegexDisableRetry() {
   auto n = new (zone()) BytecodeNode(Bytecode::kRegexDisableRetry);
   bytecode_array_writer_->Emit(n);
@@ -533,13 +527,6 @@ BytecodeNode* BytecodeBuilder::RegexRune(u16 u) {
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexSome(JSString* input) {
-  auto n = new (zone())
-      BytecodeNode(Bytecode::kRegexSome, reinterpret_cast<uintptr_t>(input));
-  bytecode_array_writer_->Emit(n);
-  return n;
-}
-
 BytecodeNode* BytecodeBuilder::RegexEvery(JSString* input) {
   auto n = new (zone())
       BytecodeNode(Bytecode::kRegexEvery, reinterpret_cast<uintptr_t>(input));
@@ -581,6 +568,18 @@ BytecodeNode* BytecodeBuilder::RegexJumpIfFailed(BytecodeLabel* label) {
 
 BytecodeNode* BytecodeBuilder::RegexEscapeSequence(uint8_t type) {
   auto n = new (zone()) BytecodeNode(Bytecode::kRegexEscapeSequence, type);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexBackReference(uint32_t index) {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexBackReference, index);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexToggleClassMatch(uint8_t flag) {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexToggleClassMatch, flag);
   bytecode_array_writer_->Emit(n);
   return n;
 }

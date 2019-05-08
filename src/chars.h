@@ -24,6 +24,7 @@
 #define SRC_CHARS_H_
 
 #include <vector>
+#include "./unicode.h"
 #include "./utils.h"
 
 namespace lux {
@@ -109,7 +110,7 @@ class Chars {
     static const char kCtrlMap[] = {'\a', '\b', 0, 0,    0, '\f', 0, 0,
                                     0,    0,    0, 0,    0, '\n', 0, 0,
                                     0,    '\r', 0, '\t', 0, '\v'};
-    if (word < 97 && word > 118) {
+    if (word < 97 || word > 118) {
       return 0;
     }
 
@@ -138,6 +139,15 @@ class Chars {
   }
 
   static u32 ToHexValue(u32 uchar);
+
+  static uint64_t ParseInt(u32 value, bool *ok);
+  static uint64_t ParseInt(Utf16CodePoint value, bool *ok) {
+    return ParseInt(value.code(), ok);
+  }
+  static uint64_t ParseInt(std::vector<Utf16CodePoint> *value, bool *ok);
+
+ private:
+  static uint64_t ParseInt(Utf16String value, bool *ok);
 };
 
 }  // namespace lux

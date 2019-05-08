@@ -23,9 +23,9 @@
 #ifndef SRC_OBJECTS_HEAP_OBJECT_H_
 #define SRC_OBJECTS_HEAP_OBJECT_H_
 
+#include "../utils.h"
 #include "./instances.h"
 #include "./object.h"
-#include "../utils.h"
 
 namespace lux {
 class Isolate;
@@ -35,8 +35,7 @@ class RootMaps {
  public:
   explicit RootMaps(Isolate* isolate);
 
-#define ROOT_MAP_PROPS_DEF(A, N, p)                   \
-  LUX_CONST_GETTER(Shape*, p, p##_)
+#define ROOT_MAP_PROPS_DEF(A, N, p) LUX_CONST_GETTER(Shape*, p, p##_)
   OBJECT_TYPES(ROOT_MAP_PROPS_DEF)
 #undef ROOT_MAP_PROPS_DEF
 
@@ -49,7 +48,7 @@ class RootMaps {
 //                       00000000 00000000
 // SmiTag(smi = 0)                       |
 // Shape.instance_type          |||
-class HeapObject: public Object {
+class HeapObject : public Object {
  public:
   enum {
     kSize = LUX_ALIGN_OFFSET(kPointerSize + kHeapObjectTag, kPointerSize),

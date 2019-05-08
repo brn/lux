@@ -23,26 +23,26 @@
 #ifndef SRC_OBJECTS_OBJECT_H_
 #define SRC_OBJECTS_OBJECT_H_
 
-#include <string>
 #include <stdint.h>
+#include <string>
+#include "../maybe.h"
 #include "../utils.h"
 
 namespace lux {
-#define FIELD_ROOT_ADDR(ptr, offset)              \
-  reinterpret_cast<Address>(                      \
-      reinterpret_cast<uintptr_t>(ptr)) + offset
+class HeapObject;
+#define FIELD_ROOT_ADDR(ptr, offset) \
+  reinterpret_cast<Address>(reinterpret_cast<uintptr_t>(ptr)) + offset
 
-#define FIELD_ADDR(ptr, offset)                                         \
-  (reinterpret_cast<Address>(                                           \
-      reinterpret_cast<uintptr_t>(ptr)) - Object::kHeapObjectTag) + offset
+#define FIELD_ADDR(ptr, offset)                                  \
+  (reinterpret_cast<Address>(reinterpret_cast<uintptr_t>(ptr)) - \
+   Object::kHeapObjectTag) +                                     \
+      offset
 
-#define FIELD_PROPERTY(Type, ptr, offset)       \
+#define FIELD_PROPERTY(Type, ptr, offset) \
   reinterpret_cast<Type>(FIELD_ADDR(ptr, offset))
 
-#define OBJECT_CAST(Type, Arg)                  \
-  static inline Type Cast(Arg o) {              \
-    return reinterpret_cast<Type>(o);           \
-  }
+#define OBJECT_CAST(Type, Arg) \
+  static inline Type Cast(Arg o) { return reinterpret_cast<Type>(o); }
 
 class Object {
  public:
@@ -61,8 +61,7 @@ class Object {
   }
 
   inline bool IsSmi() const {
-    return IsSmi(reinterpret_cast<Address>(
-        reinterpret_cast<uintptr_t>(this)));
+    return IsSmi(reinterpret_cast<Address>(reinterpret_cast<uintptr_t>(this)));
   }
 
   inline bool IsHeapObject() const {
@@ -74,6 +73,11 @@ class Object {
     return reinterpret_cast<Object*>(v);
   }
 
+  inline Maybe<HeapObject*> ToHeapObject() {
+    return IsHeapObject() ? Just(reinterpret_cast<HeapObject*>(this))
+                          : Nothing<HeapObject*>();
+  }
+
   std::string ToString();
 
   bool Equals(Object* o) const;
@@ -81,30 +85,22 @@ class Object {
   bool GreaterThan(Object* o) const;
 };
 
-class Smi: public Object {
+class Smi : public Object {
  public:
   static const smi_t kMaxValue = smi_t(~0) >> 1;
 
-  LUX_INLINE static bool IsFit(smi_t value) {
-    return value <= kMaxValue;
-  }
+  LUX_INLINE static bool IsFit(smi_t value) { return value <= kMaxValue; }
 
   LUX_INLINE static Smi* FromInt(smi_t value) {
     INVALIDATE(IsFit(value));
     return reinterpret_cast<Smi*>(value << 1);
   }
 
-  smi_t raw_value() const {
-    return reinterpret_cast<smi_t>(this);
-  }
+  smi_t raw_value() const { return reinterpret_cast<smi_t>(this); }
 
-  smi_t value() const {
-    return reinterpret_cast<smi_t>(this) >> 1;
-  }
+  smi_t value() const { return reinterpret_cast<smi_t>(this) >> 1; }
 
-  bool Equals(Smi* smi) {
-    return smi->raw_value() == raw_value();
-  }
+  bool Equals(Smi* smi) { return smi->raw_value() == raw_value(); }
 
   OBJECT_CAST(Smi*, Object*)
   OBJECT_CAST(const Smi*, const Object*)

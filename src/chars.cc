@@ -759,4 +759,23 @@ bool Chars::IsIdentifierStart(u32 value) {
          value == '_' || value == '$' || value == 92;
 }
 
+uint64_t Chars::ParseInt(u32 value, bool *ok) {
+  const Utf16CodePoint *u = new Utf16CodePoint(value);
+  return ParseInt(Utf16String(u, 1), ok);
+}
+
+uint64_t Chars::ParseInt(std::vector<Utf16CodePoint> *value, bool *ok) {
+  return ParseInt(Utf16String::FromVector(*value), ok);
+}
+
+uint64_t Chars::ParseInt(Utf16String value, bool *ok) {
+  auto result = value.ParseInt();
+  if (result.IsNaN()) {
+    *ok = false;
+    return 0;
+  }
+  *ok = true;
+  return result.value();
+}
+
 }  // namespace lux

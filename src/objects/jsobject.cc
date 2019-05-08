@@ -124,9 +124,9 @@ JSSpecials* JSRegExp::Test(Isolate* isolate, JSString* input) {
       vm.ExecuteRegex(code(), input, flag(), false));
 }
 
-JSArray* JSRegExp::Match(Isolate* isolate, JSString* input) {
+Object* JSRegExp::Match(Isolate* isolate, JSString* input) {
   lux::VirtualMachine vm(isolate);
-  return JSArray::Cast(vm.ExecuteRegex(code(), input, flag(), true));
+  return vm.ExecuteRegex(code(), input, flag(), true);
 }
 
 Handle<JSArray> JSArray::NewEmptyArray(Isolate* isolate, uint32_t length,

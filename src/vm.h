@@ -26,6 +26,7 @@
 #include <array>
 #include <vector>
 #include "./bytecode.h"
+#include "./maybe.h"
 #include "./utils.h"
 
 namespace lux {
@@ -104,7 +105,7 @@ class VirtualMachine {
   enum Flag {
     kCollectWords,
     kMatched,
-    kSearch,
+    kClassMatch,
     kRetry,
     kMultiline,
     kGlobal,
@@ -184,11 +185,11 @@ class VirtualMachine {
       return input()->length() > (current_thread()->position() + 1);
     }
 
-    void enable_search() { vm_flag_.set(kSearch); }
+    void EnableClassMatch() { vm_flag_.set(kClassMatch); }
 
-    bool is_search_enabled() { return vm_flag_.get(kSearch); }
+    bool is_class_match_enabled() { return vm_flag_.get(kClassMatch); }
 
-    void disable_search() { vm_flag_.unset(kSearch); }
+    void DisableClassMatch() { vm_flag_.unset(kClassMatch); }
 
     void disable_retry() { vm_flag_.set(kRetry); }
 
@@ -252,6 +253,9 @@ class VirtualMachine {
 
     inline void StartCapture(uint16_t index, bool set_start = true) {
       if (captured_stack_.size()) {
+        if (current_capture_) {
+          current_captured_index_stack_.push_back(index - 1);
+        }
         current_capture_ = captured_stack_[index];
         if (set_start) {
           current_capture_->set_start(current_thread()->position());
@@ -260,16 +264,24 @@ class VirtualMachine {
       }
     }
 
-    inline void ResetCurrentCapturedStartPosition() {
-      if (current_captured()) {
-        current_captured()->set_start(current_thread()->position());
+    inline Maybe<Captured*> GetCaptured(uint32_t index) {
+      if (index < captured_stack_.size()) {
+        return Just(captured_stack_[index]);
       }
+      return Nothing<Captured*>();
     }
 
     inline void UpdateCapture() {
       INVALIDATE(current_capture_);
       current_capture_->set_end(current_thread()->position());
-      current_capture_ = nullptr;
+      if (current_captured_index_stack_.size()) {
+        auto next = current_captured_index_stack_.back();
+        current_captured_index_stack_.pop_back();
+        current_capture_ = captured_stack_[next];
+        current_thread()->set_capture_index(next);
+      } else {
+        current_capture_ = nullptr;
+      }
     }
 
     inline Captured* current_captured() { return current_capture_; }
@@ -340,6 +352,7 @@ class VirtualMachine {
    private:
     ZoneAllocator* zone() { return &zone_allocator_; }
 
+    std::vector<uint32_t> current_captured_index_stack_;
     std::vector<Captured*> captured_stack_;
     std::vector<Thread*> thread_stack_;
     std::vector<JSString*> matched_words_;

@@ -135,7 +135,6 @@ struct BytecodeOperand {
   A(RegexStartCapture, Double3, 3, 1, uint16_t)                          \
   A(RegexDisableRetry, None, 1, 0)                                       \
   A(RegexCheckEnd, None, 1, 0)                                           \
-  A(RegexEnableSearch, None, 1, 0)                                       \
   A(RegexUpdateCapture, None, 1, 0)                                      \
   A(RegexMatchAny, None, 1, 0)                                           \
   A(RegexPopThread, None, 1, 0)                                          \
@@ -145,13 +144,14 @@ struct BytecodeOperand {
   A(RegexJumpIfMatchedCountLT, Wide4, 7, 2, uint16_t, BytecodeLabel*)    \
   A(RegexJumpIfMatchedCountEqual, Wide4, 7, 2, uint16_t, BytecodeLabel*) \
   A(RegexPushThread, Wide1, 5, 1, BytecodeLabel*)                        \
-  A(RegexSome, Word1, (kPointerSize + 1), 1, JSString*)                  \
   A(RegexEvery, Word1, (kPointerSize + 1), 1, JSString*)                 \
   A(RegexBranch, Wide3, 9, 1, BytecodeLabel*, BytecodeLabel*)            \
   A(RegexJump, Wide1, 5, 1, BytecodeLabel*)                              \
   A(RegexJumpIfMatched, Wide1, 5, 1, BytecodeLabel*)                     \
   A(RegexJumpIfFailed, Wide1, 5, 1, BytecodeLabel*)                      \
-  A(RegexEscapeSequence, Short1, 2, 1, uint8_t)
+  A(RegexEscapeSequence, Short1, 2, 1, uint8_t)                          \
+  A(RegexBackReference, Wide1, 5, 1, uint32_t)                           \
+  A(RegexToggleClassMatch, Short1, 2, 1, uint8_t)
 
 #define REGEX_BYTECODE_LIST(A)          \
   REGEX_BYTECODE_LIST_WITOUT_MATCHED(A) \

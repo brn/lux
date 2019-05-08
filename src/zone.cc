@@ -20,18 +20,17 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
+#include "./zone.h"
 #include <stdlib.h>
 #include <string.h>
 #include <utility>
 #include "./alloc.h"
-#include "./zone.h"
 
 namespace lux {
 ZoneAllocator::ZoneAllocator()
     : chunk_(std::make_shared<Chunk>(kDefaultSize)) {}
 
-ZoneAllocator::Chunk::Chunk(size_t size)
-    : size_(size), remains_(size_) {
+ZoneAllocator::Chunk::Chunk(size_t size) : size_(size), remains_(size_) {
   AllocateInternal();
 }
 
@@ -81,9 +80,7 @@ void* Zone::operator new(size_t size, ZoneAllocator* zone_allocator) {
   return zone_allocator->Allocate(size);
 }
 
-void Zone::operator delete(void* ptr) {
-  UNREACHABLE();
-}
+void Zone::operator delete(void* ptr) { UNREACHABLE(); }
 
 void Zone::operator delete(void* ptr, ZoneAllocator* zone_allocator) {
   UNREACHABLE();

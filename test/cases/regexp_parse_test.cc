@@ -52,6 +52,7 @@ class RegExpTest : public lux::IsolateSetup {
         er.PrintError();
       }
     } else {
+      ASSERT_TRUE(!er.HasPendingError()) << "Error occured " << er.ToString();
       auto a = p.node()->ToString();
       ASSERT_TRUE(lux::testing::CompareNode(regexp, a.c_str(), expected));
     }
@@ -124,14 +125,16 @@ TEST_F(RegExpTest, CharClass) {
   RunTest("[abcdefg,{}()?]",
           "[Root]\n"
           "  [Conjunction]\n"
-          "    [CharClass exclude = false <abcdefg,{}()?>]\n");
+          "    [CharClass exclude = false]\n"
+          "      [CharSequence <abcdefg,{}()?>]\n");
 }
 
 TEST_F(RegExpTest, CharClassExclude) {
   RunTest("[^abcdefg,{}()?]",
           "[Root]\n"
           "  [Conjunction]\n"
-          "    [CharClass exclude = true <abcdefg,{}()?>]\n");
+          "    [CharClass exclude = true]\n"
+          "      [CharSequence <abcdefg,{}()?>]\n");
 }
 
 TEST_F(RegExpTest, Question) {

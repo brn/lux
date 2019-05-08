@@ -41,6 +41,28 @@ namespace lux {
 class Isolate;
 class JSString;
 namespace regexp {
+#define REGEXP_FLAG_LIST(A) \
+  A(Multiline, 0x1)         \
+  A(Global, 0x2)            \
+  A(IgnoreCase, 0x4)        \
+  A(Sticky, 0x8)
+
+struct Flag {
+  enum Type : uint8_t {
+    kNone,
+#define REGEXP_DEF_FLAG(Flag, v) k##Flag = v,
+    REGEXP_FLAG_LIST(REGEXP_DEF_FLAG)
+#undef REGEXP_DEF_FLAG
+  };
+
+#define FLAG_CHECK(Name, _)                   \
+  inline static bool Is##Name(uint8_t flag) { \
+    return (flag & k##Name) == k##Name;       \
+  }
+  REGEXP_FLAG_LIST(FLAG_CHECK)
+#undef FLAG_CHECK
+};
+
 #define REGEXP_AST_TYPES(A)          \
   A(GROUP, Group)                    \
   A(BACK_REFERENCE, BackReference)   \
@@ -66,7 +88,7 @@ REGEXP_AST_TYPES(RE_AST_FORWARD_DECL)
 class Visitor {
  public:
   explicit Visitor(uint16_t captured_count, BytecodeBuilder* bytecode_builder,
-                   ZoneAllocator* zone_allocator);
+                   ZoneAllocator* zone_allocator, uint8_t flag);
 
   LUX_GETTER(BytecodeBuilder*, builder, bytecode_builder_)
   LUX_GETTER(ZoneAllocator*, zone, zone_allocator_)
@@ -81,12 +103,15 @@ class Visitor {
   bool first_op() const { return !flags_.get(kFirstOp); }
   void disable_retry() { flags_.set(kDisableRetry); }
   bool is_retryable() { return !flags_.get(kDisableRetry); }
-  void EnableSearchIf();
   void EmitCompare(u16 code);
   void CollectMatchedChar(Var* char_register);
   void Return(Var* ret = nullptr);
+  LUX_INLINE bool IsGlobal() {
+    return (flag_ & Flag::kGlobal) == Flag::kGlobal;
+  }
   LUX_CONST_GETTER(uint16_t, captured_count, captured_count_)
 
+  uint8_t flag_;
   uint16_t captured_count_;
   Bitset<uint8_t> flags_;
   BytecodeLabel matched_;
@@ -271,25 +296,42 @@ class Group : public Ast, public AstListTrait {
 
 class BackReference : public Ast {
  public:
-  BackReference() : Ast(Ast::BACK_REFERENCE) {}
+  explicit BackReference(uint32_t index)
+      : Ast(Ast::BACK_REFERENCE), index_(index) {}
+
+  LUX_CONST_PROPERTY(uint32_t, index, index_);
+
+  REGEXP_VISIT_INTERNAL_METHOD_DECL(BackReference);
+
+ private:
+  std::string ToString(std::string* indent = nullptr) const {
+    std::stringstream st;
+    st << (indent == nullptr ? "" : *indent) << "[BackReference index = '"
+       << index_ << "']\n";
+    return st.str();
+  }
+
+  uint32_t index_;
 };
 
 class CharClass : public Ast {
  public:
-  explicit CharClass(bool exclude, JSString* value)
-      : Ast(Ast::CHAR_CLASS), exclude_(exclude), value_(value) {}
+  CharClass(Ast* chars, bool exclude)
+      : Ast(Ast::CHAR_CLASS), exclude_(exclude), chars_(chars) {}
 
   REGEXP_VISIT_INTERNAL_METHOD_DECL(CharClass);
 
-  LUX_CONST_GETTER(JSString*, value, value_)
+  LUX_INLINE bool IsExclude() const { return exclude_; }
+  LUX_CONST_GETTER(Ast*, chars, chars_)
 
 #ifdef DEBUG
   std::string ToString(std::string* indent = nullptr) const {
     std::stringstream st;
-    JSString::Utf8String u8str(value_);
     st << (indent == nullptr ? "" : *indent)
        << "[CharClass exclude = " << (exclude_ ? "true" : "false");
-    st << ' ' << '<' << u8str.value() << ">]\n";
+    st << "]\n";
+    *indent += "  ";
+    st << chars_->ToString(indent);
     if (indent != nullptr) {
       (*indent) = (*indent).substr(0, indent->size() - 2);
     }
@@ -298,7 +340,7 @@ class CharClass : public Ast {
 #endif
  private:
   bool exclude_;
-  JSString* value_;
+  Ast* chars_;
 };
 
 class Alternate final : public Ast {
@@ -562,7 +604,7 @@ class Parser {
 
   Maybe<Ast*> ParseAtom();
 
-  Maybe<Ast*> ParseChar(bool allow_selection = true);
+  Maybe<Ast*> ParseChar(bool is_inner_char_class);
 
   Maybe<Ast*> ParseGroup();
 
@@ -618,28 +660,6 @@ class Parser {
   JSString::iterator end_;
   Handle<JSString> source_;
   ZoneAllocator zone_allocator_;
-};
-
-#define REGEXP_FLAG_LIST(A) \
-  A(Multiline, 0x1)         \
-  A(Global, 0x2)            \
-  A(IgnoreCase, 0x4)        \
-  A(Sticky, 0x8)
-
-struct Flag {
-  enum Type : uint8_t {
-    kNone,
-#define REGEXP_DEF_FLAG(Flag, v) k##Flag = v,
-    REGEXP_FLAG_LIST(REGEXP_DEF_FLAG)
-#undef REGEXP_DEF_FLAG
-  };
-
-#define FLAG_CHECK(Name, _)                   \
-  inline static bool Is##Name(uint8_t flag) { \
-    return (flag & k##Name) == k##Name;       \
-  }
-  REGEXP_FLAG_LIST(FLAG_CHECK)
-#undef FLAG_CHECK
 };
 
 class Compiler {

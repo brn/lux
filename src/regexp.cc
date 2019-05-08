@@ -93,8 +93,9 @@ const char* Ast::kNodeTypeStringList[] = {
 using Label = BytecodeLabel;
 
 Visitor::Visitor(uint16_t captured_count, BytecodeBuilder* bytecode_builder,
-                 ZoneAllocator* zone_allocator)
-    : captured_count_(captured_count),
+                 ZoneAllocator* zone_allocator, uint8_t flag)
+    : flag_(flag),
+      captured_count_(captured_count),
       bytecode_builder_(bytecode_builder),
       zone_allocator_(zone_allocator) {}
 
@@ -107,11 +108,15 @@ AST_VISIT(Root) {
     __ RegexDisableRetry();
   }
 
-  __ RegexReserveCapture(captured_count());
+  if (!IsGlobal()) {
+    __ RegexReserveCapture(captured_count());
+  }
+  jump_point_ = Just(&failed_);
   node->regexp()->Visit(this);
   if (node->is_to_end()) {
     __ RegexCheckEnd();
   }
+
   __ RegexJumpIfFailed(&failed_);
 
   __ Bind(&matched_);
@@ -131,7 +136,7 @@ AST_VISIT(Conjunction) {
 AST_VISIT(Group) {
   __ RegexComment("Group");
 
-  if (node->IsCapturable()) {
+  if (node->IsCapturable() && !IsGlobal()) {
     __ RegexStartCapture(node->captured_index());
   }
 
@@ -139,29 +144,29 @@ AST_VISIT(Group) {
     a->Visit(this);
   }
 
-  if (node->IsCapturable()) {
+  if (node->IsCapturable() && !IsGlobal()) {
     __ RegexUpdateCapture();
   }
 }
 
 AST_VISIT(CharClass) {
-  __ RegexComment("CharClass");
-  EnableSearchIf();
+  __ RegexComment("CharClassOpen");
+  __ RegexToggleClassMatch(1);
+  node->chars()->Visit(this);
+  __ RegexComment("CharClassClose");
+  __ RegexToggleClassMatch(0);
+  jump_point_ >>= [&](auto p) { __ RegexJumpIfFailed(p); };
+}
 
-  Label ok, pop;
+AST_VISIT(BackReference) {
+  __ RegexComment("BackReference");
 
-  __ RegexSome(node->value());
-  __ RegexBranch(&ok, &pop);
-
-  __ Bind(&pop);
-  { __ RegexPopThread(); }
-
-  __ Bind(&ok);
+  __ RegexBackReference(node->index());
 }
 
 AST_VISIT(Alternate) {
   __ RegexComment("Alternate");
-
+  auto old_jump = jump_point_;
   Label next, exit, pop;
 
   __ RegexPushThread(&next);
@@ -172,12 +177,12 @@ AST_VISIT(Alternate) {
   __ Bind(&pop);
   { __ RegexPopThread(); }
 
+  __ RegexComment("Alternative");
   __ Bind(&next);
   {
     Label pop;
-    jump_point_ = Just(&exit);
+    jump_point_ = old_jump;
     node->right()->Visit(this);
-    __ RegexJump(&exit);
   }
 
   __ Bind(&exit);
@@ -186,7 +191,7 @@ AST_VISIT(Alternate) {
 AST_VISIT(Repeat) {
   __ RegexComment("Repeat");
   auto count = node->more_than();
-
+  auto old_jump = jump_point_;
   Label loop, pop, next;
 
   if (count == 1) {
@@ -215,12 +220,10 @@ AST_VISIT(Repeat) {
 
   __ Bind(&next);
   if (count == 1) {
-    Label ok;
     __ RegexJumpIfMatchedCountLT(count, &pop);
-    __ RegexJump(&ok);
-
-    __ Bind(&ok);
   }
+
+  jump_point_ = old_jump;
 }
 
 AST_VISIT(RepeatRange) {
@@ -228,6 +231,7 @@ AST_VISIT(RepeatRange) {
 
   auto least_count = node->more_than();
   auto max_count = node->less_than();
+  auto old_jump = jump_point_;
 
   Label loop, next, pop;
 
@@ -253,12 +257,11 @@ AST_VISIT(RepeatRange) {
         Label ok;
         __ RegexJumpIfMatchedCountLT(least_count, &pop);
         __ RegexResetMatchedCount();
-        __ RegexJump(&ok);
-
-        __ Bind(&ok);
       }
     }
   }
+
+  jump_point_ = old_jump;
 }
 
 AST_VISIT(Char) {
@@ -273,28 +276,17 @@ AST_VISIT(Char) {
 
 AST_VISIT(CharSequence) {
   __ RegexComment("CharSequence");
-  EnableSearchIf();
-
-  Label ok, pop;
-
   __ RegexEvery(node->value());
-  jump_point_ >>= [&](auto point) { __ RegexBranch(&ok, point); };
-
-  __ Bind(&ok);
+  jump_point_ >>= [&](auto point) { __ RegexJumpIfFailed(point); };
 }
 
 AST_VISIT(EscapeSequence) {
   __ RegexComment("EscapeSequence");
   __ RegexEscapeSequence(static_cast<uint8_t>(node->type()));
-
-  Label ok;
-
-  jump_point_ >>= [&](auto point) { __ RegexBranch(&ok, point); };
-  __ Bind(&ok);
+  jump_point_ >>= [&](auto point) { __ RegexJumpIfFailed(point); };
 }
 
 AST_VISIT(Any) {
-  EnableSearchIf();
   bool fall_through = false;
 
   switch (node->type()) {
@@ -343,20 +335,12 @@ AST_VISIT(Any) {
 }
 
 void Visitor::EmitCompare(u16 code) {
-  EnableSearchIf();
-
   Label ok, pop;
   __ RegexRune(code);
   __ RegexBranch(&ok, &pop);
   __ Bind(&pop);
   __ RegexPopThread();
   __ Bind(&ok);
-}
-
-void Visitor::EnableSearchIf() {
-  if (is_retryable()) {
-    __ RegexEnableSearch();
-  }
 }
 
 bool IsRepeatChar(u16 ch) {
@@ -421,7 +405,7 @@ Maybe<Ast*> Parser::ParseAtom() {
     case '.':
       return Just(new (zone()) Any());
     default:
-      return ParseChar();
+      return ParseChar(false);
   }
 }
 
@@ -504,7 +488,7 @@ Utf16CodePoint Parser::DecodeHexEscape(bool* ok, int len) {
 
 Utf16CodePoint Parser::DecodeAsciiEscapeSequence(bool* ok) {
   auto u = DecodeHexEscape(ok, 2);
-  if (u > 127) {
+  if (u > 255) {
     *ok = false;
   }
 
@@ -562,41 +546,27 @@ Maybe<Ast*> Parser::ParseCharClass() {
     exclude = true;
     advance();
   }
-  bool escaped = false;
-  bool success = false;
-  std::vector<Utf16CodePoint> v;
-  while (has_more()) {
-    if ((cur() == ']' && !escaped)) {
-      advance();
-      success = true;
-      break;
-    } else if (!escaped && cur() == '\\') {
-      if (escaped) {
-        v.push_back(cur());
-      }
-      escaped = !escaped;
-    } else {
-      v.push_back(cur());
-    }
-    advance();
-  }
-  Handle<JSString> js_str = JSString::New(isolate_, v.data(), v.size());
-  auto cc = new (zone()) CharClass(exclude, *js_str);
-  update_start_pos();
-  if (!success) {
-    REPORT_SYNTAX_ERROR(this, "] expected.");
-  }
 
-  return Just(cc);
+  return ParseChar(true) >>= [&](Ast* ast) {
+    update_start_pos();
+    EXPECT_WITH_RETURN(this, cur(), ']', Nothing<CharClass*>())
+    return Just(new (zone()) CharClass(ast, exclude));
+  };
 }
 
-Maybe<Ast*> Parser::ParseChar(bool allow_selection) {
+Maybe<Ast*> Parser::ParseChar(bool is_inner_char_class) {
   ENTER();
   bool escaped = false;
   std::vector<Utf16CodePoint> buf;
   auto conj = new (zone()) Conjunction();
-  while (has_more() && (!IsSpecialChar(cur()) || escaped)) {
-    Maybe<EscapeSequence*> special = Nothing<EscapeSequence*>();
+  while (has_more()) {
+    if (!escaped && !is_inner_char_class && IsSpecialChar(cur())) {
+      break;
+    }
+    if (is_inner_char_class && !escaped && cur() == ']') {
+      break;
+    }
+    Maybe<Ast*> special = Nothing<Ast*>();
     auto current = advance();
     if (escaped) {
       switch (current) {
@@ -606,6 +576,14 @@ Maybe<Ast*> Parser::ParseChar(bool allow_selection) {
             advance();
           } else {
             buf.push_back(Utf16CodePoint(0x005c));
+          }
+          break;
+        }
+        case 'u': {
+          bool ok = true;
+          current = DecodeHexEscape(&ok);
+          if (!ok) {
+            REPORT_SYNTAX_ERROR(this, "Invalid escape sequence.");
           }
           break;
         }
@@ -624,12 +602,26 @@ Maybe<Ast*> Parser::ParseChar(bool allow_selection) {
           REGEXP_ESCAPE_SEQUENCES(DEF_REGEXP_ESCAPE_SEQUENCE_AST_BUILDER)
 #undef DEF_REGEXP_ESCAPE_SEQUENCE_AST_BUILDER
         default:
+          if (Chars::IsDecimalDigit(current.code()) && current != '0') {
+            bool ok = true;
+            std::vector<Utf16CodePoint> buf;
+            buf.push_back(current);
+            while (Chars::IsDecimalDigit(cur().code())) {
+              buf.push_back(cur());
+              current = advance();
+            }
+            special = Just(new (zone()) BackReference(
+                static_cast<uint32_t>(Chars::ParseInt(&buf, &ok))));
+            if (!ok) {
+              REPORT_SYNTAX_ERROR(this, "Invalid Backreference.");
+            }
+          }
           auto code = Chars::GetAsciiCtrlCodeFromWord(current.code());
           if (code) {
             current = Utf16CodePoint(code);
           }
       }
-      special >>= [&](EscapeSequence* special) {
+      special >>= [&](Ast* special) {
         if (buf.size() == 1) {
           conj->Push(new (zone()) Char(buf.back()));
         } else if (buf.size() > 1) {
@@ -839,7 +831,8 @@ Handle<JSRegExp> Compiler::Compile(const char* source, uint8_t flag) {
   parser.Parse();
   ZoneAllocator zone_allocator;
   BytecodeBuilder bytecode_builder(isolate_, &zone_allocator);
-  Visitor visitor(parser.capture_count(), &bytecode_builder, &zone_allocator);
+  Visitor visitor(parser.capture_count(), &bytecode_builder, &zone_allocator,
+                  flag);
   parser.node()->Visit(&visitor);
   auto executable = bytecode_builder.flush();
   return JSRegExp::New(isolate_, *scope.Return(executable), flag);

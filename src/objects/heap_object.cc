@@ -20,27 +20,25 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 // THE SOFTWARE.
 
-#include "../heap.h"
 #include "./heap_object.h"
+#include "../heap.h"
 #include "../isolate.h"
-#include "./shape.h"
 #include "./jsobject.h"
+#include "./shape.h"
 
 namespace lux {
 RootMaps::RootMaps(Isolate* isolate) {
-#define ROOT_MAPS_INIT(NAME, Name, p)             \
-  p##_ = Shape::New(isolate, InstanceType::NAME); \
-  INVALIDATE(p##_->instance_type()                \
-             == InstanceType::NAME);              \
-  INVALIDATE(p##_->size()                         \
-             == Name::kSize);
+#define ROOT_MAPS_INIT(NAME, Name, p)                      \
+  p##_ = Shape::New(isolate, InstanceType::NAME);          \
+  INVALIDATE(p##_->instance_type() == InstanceType::NAME); \
+  INVALIDATE(p##_->size() == Name::kSize);
   OBJECT_TYPES(ROOT_MAPS_INIT)
 #undef ROOT_MAPS_INIT
 }
 
 HeapObject* HeapObject::New(Isolate* isolate, Shape* shape, size_t size) {
-  auto addr = isolate->heap()->Allocate(
-      HeapObject::kSize + (size > 0? size: shape->size()));
+  auto addr = isolate->heap()->Allocate(HeapObject::kSize +
+                                        (size > 0 ? size : shape->size()));
   auto heap_object = reinterpret_cast<HeapObject*>(addr);
   auto shape_p = reinterpret_cast<Shape**>(heap_object);
   *shape_p = shape;
@@ -48,8 +46,7 @@ HeapObject* HeapObject::New(Isolate* isolate, Shape* shape, size_t size) {
 }
 
 HeapObject* HeapObject::NewWithoutShape(Isolate* isolate, size_t size) {
-  auto addr = isolate->heap()->Allocate(
-      kPointerSize + size + kHeapObjectTag);
+  auto addr = isolate->heap()->Allocate(kPointerSize + size + kHeapObjectTag);
   return reinterpret_cast<HeapObject*>(addr + kHeapObjectTag);
 }
 }  // namespace lux

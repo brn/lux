@@ -34,8 +34,7 @@ const smi_t Smi::kMaxValue;
 
 bool Object::Equals(Object* o) const {
   if (IsSmi() && o->IsSmi()) {
-    return Smi::Cast(o)->value() ==
-      Smi::Cast(this)->value();
+    return Smi::Cast(o)->value() == Smi::Cast(this)->value();
   }
 
   auto ho = HeapObject::Cast(o);
@@ -49,10 +48,8 @@ bool Object::Equals(Object* o) const {
 
   switch (self->shape()->instance_type()) {
     case InstanceType::JS_STRING: {
-      if (ho->shape()->instance_type() ==
-          InstanceType::JS_STRING) {
-        return JSString::Cast(self)->Equals(
-            JSString::Cast(ho));
+      if (ho->shape()->instance_type() == InstanceType::JS_STRING) {
+        return JSString::Cast(self)->Equals(JSString::Cast(ho));
       }
       return false;
     }
@@ -82,10 +79,8 @@ bool Object::GreaterThan(Object* o) const {
 
   switch (self->shape()->instance_type()) {
     case InstanceType::JS_STRING: {
-      if (ho->shape()->instance_type() ==
-          InstanceType::JS_STRING) {
-        return JSString::Cast(self)->GreaterThan(
-            JSString::Cast(ho));
+      if (ho->shape()->instance_type() == InstanceType::JS_STRING) {
+        return JSString::Cast(self)->GreaterThan(JSString::Cast(ho));
       }
       return false;
     }

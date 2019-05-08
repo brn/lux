@@ -80,8 +80,6 @@ REGEX_HANDLER(RegexCheckEnd) {
   }
 }
 
-REGEX_HANDLER(RegexEnableSearch) { exec->enable_search(); }
-
 REGEX_HANDLER(RegexMatchAny) {
   auto pos = exec->current_thread()->position();
   if (exec->is_advanceable()) {
@@ -133,10 +131,60 @@ REGEX_HANDLER(RegexResetMatchedCount) {
   exec->current_thread()->ResetMatchedCount();
 }
 
-REGEX_HANDLER(RegexRune) {
-  LUX_SCOPED([exec]() mutable { exec->disable_search(); });
-  u32 ch = fetcher->FetchNextDoubleOperand();
+void MatchEvery(Isolate* isolate, VM::RegexExecutor* exec,
+                BytecodeFetcher* fetcher, BytecodeConstantArray* constant,
+                JSString* chars) {
+  INVALIDATE(chars->shape()->IsJSString());
+  auto subject = exec->input();
+  auto subject_length = subject->length();
 
+  int matched = 0;
+  auto p = exec->current_thread()->position();
+  for (auto& ch : *chars) {
+    if (subject_length == p) {
+      return exec->store_flag(Smi::FromInt(0));
+    }
+    auto code = subject->at(p);
+    if (ch == code) {
+      matched++;
+      exec->Advance();
+      if (exec->is_class_match_enabled()) {
+        break;
+      }
+      p++;
+    } else {
+      if (!exec->is_class_match_enabled()) {
+        return exec->store_flag(Smi::FromInt(0));
+      }
+    }
+  }
+
+  exec->store_flag(Smi::FromInt(matched > 0 ? 1 : 0));
+}
+
+REGEX_HANDLER(RegexBackReference) {
+  auto index = fetcher->FetchNextWideOperand();
+  exec->GetCaptured(index - 1) >>=
+      [&](VirtualMachine::RegexExecutor::Captured* c) {
+        if (c->IsCaptured()) {
+          auto subject = exec->input();
+          auto chars = subject->Slice(isolate, c->start(), c->end());
+          MatchEvery(isolate, exec, fetcher, constant, *chars);
+        }
+      };
+}
+
+REGEX_HANDLER(RegexToggleClassMatch) {
+  uint8_t flag = fetcher->FetchNextShortOperand();
+  if (flag) {
+    exec->EnableClassMatch();
+  } else {
+    exec->DisableClassMatch();
+  }
+}
+
+REGEX_HANDLER(RegexRune) {
+  u32 ch = fetcher->FetchNextDoubleOperand();
   auto p = exec->current_thread()->position();
   auto subject = exec->input();
   if (subject->length() > p) {
@@ -152,59 +200,11 @@ REGEX_HANDLER(RegexRune) {
   exec->store_flag(Smi::FromInt(0));
 }
 
-REGEX_HANDLER(RegexSome) {
-  LUX_SCOPED([exec]() mutable { exec->disable_search(); });
-
-  auto chars = JSString::Cast(
-      reinterpret_cast<Object*>(fetcher->FetchNextWordOperand()));
-  INVALIDATE(chars->shape()->IsJSString());
-
-  auto p = exec->current_thread()->position();
-  auto subject = exec->input();
-  if (subject->length() > p) {
-    auto code = subject->at(p);
-    for (auto& ch : *chars) {
-      if (ch == code) {
-        exec->current_thread()->Matched();
-        exec->Advance();
-        return exec->store_flag(Smi::FromInt(1));
-      }
-    }
-
-    return exec->store_flag(Smi::FromInt(0));
-  }
-}
-
 REGEX_HANDLER(RegexEvery) {
-  LUX_SCOPED([exec]() mutable { exec->disable_search(); });
-
   auto chars = JSString::Cast(
       reinterpret_cast<Object*>(fetcher->FetchNextWordOperand()));
   INVALIDATE(chars->shape()->IsJSString());
-  auto subject = exec->input();
-  auto subject_length = subject->length();
-
-  int matched = 0;
-  auto p = exec->current_thread()->position();
-  for (auto& ch : *chars) {
-    if (subject_length == p) {
-      return exec->store_flag(Smi::FromInt(0));
-    }
-    auto code = subject->at(p);
-    if (ch == code) {
-      if (matched == 0 && exec->current_captured()) {
-        exec->current_captured()->set_start(p);
-      }
-      matched++;
-      exec->Advance();
-      p++;
-    } else {
-      exec->current_thread()->set_matched_count(matched);
-      return exec->store_flag(Smi::FromInt(0));
-    }
-  }
-
-  exec->store_flag(Smi::FromInt(matched > 0 ? 1 : 0));
+  MatchEvery(isolate, exec, fetcher, constant, chars);
 }
 
 REGEX_HANDLER(RegexCheckPosition) {
@@ -262,7 +262,7 @@ REGEX_HANDLER(RegexEscapeSequence) {
   auto type = fetcher->FetchNextShortOperand();
   auto subject = exec->input();
   auto subject_length = subject->length();
-  if (subject_length >= exec->current_thread()->position()) {
+  if (subject_length <= exec->current_thread()->position()) {
     return exec->store_flag(Smi::FromInt(0));
   }
   auto value = subject->at(exec->current_thread()->position());
@@ -291,6 +291,10 @@ REGEX_HANDLER(RegexEscapeSequence) {
       break;
     default:
       UNREACHABLE();
+  }
+  if (match) {
+    exec->Advance();
+    exec->current_thread()->Matched();
   }
   exec->store_flag(Smi::FromInt(match ? 1 : 0));
 }
@@ -586,29 +590,21 @@ JSString* VirtualMachine::RegexExecutor::SliceMatchedInput(uint32_t start) {
 }
 
 void VirtualMachine::RegexExecutor::FixInterCaptured() {
-  if (!is_global()) {
-    matched_words_.push_back(
-        SliceMatchedInput(current_thread()->start_position()));
-  } else {
-    for (auto& c : captured_stack_) {
-      if (c->IsCaptured()) {
-        auto str = input_->Slice(isolate_, c->start(), c->end());
-        matched_words_.push_back(*str);
-      }
-    }
-  }
+  matched_words_.push_back(
+      SliceMatchedInput(current_thread()->start_position()));
 }
 
 Handle<JSArray> VirtualMachine::RegexExecutor::FixCaptured() {
   auto arr = JSArray::NewEmptyArray(isolate_, 0);
+
   if (!is_global()) {
     arr->Push(isolate_, SliceMatchedInput(current_thread()->start_position()));
-  }
-  if (matched_words_.size() == 0) {
     for (auto& c : captured_stack_) {
       if (c->IsCaptured()) {
         auto str = input_->Slice(isolate_, c->start(), c->end());
         arr->Push(isolate_, *str);
+      } else {
+        arr->Push(isolate_, isolate_->jsval_undefined());
       }
     }
   } else {
