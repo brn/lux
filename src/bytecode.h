@@ -140,18 +140,22 @@ struct BytecodeOperand {
   A(RegexPopThread, None, 1, 0)                                          \
   A(RegexResetMatchedCount, None, 1, 0)                                  \
   A(RegexRune, Double3, 3, 1, u16)                                       \
+  A(RegexCharRange, Double2, 5, 2, u16, u16)                             \
   A(RegexCheckPosition, Wide1, 5, 1, BytecodeLabel*)                     \
   A(RegexJumpIfMatchedCountLT, Wide4, 7, 2, uint16_t, BytecodeLabel*)    \
   A(RegexJumpIfMatchedCountEqual, Wide4, 7, 2, uint16_t, BytecodeLabel*) \
   A(RegexPushThread, Wide1, 5, 1, BytecodeLabel*)                        \
   A(RegexEvery, Word1, (kPointerSize + 1), 1, JSString*)                 \
-  A(RegexBranch, Wide3, 9, 1, BytecodeLabel*, BytecodeLabel*)            \
+  A(RegexSome, Word1, (kPointerSize + 1), 1, JSString*)                  \
+  A(RegexBranch, Wide3, 9, 2, BytecodeLabel*, BytecodeLabel*)            \
   A(RegexJump, Wide1, 5, 1, BytecodeLabel*)                              \
   A(RegexJumpIfMatched, Wide1, 5, 1, BytecodeLabel*)                     \
   A(RegexJumpIfFailed, Wide1, 5, 1, BytecodeLabel*)                      \
   A(RegexEscapeSequence, Short1, 2, 1, uint8_t)                          \
   A(RegexBackReference, Wide1, 5, 1, uint32_t)                           \
-  A(RegexToggleClassMatch, Short1, 2, 1, uint8_t)
+  A(RegexToggleClassMatch, Short1, 2, 1, uint8_t)                        \
+  A(RegexStorePosition, None, 1, 0)                                      \
+  A(RegexLoadPosition, None, 1, 0)
 
 #define REGEX_BYTECODE_LIST(A)          \
   REGEX_BYTECODE_LIST_WITOUT_MATCHED(A) \

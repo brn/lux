@@ -138,6 +138,18 @@ class Chars {
     return kCtrlMap[ToLower(word) - 97];
   }
 
+  LUX_INLINE static u8 GetCarretWordFromAsciiCodeIf(u32 word) {
+    if ((word >= 0x01 && word <= 0x1a) && !IsLF(word) && !IsCR(word)) {
+      return word + 64;
+    }
+
+    if ((word >= 0x1b && word <= 0x1f)) {
+      return word + 91;
+    }
+
+    return word;
+  }
+
   static u32 ToHexValue(u32 uchar);
 
   static uint64_t ParseInt(u32 value, bool *ok);
@@ -145,6 +157,10 @@ class Chars {
     return ParseInt(value.code(), ok);
   }
   static uint64_t ParseInt(std::vector<Utf16CodePoint> *value, bool *ok);
+
+  static bool IsCharRangeStart(u32 value) {
+    return value != '-' && value != '\\';
+  }
 
  private:
   static uint64_t ParseInt(Utf16String value, bool *ok);

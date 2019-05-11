@@ -87,20 +87,24 @@ const char* Ast::kNodeTypeStringList[] = {
 #undef AST_STRING_DEF
 };
 
-#define AST_VISIT(Name) void Visitor::Visit##Name(Name* node)
+#define AST_VISIT(Name) \
+  void Visitor::Visit##Name(Name* node, AstContext* context)
 
 #define __ builder()->
 using Label = BytecodeLabel;
 
-Visitor::Visitor(uint16_t captured_count, BytecodeBuilder* bytecode_builder,
+Visitor::Visitor(Isolate* isolate, uint16_t captured_count,
+                 BytecodeBuilder* bytecode_builder,
                  ZoneAllocator* zone_allocator, uint8_t flag)
     : flag_(flag),
       captured_count_(captured_count),
+      isolate_(isolate),
       bytecode_builder_(bytecode_builder),
       zone_allocator_(zone_allocator) {}
 
 AST_VISIT(Root) {
   Var offset;
+  AstContext new_context = {&matched_, &failed_};
   __ RegexComment("RegExp");
 
   if (node->is_from_start()) {
@@ -111,13 +115,12 @@ AST_VISIT(Root) {
   if (!IsGlobal()) {
     __ RegexReserveCapture(captured_count());
   }
-  jump_point_ = Just(&failed_);
-  node->regexp()->Visit(this);
+  node->regexp()->Visit(this, &new_context);
+
   if (node->is_to_end()) {
     __ RegexCheckEnd();
+    __ RegexJumpIfFailed(&failed_);
   }
-
-  __ RegexJumpIfFailed(&failed_);
 
   __ Bind(&matched_);
   __ RegexMatched();
@@ -129,33 +132,122 @@ AST_VISIT(Root) {
 AST_VISIT(Conjunction) {
   __ RegexComment("Conjunction");
   for (auto& a : *node) {
-    a->Visit(this);
+    a->Visit(this, context);
+  }
+}
+
+AST_VISIT(Alternate) {
+  __ RegexComment("Alternate");
+  Label next, ok, pop;
+  AstContext then_context = {&ok, &pop};
+  AstContext else_context = {&ok, context->failure_label};
+
+  __ RegexComment("Alternate.PushThread");
+  __ RegexPushThread(&next);
+  node->left()->Visit(this, &then_context);
+  __ RegexComment("Alternate.Branch");
+
+  __ Bind(&pop);
+  {
+    __ RegexComment("Alternate.PopThread");
+    __ RegexPopThread();
+  }
+
+  __ RegexComment("Alternative");
+  __ Bind(&next);
+  {
+    node->right()->Visit(this, &else_context);
+    __ RegexComment("Alternative.Branch");
+  }
+
+  __ Bind(&ok);
+}
+
+AST_VISIT(MatchRoot) {
+  __ RegexComment("MatchRoot");
+
+  __ RegexComment("MatchRoot.Store");
+  __ RegexStorePosition();
+
+  AstContext new_context = {nullptr, context->failure_label};
+
+  for (auto& a : *node) {
+    a->Visit(this, &new_context);
+  }
+
+  __ RegexComment("MatchRoot.Load");
+  __ RegexLoadPosition();
+  if (context->success_label) {
+    __ RegexJump(context->success_label);
   }
 }
 
 AST_VISIT(Group) {
   __ RegexComment("Group");
 
+  Label ok;
+
   if (node->IsCapturable() && !IsGlobal()) {
     __ RegexStartCapture(node->captured_index());
   }
 
+  AstContext nc = {nullptr, context->failure_label};
   for (auto& a : *node) {
-    a->Visit(this);
+    a->Visit(this, &nc);
   }
 
   if (node->IsCapturable() && !IsGlobal()) {
     __ RegexUpdateCapture();
   }
+  if (context->success_label) {
+    __ RegexJump(context->success_label);
+  }
 }
 
 AST_VISIT(CharClass) {
   __ RegexComment("CharClassOpen");
+  if (!node->size()) {
+    __ RegexJump(context->failure_label);
+    return;
+  }
+
   __ RegexToggleClassMatch(1);
-  node->chars()->Visit(this);
+
+  Label exit, every, failed;
+
+  std::vector<Utf16CodePoint> buf;
+  for (auto& child : *node) {
+    if (child->IsChar()) {
+      buf.push_back(child->UncheckedCastToChar()->value());
+    } else {
+      Label next;
+      if (buf.size() > 0) {
+        EmitSomeOrRune(buf);
+        __ RegexJumpIfMatched(&next);
+        buf.clear();
+      }
+
+      __ Bind(&next);
+      {
+        AstContext nc = {&exit, nullptr};
+        child->Visit(this, &nc);
+      }
+    }
+  }
+
+  __ Bind(&every);
+  {
+    if (buf.size()) {
+      EmitSomeOrRune(buf);
+    }
+  }
+
   __ RegexComment("CharClassClose");
-  __ RegexToggleClassMatch(0);
-  jump_point_ >>= [&](auto p) { __ RegexJumpIfFailed(p); };
+  __ Bind(&exit);
+  {
+    __ RegexToggleClassMatch(0);
+    EmitResultBranch(context);
+  }
 }
 
 AST_VISIT(BackReference) {
@@ -164,34 +256,15 @@ AST_VISIT(BackReference) {
   __ RegexBackReference(node->index());
 }
 
-AST_VISIT(Alternate) {
-  __ RegexComment("Alternate");
-  auto old_jump = jump_point_;
-  Label next, exit, pop;
-
-  __ RegexPushThread(&next);
-  jump_point_ = Just(&pop);
-  node->left()->Visit(this);
-  __ RegexBranch(&exit, &pop);
-
-  __ Bind(&pop);
-  { __ RegexPopThread(); }
-
-  __ RegexComment("Alternative");
-  __ Bind(&next);
-  {
-    Label pop;
-    jump_point_ = old_jump;
-    node->right()->Visit(this);
-  }
-
-  __ Bind(&exit);
+AST_VISIT(CharRange) {
+  __ RegexComment("CharRange");
+  __ RegexCharRange(node->start(), node->end());
+  EmitResultBranch(context);
 }
 
 AST_VISIT(Repeat) {
   __ RegexComment("Repeat");
   auto count = node->more_than();
-  auto old_jump = jump_point_;
   Label loop, pop, next;
 
   if (count == 1) {
@@ -202,17 +275,19 @@ AST_VISIT(Repeat) {
   __ RegexCheckPosition(&next);
   if (node->type() == Repeat::GREEDY) {
     __ RegexPushThread(&next);
-    jump_point_ = Just(&pop);
-    node->target()->Visit(this);
-    __ RegexJumpIfMatched(&loop);
+    AstContext nc = {&loop, &pop};
+    node->target()->Visit(this, &nc);
   } else {
     INVALIDATE(node->type() == Repeat::SHORTEST);
     Label push;
-    jump_point_ = Just(&pop);
-    node->target()->Visit(this);
-    __ Branch(&push, &next);
+    AstContext nc = {&push, &next};
+    node->target()->Visit(this, &nc);
+
     __ Bind(&push);
-    { __ RegexPushThread(&loop); }
+    {
+      __ RegexPushThread(&loop);
+      __ RegexJump(&next);
+    }
   }
 
   __ Bind(&pop);
@@ -222,8 +297,6 @@ AST_VISIT(Repeat) {
   if (count == 1) {
     __ RegexJumpIfMatchedCountLT(count, &pop);
   }
-
-  jump_point_ = old_jump;
 }
 
 AST_VISIT(RepeatRange) {
@@ -231,7 +304,6 @@ AST_VISIT(RepeatRange) {
 
   auto least_count = node->more_than();
   auto max_count = node->less_than();
-  auto old_jump = jump_point_;
 
   Label loop, next, pop;
 
@@ -244,9 +316,8 @@ AST_VISIT(RepeatRange) {
     __ RegexJumpIfMatchedCountEqual(max_count, &next);
     __ RegexCheckPosition(&next);
     __ RegexPushThread(&next);
-    jump_point_ = Just(&pop);
-    node->target()->Visit(this);
-    __ RegexJumpIfMatched(&loop);
+    AstContext nc = {&loop, &pop};
+    node->target()->Visit(this, &nc);
 
     __ Bind(&pop);
     __ RegexPopThread();
@@ -260,30 +331,48 @@ AST_VISIT(RepeatRange) {
       }
     }
   }
-
-  jump_point_ = old_jump;
 }
 
 AST_VISIT(Char) {
   auto value = node->value();
   if (value.IsSurrogatePair()) {
-    EmitCompare(value.ToLowSurrogate());
-    EmitCompare(value.ToHighSurrogate());
+    __ RegexRune(value.ToLowSurrogate());
+    __ RegexRune(value.ToHighSurrogate());
   } else {
-    EmitCompare(value.code());
+    __ RegexRune(value.code());
   }
+  EmitResultBranch(context);
 }
 
 AST_VISIT(CharSequence) {
   __ RegexComment("CharSequence");
-  __ RegexEvery(node->value());
-  jump_point_ >>= [&](auto point) { __ RegexJumpIfFailed(point); };
+  std::vector<Utf16CodePoint> buf;
+  Label next, every, exit;
+
+  for (auto& child : *node) {
+    if (child->IsChar()) {
+      buf.push_back(child->UncheckedCastToChar()->value());
+    } else {
+      if (buf.size() > 0) {
+        __ RegexComment("CharSequence.Every");
+        EmitEveryOrRune(buf, context);
+        buf.clear();
+      }
+      __ RegexComment("CharSequence.Others");
+      child->Visit(this, context);
+    }
+  }
+
+  if (buf.size()) {
+    __ RegexComment("CharSequence.Drain");
+    EmitEveryOrRune(buf, context);
+  }
 }
 
 AST_VISIT(EscapeSequence) {
   __ RegexComment("EscapeSequence");
   __ RegexEscapeSequence(static_cast<uint8_t>(node->type()));
-  jump_point_ >>= [&](auto point) { __ RegexJumpIfFailed(point); };
+  EmitResultBranch(context);
 }
 
 AST_VISIT(Any) {
@@ -304,9 +393,8 @@ AST_VISIT(Any) {
       if (!fall_through) {
         __ RegexComment("Any-Shortest");
       }
-      Label loop, pop, next;
+      Label next;
 
-      __ Bind(&loop);
       __ RegexCheckPosition(&next);
       __ RegexMatchAny();
       __ Bind(&next);
@@ -334,13 +422,40 @@ AST_VISIT(Any) {
   }
 }
 
-void Visitor::EmitCompare(u16 code) {
-  Label ok, pop;
-  __ RegexRune(code);
-  __ RegexBranch(&ok, &pop);
-  __ Bind(&pop);
-  __ RegexPopThread();
-  __ Bind(&ok);
+void Visitor::EmitEveryOrRune(const std::vector<Utf16CodePoint>& buf,
+                              AstContext* context) {
+  if (buf.size() > 1) {
+    Handle<JSString> str = JSString::New(isolate_, buf.data(), buf.size());
+    __ RegexEvery(*str);
+  } else if (buf.size() == 1) {
+    auto value = buf.at(0);
+    if (value.IsSurrogatePair()) {
+      __ RegexRune(value.ToLowSurrogate());
+      __ RegexRune(value.ToHighSurrogate());
+    } else {
+      __ RegexRune(value.code());
+    }
+  }
+  EmitResultBranch(context);
+}
+
+void Visitor::EmitSomeOrRune(const std::vector<Utf16CodePoint>& buf) {
+  if (buf.size() > 1) {
+    Handle<JSString> str = JSString::New(isolate_, buf.data(), buf.size());
+    __ RegexSome(*str);
+  } else if (buf.size() == 1) {
+    __ RegexRune(buf.at(0).code());
+  }
+}
+
+void Visitor::EmitResultBranch(AstContext* context) {
+  if (context->success_label && context->failure_label) {
+    __ RegexBranch(context->success_label, context->failure_label);
+  } else if (context->failure_label) {
+    __ RegexJumpIfFailed(context->failure_label);
+  } else if (context->success_label) {
+    __ RegexJumpIfMatched(context->success_label);
+  }
 }
 
 bool IsRepeatChar(u16 ch) {
@@ -367,32 +482,34 @@ void Parser::Parse() {
 Ast* Parser::ParseRegExp() {
   ENTER();
   auto cj = new (zone()) Conjunction();
+  auto mr = new (zone()) MatchRoot();
   while (has_more() && cur() != '$' && !has_pending_error()) {
-    ParseDisjunction() >>= [&](Ast* a) { cj->Push(a); };
+    ParseDisjunction() >>= [&](Ast* node) {
+      mr->Push(node);
+      while (cur() == '|' && !has_pending_error()) {
+        advance();
+        ParseDisjunction() >>= [&](Ast* n) {
+          auto mra = new (zone()) MatchRoot();
+          mra->Push(n);
+          cj->Push(new (zone()) Alternate(mr, mra));
+          mr = new (zone()) MatchRoot();
+        };
+      }
+    };
   }
-  return cj;
+
+  return cj->size() ? reinterpret_cast<Ast*>(cj) : reinterpret_cast<Ast*>(mr);
 }
 
 Maybe<Ast*> Parser::ParseDisjunction() {
   ENTER();
   update_start_pos();
-  auto atom = ParseAtom() >>= [&](Ast* node) {
+  return ParseAtom() >>= [&](Ast* node) {
     if (IsRepeatChar(cur().code())) {
-      return ParseRepeat(node) >>=
-             [&](Ast* repeat) { return ParseRepeat(repeat); };
+      return ParseRepeat(node);
     }
 
     return Just(node);
-  };
-
-  return atom >>= [&](Ast* node) {
-    while (cur() == '|' && !has_pending_error()) {
-      advance();
-      ParseDisjunction() >>=
-          [&](Ast* n) { node = new (zone()) Alternate(node, n); };
-    }
-
-    return node;
   };
 }  // namespace regexp
 
@@ -405,7 +522,7 @@ Maybe<Ast*> Parser::ParseAtom() {
     case '.':
       return Just(new (zone()) Any());
     default:
-      return ParseChar(false);
+      return ParseChar();
   }
 }
 
@@ -547,58 +664,108 @@ Maybe<Ast*> Parser::ParseCharClass() {
     advance();
   }
 
-  return ParseChar(true) >>= [&](Ast* ast) {
-    update_start_pos();
-    EXPECT_WITH_RETURN(this, cur(), ']', Nothing<CharClass*>())
-    return Just(new (zone()) CharClass(ast, exclude));
-  };
-}
-
-Maybe<Ast*> Parser::ParseChar(bool is_inner_char_class) {
   ENTER();
   bool escaped = false;
-  std::vector<Utf16CodePoint> buf;
-  auto conj = new (zone()) Conjunction();
-  while (has_more()) {
-    if (!escaped && !is_inner_char_class && IsSpecialChar(cur())) {
-      break;
+  auto char_class = new (zone()) CharClass(exclude);
+
+  while (has_more() && !has_pending_error() && (escaped || cur() != ']')) {
+    auto current = cur();
+    if (current == '-' && char_class->size() > 0) {
+      auto prev = char_class->Last();
+      if (prev && prev->IsChar() &&
+          Chars::IsCharRangeStart(
+              prev->UncheckedCastToChar()->value().code())) {
+        advance();
+        auto prevChar = prev->UncheckedCastToChar();
+        if (cur() == ']') {
+          advance();
+          char_class->Push(new (zone()) Char(Utf16CodePoint('-')));
+          continue;
+        }
+        ParseSingleWord(true) >>= [&](Ast* next) {
+          if (next->IsChar()) {
+            auto nextChar = next->UncheckedCastToChar();
+            if (nextChar->value() > prevChar->value()) {
+              char_class->Set(char_class->size() - 1,
+                              new (zone()) CharRange(prevChar->value().code(),
+                                                     nextChar->value().code()));
+            }
+          } else {
+            char_class->Push(next);
+          }
+        };
+      } else if (prev->type() == Ast::Type::BACK_REFERENCE) {
+        char_class->Push(new (zone()) Char(Utf16CodePoint('-')));
+        advance();
+        continue;
+      }
+    } else {
+      ParseSingleWord(true) >>= [&](Ast* a) { char_class->Push(a); };
     }
-    if (is_inner_char_class && !escaped && cur() == ']') {
-      break;
-    }
-    Maybe<Ast*> special = Nothing<Ast*>();
-    auto current = advance();
+  }
+
+  EXPECT_WITH_RETURN(this, cur(), ']', Nothing<CharClass*>())
+
+  return Just(char_class);
+}
+
+Maybe<Ast*> Parser::ParseChar() {
+  ENTER();
+  bool escaped = false;
+  auto char_sequence = new (zone()) CharSequence();
+
+  while (has_more() && !has_pending_error() &&
+         (escaped || !IsSpecialChar(cur()))) {
+    ParseSingleWord(false) >>= [&](Ast* a) { char_sequence->Push(a); };
+  }
+
+  if (char_sequence->size() == 0 && IsRepeatChar(cur().code())) {
+    advance();
+    update_start_pos();
+    REPORT_SYNTAX_ERROR(this, "Nothing to repeat.");
+  }
+
+  return Just(char_sequence);
+}
+
+Maybe<Ast*> Parser::ParseSingleWord(bool is_inner_char_class) {
+  ENTER();
+  bool escaped = false;
+
+  while (has_more() && !has_pending_error()) {
+    auto current = cur();
     if (escaped) {
       switch (current) {
         case 'c': {
-          if (Chars::IsCtrlSuccessor(current)) {
-            current = Utf16CodePoint(Chars::GetAsciiCodeFromCarretWord(cur()));
-            advance();
-          } else {
-            buf.push_back(Utf16CodePoint(0x005c));
+          advance();
+          if (Chars::IsCtrlSuccessor(cur())) {
+            return Just(new (zone()) Char(
+                Utf16CodePoint(Chars::GetAsciiCodeFromCarretWord(cur()))));
           }
-          break;
+          return Just(new (zone()) Char(Utf16CodePoint(0x005c)));
         }
         case 'u': {
+          advance();
           bool ok = true;
-          current = DecodeHexEscape(&ok);
+          auto ret = DecodeHexEscape(&ok);
           if (!ok) {
             REPORT_SYNTAX_ERROR(this, "Invalid escape sequence.");
           }
-          break;
+          return Just(new (zone()) Char(ret));
         }
         case 'x': {
+          advance();
           bool ok = true;
-          current = DecodeAsciiEscapeSequence(&ok);
+          auto ret = DecodeAsciiEscapeSequence(&ok);
           if (!ok) {
             REPORT_SYNTAX_ERROR(this, "Invalid escape sequence.");
           }
-          break;
+          return Just(new (zone()) Char(ret));
         }
-#define DEF_REGEXP_ESCAPE_SEQUENCE_AST_BUILDER(NAME, value, ch)              \
-  case ch:                                                                   \
-    special = Just(new (zone()) EscapeSequence(RegexSpecialCharType::NAME)); \
-    break;
+#define DEF_REGEXP_ESCAPE_SEQUENCE_AST_BUILDER(NAME, value, ch) \
+  case ch:                                                      \
+    advance();                                                  \
+    return Just(new (zone()) EscapeSequence(RegexSpecialCharType::NAME));
           REGEXP_ESCAPE_SEQUENCES(DEF_REGEXP_ESCAPE_SEQUENCE_AST_BUILDER)
 #undef DEF_REGEXP_ESCAPE_SEQUENCE_AST_BUILDER
         default:
@@ -606,64 +773,41 @@ Maybe<Ast*> Parser::ParseChar(bool is_inner_char_class) {
             bool ok = true;
             std::vector<Utf16CodePoint> buf;
             buf.push_back(current);
+            advance();
             while (Chars::IsDecimalDigit(cur().code())) {
               buf.push_back(cur());
-              current = advance();
+              advance();
             }
-            special = Just(new (zone()) BackReference(
-                static_cast<uint32_t>(Chars::ParseInt(&buf, &ok))));
+            auto ret = Chars::ParseInt(&buf, &ok);
             if (!ok) {
               REPORT_SYNTAX_ERROR(this, "Invalid Backreference.");
             }
-          }
-          auto code = Chars::GetAsciiCtrlCodeFromWord(current.code());
-          if (code) {
-            current = Utf16CodePoint(code);
+            return Just(new (zone()) BackReference(static_cast<uint32_t>(ret)));
+          } else {
+            auto code = Chars::GetAsciiCtrlCodeFromWord(current.code());
+            if (code) {
+              advance();
+              return Just(new (zone()) Char(Utf16CodePoint(code)));
+            }
           }
       }
-      special >>= [&](Ast* special) {
-        if (buf.size() == 1) {
-          conj->Push(new (zone()) Char(buf.back()));
-        } else if (buf.size() > 1) {
-          auto str = JSString::New(isolate_, buf.data(), buf.size());
-          conj->Push(new (zone()) CharSequence(*str));
-        }
-        conj->Push(special);
-      };
     }
+
     if (current == '\\') {
       escaped = !escaped;
-      if (escaped) {
+      if (escaped && (!is_inner_char_class || peek() != ']')) {
+        advance();
         continue;
       }
     } else {
       escaped = false;
     }
-    if (!special) {
-      buf.push_back(current);
-    } else {
-      buf.clear();
-    }
-  }
 
-  if (buf.size() == 0 && conj->size() == 0 && IsRepeatChar(cur().code())) {
     advance();
-    update_start_pos();
-    REPORT_SYNTAX_ERROR(this, "Nothing to repeat.");
+    return Just(new (zone()) Char(current));
   }
 
-  if (conj->size() == 0) {
-    if (buf.size() == 1) {
-      return Just(new (zone()) Char(buf.back()));
-    }
-    auto str = JSString::New(isolate_, buf.data(), buf.size());
-    return Just(new (zone()) CharSequence(*str));
-  }
-
-  if (conj->size() == 1) {
-    return Just(conj->at(0));
-  }
-  return Just(conj);
+  return Nothing<Ast*>();
 }
 
 Maybe<Ast*> Parser::ParseRepeat(Ast* node) {
@@ -735,18 +879,15 @@ Maybe<Ast*> Parser::SplitCharSequenceIf(Ast* node, T factory) {
     return factory(node);
   }
   auto char_sequence = node->UncheckedCastToCharSequence();
-  auto value = char_sequence->value();
-  auto last_char = value->Slice(isolate_, value->length() - 1, value->length());
-  auto conjunction = new (zone()) Conjunction();
-  auto start = value->Slice(isolate_, 0, value->length() - 1);
-  auto char_item = new (zone()) Char(last_char->at(0));
-  if (start->length() == 1) {
-    conjunction->Push(new (zone()) Char(start->at(0)));
-  } else {
-    conjunction->Push(new (zone()) CharSequence(*start));
+  if (char_sequence->size() == 0) {
+    return factory(char_sequence->Last());
   }
-  return factory(char_item) >>= [&](Ast* ast) {
+  auto conjunction = new (zone()) Conjunction();
+  for (auto& ast : *char_sequence) {
     conjunction->Push(ast);
+  }
+  return factory(char_sequence->Last()) >>= [&](Ast* ast) {
+    conjunction->Set(conjunction->size() - 1, ast);
     return Just(conjunction);
   };
 }
@@ -831,9 +972,9 @@ Handle<JSRegExp> Compiler::Compile(const char* source, uint8_t flag) {
   parser.Parse();
   ZoneAllocator zone_allocator;
   BytecodeBuilder bytecode_builder(isolate_, &zone_allocator);
-  Visitor visitor(parser.capture_count(), &bytecode_builder, &zone_allocator,
-                  flag);
-  parser.node()->Visit(&visitor);
+  Visitor visitor(isolate_, parser.capture_count(), &bytecode_builder,
+                  &zone_allocator, flag);
+  parser.node()->Visit(&visitor, nullptr);
   auto executable = bytecode_builder.flush();
   return JSRegExp::New(isolate_, *scope.Return(executable), flag);
 }

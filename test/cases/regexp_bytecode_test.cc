@@ -42,7 +42,7 @@ class RegExpBytecodeTest : public lux::IsolateSetup {
     lux::SourcePosition sp;
     lux::regexp::Compiler compiler(isolate_, &er, &sp);
     auto jsregexp = compiler.Compile(regexp, flag);
-    printf("%s\n", jsregexp->code()->ToString().c_str());
+    //    printf("%s\n", jsregexp->code()->ToString().c_str());
     auto ret = jsregexp->Match(isolate_, *lux::JSString::New(isolate_, input));
     ASSERT_TRUE(lux::testing::CompareNode(regexp, ret->ToString().c_str(),
                                           expectation));
@@ -55,7 +55,7 @@ class RegExpBytecodeTest : public lux::IsolateSetup {
     lux::SourcePosition sp;
     lux::regexp::Compiler compiler(isolate_, &er, &sp);
     auto jsregexp = compiler.Compile(regexp, flag);
-    printf("%s\n", jsregexp->code()->ToString().c_str());
+    //    printf("%s\n", jsregexp->code()->ToString().c_str());
     auto ret = jsregexp->Match(isolate_, *lux::JSString::New(isolate_, input));
     ASSERT_TRUE(lux::JSSpecials::IsNull(ret)) << "Got " << ret->ToString();
   }
@@ -136,7 +136,6 @@ TEST_F(RegExpBytecodeTest, Test262_S15_10_2_10_A2_1_T1) {
     std::string reg;
     lux::SPrintf(&reg, false, "\\c%c", alpha);
     std::string result;
-    printf("%d\n", str.at(0));
     lux::SPrintf(&result, false, "JSArray[String(\"%s\")]", str.c_str());
     RunTest(reg.c_str(), str.c_str(), lux::regexp::Flag::kNone, result.c_str());
   }
@@ -150,7 +149,6 @@ TEST_F(RegExpBytecodeTest, Test262_S15_10_2_10_A2_1_T2) {
     std::string reg;
     lux::SPrintf(&reg, false, "\\c%c", alpha);
     std::string result;
-    printf("%d\n", str.at(0));
     lux::SPrintf(&result, false, "JSArray[String(\"%s\")]", str.c_str());
     RunTest(reg.c_str(), str.c_str(), lux::regexp::Flag::kNone, result.c_str());
   }
@@ -381,7 +379,7 @@ TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T1) {
 }
 
 TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T10) {
-  RunTest("[a-c\\d]+", "\n\n\abc324234\n", lux::regexp::Flag::kNone,
+  RunTest("[a-c\\d]+", "\n\n\\abc324234\n", lux::regexp::Flag::kNone,
           "JSArray[String(\"abc324234\")]");
 }
 

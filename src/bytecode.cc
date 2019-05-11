@@ -165,7 +165,6 @@ std::string BytecodeArray::ToString(BytecodeConstantArray* constant_pool) {
     auto start = fetcher.pc();
     auto start_size = std::to_string(start).size();
     auto detail = BytecodeUtil::ToString(&fetcher);
-    ;
     auto end = fetcher.pc() - 1;
     auto end_size = std::to_string(end).size();
     std::string indent((max - size) + 1, ' ');
@@ -297,6 +296,7 @@ Handle<BytecodeExecutable> BytecodeArrayWriter::Flush() {
   HandleScope scope;
   auto array = BytecodeArray::New(isolate_, current_offset_ + 2);
   size_t index = 0;
+
   auto node = bytecode_top_;
   while (node) {
     auto bytecode = node->bytecode();
@@ -404,6 +404,7 @@ Handle<BytecodeExecutable> BytecodeArrayWriter::Flush() {
                    bu::DecodeOperand(bu::kOperandD, target));
     }
   }
+
   auto pool = BytecodeConstantArray::New(isolate_, constant_length_);
   auto bcn = constant_top_;
   index = 0;
@@ -452,6 +453,14 @@ BytecodeNode* BytecodeBuilder::RegexStartCapture(uint16_t v) {
 
 BytecodeNode* BytecodeBuilder::RegexUpdateCapture() {
   auto n = new (zone()) BytecodeNode(Bytecode::kRegexUpdateCapture);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexCharRange(u16 start, u16 end) {
+  uint64_t x = end << 16;
+  x |= start;
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexCharRange, x);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -534,6 +543,13 @@ BytecodeNode* BytecodeBuilder::RegexEvery(JSString* input) {
   return n;
 }
 
+BytecodeNode* BytecodeBuilder::RegexSome(JSString* input) {
+  auto n = new (zone())
+      BytecodeNode(Bytecode::kRegexSome, reinterpret_cast<uintptr_t>(input));
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
 BytecodeNode* BytecodeBuilder::RegexBranch(BytecodeLabel* label,
                                            BytecodeLabel* label2) {
   auto n = new (zone())
@@ -580,6 +596,18 @@ BytecodeNode* BytecodeBuilder::RegexBackReference(uint32_t index) {
 
 BytecodeNode* BytecodeBuilder::RegexToggleClassMatch(uint8_t flag) {
   auto n = new (zone()) BytecodeNode(Bytecode::kRegexToggleClassMatch, flag);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexStorePosition() {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexStorePosition);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexLoadPosition() {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexLoadPosition);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -898,5 +926,4 @@ BytecodeScope::BytecodeScope(BytecodeBuilder* builder) : builder_(builder) {
 }
 
 BytecodeNode* BytecodeScope::end() { return builder_->last_bytecode(); }
-
 }  // namespace lux

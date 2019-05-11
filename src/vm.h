@@ -24,9 +24,12 @@
 #define SRC_VM_H_
 
 #include <array>
+#include <string>
 #include <vector>
 #include "./bytecode.h"
+#include "./chars.h"
 #include "./maybe.h"
+#include "./platform/os.h"
 #include "./utils.h"
 
 namespace lux {
@@ -117,7 +120,8 @@ class VirtualMachine {
    public:
     RegexExecutor(Isolate* isolate, JSString* input, bool collect_matched_word,
                   BytecodeExecutable* executable)
-        : captured_array_(isolate->jsval_null()),
+        : saved_position_(0),
+          captured_array_(isolate->jsval_null()),
           current_capture_(nullptr),
           flag_(Smi::FromInt(0)),
           input_(input),
@@ -126,7 +130,7 @@ class VirtualMachine {
       if (collect_matched_word) {
         vm_flag_.set(kCollectWords);
       }
-      current_thread_ = new (zone()) Thread(0, 0, 0, 0, Smi::FromInt(0));
+      current_thread_ = new (zone()) Thread(0, 0, 0, 0, 0, Smi::FromInt(0));
       unset_matched();
       fetcher_(executable->bytecode_array());
     }
@@ -147,9 +151,9 @@ class VirtualMachine {
 
     class Thread : public Zone {
      public:
-      Thread(uint32_t pc, uint32_t position, uint32_t matched_count,
-             uint16_t capture_index, Smi* flag)
-          : start_position_(position),
+      Thread(uint32_t pc, uint32_t start_position, uint32_t position,
+             uint32_t matched_count, uint16_t capture_index, Smi* flag)
+          : start_position_(start_position),
             pc_(pc),
             position_(position),
             matched_count_(matched_count),
@@ -175,6 +179,7 @@ class VirtualMachine {
       Smi* flag_;
     };
 
+    LUX_CONST_PROPERTY(uint32_t, saved_position, saved_position_)
     LUX_CONST_GETTER(Object*, captured_array, captured_array_)
     LUX_CONST_GETTER(bool, collect_matched_word, vm_flag_.get(0))
     LUX_INLINE void set_matched() { vm_flag_.set(kMatched); }
@@ -183,6 +188,13 @@ class VirtualMachine {
 
     LUX_INLINE bool is_advanceable() {
       return input()->length() > (current_thread()->position() + 1);
+    }
+
+    LUX_INLINE void store_position() {
+      saved_position_ = current_thread()->position();
+    }
+    LUX_INLINE void load_position() {
+      current_thread()->set_start_position(saved_position_);
     }
 
     void EnableClassMatch() { vm_flag_.set(kClassMatch); }
@@ -227,9 +239,10 @@ class VirtualMachine {
     inline void ClearAllThread() { thread_stack_.clear(); }
 
     inline void NewThread(uint32_t pc) {
-      auto t = new (zone()) Thread(pc, current_thread_->position(),
-                                   current_thread_->matched_count(),
-                                   current_thread_->capture_index(), flag_);
+      auto t = new (zone())
+          Thread(pc, current_thread_->start_position(),
+                 current_thread_->position(), current_thread_->matched_count(),
+                 current_thread_->capture_index(), flag_);
       thread_stack_.push_back(t);
     }
 
@@ -328,24 +341,47 @@ class VirtualMachine {
       Bytecode bytecode;
     };
 
-    void CollectExecutionLog(uint32_t start_position, Bytecode bytecode) {
+    void CollectExecutionLog(uint32_t start_position, Bytecode bytecode,
+                             bool is_print) {
       u8 value = current_thread_->position() >= input_->length()
                      ? '?'
                      : input_->at(current_thread_->position()).ToAscii();
       ExecutionLog e = {value, current_thread_->position(), start_position,
                         JSSpecials::ToBoolean(load_flag()), bytecode};
       exec_log_list_.push_back(e);
+      if (is_print) {
+        auto s = DoPrintLog(e);
+        printf("%s\n", s.c_str());
+      }
     }
 
     const std::vector<ExecutionLog>& exec_log() const { return exec_log_list_; }
 
     void PrintLog() const {
       for (auto& log : exec_log_list_) {
-        printf(
-            "%c %d %d %s %s\n", log.value, log.position, log.start_position,
-            log.matched ? "matched" : "unmatched",
-            BytecodeUtil::ToStringOpecode(static_cast<Bytecode>(log.bytecode)));
+        auto s = DoPrintLog(log);
+        printf("%s\n", s.c_str());
       }
+    }
+
+    std::string DoPrintLog(const ExecutionLog& log) const {
+      u32 u = Chars::GetCarretWordFromAsciiCodeIf(log.value);
+      std::string v(u == '\n' ? "\\n"
+                              : u == '\r' ? "\\r" : u == '\t' ? "\\t" : "");
+      if (!v.size()) {
+        if (u != log.value) {
+          SPrintf(&v, false, "^%c", u);
+        } else {
+          SPrintf(&v, false, "%c", u);
+        }
+      }
+      std::string result;
+      SPrintf(
+          &result, false, "%s %d %d %s %s", v.c_str(), log.position,
+          log.start_position, log.matched ? "matched" : "unmatched",
+          BytecodeUtil::ToStringOpecode(static_cast<Bytecode>(log.bytecode)));
+
+      return result;
     }
 #endif
 
@@ -356,6 +392,7 @@ class VirtualMachine {
     std::vector<Captured*> captured_stack_;
     std::vector<Thread*> thread_stack_;
     std::vector<JSString*> matched_words_;
+    uint32_t saved_position_;
     Object* captured_array_;
     Captured* current_capture_;
     Thread* current_thread_;

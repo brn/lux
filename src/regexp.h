@@ -75,37 +75,51 @@ struct Flag {
   A(ESCAPE_SEQUENCE, EscapeSequence) \
   A(ANY, Any)                        \
   A(CONJUNCTION, Conjunction)        \
+  A(CHAR_RANGE, CharRange)           \
+  A(MATCH_ROOT, MatchRoot)           \
   A(ROOT, Root)
 
 #define RE_AST_FORWARD_DECL(_, Name) class Name;
 REGEXP_AST_TYPES(RE_AST_FORWARD_DECL)
 #undef RE_AST_FORWARD_DECL
 
-#define REGEXP_VISIT_INTERNAL_IFACE void VisitInternal(Visitor* v)
-#define REGEXP_VISIT_INTERNAL_METHOD_DECL(Name) \
-  void VisitInternal(Visitor* v) { v->Visit##Name(this); }
+struct AstContext {
+  BytecodeLabel* success_label;
+  BytecodeLabel* failure_label;
+};
+
+#define REGEXP_VISIT_INTERNAL_IFACE \
+  void VisitInternal(Visitor* v, AstContext* failure_label)
+#define REGEXP_VISIT_INTERNAL_METHOD_DECL(Name)               \
+  void VisitInternal(Visitor* v, AstContext* failure_label) { \
+    v->Visit##Name(this, failure_label);                      \
+  }
 
 class Visitor {
  public:
-  explicit Visitor(uint16_t captured_count, BytecodeBuilder* bytecode_builder,
+  explicit Visitor(Isolate* isolate, uint16_t captured_count,
+                   BytecodeBuilder* bytecode_builder,
                    ZoneAllocator* zone_allocator, uint8_t flag);
 
   LUX_GETTER(BytecodeBuilder*, builder, bytecode_builder_)
   LUX_GETTER(ZoneAllocator*, zone, zone_allocator_)
 
-#define REGEXP_VISIT_DECL(G, Name) void Visit##Name(Name* ast);
+#define REGEXP_VISIT_DECL(G, Name) \
+  void Visit##Name(Name* ast, AstContext* context);
   REGEXP_AST_TYPES(REGEXP_VISIT_DECL)
 #undef REGEXP_VISIT_DECL
 
  private:
-  enum { kFirstOp = 0, kDisableRetry };
-  void set_first_op() { flags_.set(kFirstOp); }
-  bool first_op() const { return !flags_.get(kFirstOp); }
+  enum { kDisableRetry = 0 };
   void disable_retry() { flags_.set(kDisableRetry); }
   bool is_retryable() { return !flags_.get(kDisableRetry); }
   void EmitCompare(u16 code);
   void CollectMatchedChar(Var* char_register);
   void Return(Var* ret = nullptr);
+  void EmitEveryOrRune(const std::vector<Utf16CodePoint>& buf,
+                       AstContext* context);
+  void EmitSomeOrRune(const std::vector<Utf16CodePoint>& buf);
+  void EmitResultBranch(AstContext*);
   LUX_INLINE bool IsGlobal() {
     return (flag_ & Flag::kGlobal) == Flag::kGlobal;
   }
@@ -113,10 +127,10 @@ class Visitor {
 
   uint8_t flag_;
   uint16_t captured_count_;
+  Isolate* isolate_;
   Bitset<uint8_t> flags_;
   BytecodeLabel matched_;
   BytecodeLabel failed_;
-  Maybe<BytecodeLabel*> jump_point_;
   BytecodeBuilder* bytecode_builder_;
   ZoneAllocator* zone_allocator_;
 };
@@ -147,7 +161,9 @@ class Ast : public Zone {
   virtual std::string ToString(std::string* indent = nullptr) const = 0;
 #endif
 
-  LUX_INLINE void Visit(Visitor* visitor) { VisitInternal(visitor); }
+  LUX_INLINE void Visit(Visitor* visitor, AstContext* context) {
+    VisitInternal(visitor, context);
+  }
 
  private:
   virtual REGEXP_VISIT_INTERNAL_IFACE {}
@@ -165,7 +181,11 @@ class AstListTrait {
   using iterator = AstList::iterator;
   Ast* at(int index) const { return list_[index]; }
 
+  void Set(int index, Ast* ast) { list_[index] = ast; }
+
   void Push(Ast* a) { list_.push_back(a); }
+
+  Ast* Last() const { return list_.back(); }
 
   size_t size() const { return list_.size(); }
 
@@ -314,33 +334,23 @@ class BackReference : public Ast {
   uint32_t index_;
 };
 
-class CharClass : public Ast {
+class CharClass : public Ast, public AstListTrait {
  public:
-  CharClass(Ast* chars, bool exclude)
-      : Ast(Ast::CHAR_CLASS), exclude_(exclude), chars_(chars) {}
+  explicit CharClass(bool exclude) : Ast(Ast::CHAR_CLASS), exclude_(exclude) {}
 
   REGEXP_VISIT_INTERNAL_METHOD_DECL(CharClass);
 
   LUX_INLINE bool IsExclude() const { return exclude_; }
-  LUX_CONST_GETTER(Ast*, chars, chars_)
 
 #ifdef DEBUG
   std::string ToString(std::string* indent = nullptr) const {
     std::stringstream st;
-    st << (indent == nullptr ? "" : *indent)
-       << "[CharClass exclude = " << (exclude_ ? "true" : "false");
-    st << "]\n";
-    *indent += "  ";
-    st << chars_->ToString(indent);
-    if (indent != nullptr) {
-      (*indent) = (*indent).substr(0, indent->size() - 2);
-    }
-    return st.str();
+    st << "[CharClass exclude = " << (exclude_ ? "true" : "false") << "]\n";
+    return ToStringList(st.str().c_str(), indent);
   }
 #endif
  private:
   bool exclude_;
-  Ast* chars_;
 };
 
 class Alternate final : public Ast {
@@ -453,27 +463,15 @@ class RepeatRange : public Ast {
   Ast* target_;
 };
 
-class CharSequence : public Ast {
+class CharSequence : public Ast, public AstListTrait {
  public:
-  explicit CharSequence(JSString* value)
-      : Ast(Ast::CHAR_SEQUENCE), value_(value) {}
+  CharSequence() : Ast(Ast::CHAR_SEQUENCE), AstListTrait() {}
+
+  std::string ToString(std::string* indent = nullptr) const {
+    return ToStringList("Conjunction", indent);
+  }
 
   REGEXP_VISIT_INTERNAL_METHOD_DECL(CharSequence);
-
-  LUX_CONST_GETTER(JSString*, value, value_)
-
-#ifdef DEBUG
-  std::string ToString(std::string* indent = nullptr) const {
-    std::stringstream st;
-    JSString::Utf8String u8str(value_);
-    st << (indent == nullptr ? "" : *indent) << "[CharSequence <"
-       << u8str.value() << ">]\n";
-    return st.str();
-  }
-#endif
-
- private:
-  JSString* value_;
 };
 
 class Char : public Ast {
@@ -548,6 +546,44 @@ class EscapeSequence : public Ast {
   RegexSpecialCharType type_;
 };
 
+class CharRange : public Ast {
+ public:
+  CharRange(u16 start, u16 end)
+      : Ast(Ast::CHAR_RANGE), start_(start), end_(end) {}
+
+  LUX_CONST_GETTER(u16, start, start_);
+  LUX_CONST_GETTER(u16, end, end_);
+
+#ifdef DEBUG
+  std::string ToString(std::string* indent = nullptr) const {
+    std::stringstream st;
+    st << (indent == nullptr ? "" : *indent) << "[CharRange from = '" << start_
+       << " to = " << end_ << "']\n";
+    return st.str();
+  }
+#endif
+
+ private:
+  REGEXP_VISIT_INTERNAL_METHOD_DECL(CharRange);
+
+  u16 start_;
+  u16 end_;
+};
+
+class MatchRoot : public Ast, public AstListTrait {
+ public:
+  MatchRoot() : Ast(Ast::MATCH_ROOT), AstListTrait() {}
+
+#ifdef DEBUG
+  std::string ToString(std::string* indent = nullptr) const {
+    return ToStringList("MatchRoot", indent);
+  }
+#endif
+
+ private:
+  REGEXP_VISIT_INTERNAL_METHOD_DECL(MatchRoot);
+};
+
 class Any : public Ast {
  public:
   enum Type {
@@ -604,7 +640,7 @@ class Parser {
 
   Maybe<Ast*> ParseAtom();
 
-  Maybe<Ast*> ParseChar(bool is_inner_char_class);
+  Maybe<Ast*> ParseChar();
 
   Maybe<Ast*> ParseGroup();
 
@@ -621,6 +657,8 @@ class Parser {
   Utf16CodePoint DecodeAsciiEscapeSequence(bool* ok);
 
   Utf16String::ParseIntResult ToInt();
+
+  Maybe<Ast*> ParseSingleWord(bool is_inner_char_class);
 
   inline bool has_pending_error() { return reporter_->HasPendingError(); }
 
