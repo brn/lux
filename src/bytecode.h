@@ -76,37 +76,41 @@ class BytecodeExecutable;
 // Short3   | instruction | C | B | A |
 //          +-------------------------+
 //
-//          +-------------------------+
-// Double1  | instruction | C |   Ax  |
-//          +-------------------------+
+//          +------------------------+
+// Double1  | instruction | C |  Ax  |
+//          +------------------------+
 //
-//          +-----------------------------+
-// Double2  | instruction |  Bx   |   Ax  |
-//          +-----------------------------+
+//          +---------------------------+
+// Double2  | instruction |  Bx  |  Ax  |
+//          +---------------------------+
 //
-//          +---------------------+
-// Double3  | instruction |   Ax  |
-//          +---------------------+
-//
-//          +---------------------------------------------+
-// Word1    | instruction |            Rax                |
-//          +---------------------------------------------+
-//
-//          +-----------------------------+
-// Wide1    | instruction |      Eax      |
-//          +-----------------------------+
+//          +--------------------+
+// Double3  | instruction |  Ax  |
+//          +--------------------+
 //
 //          +---------------------------------+
-// Wide2    | instruction | E |      Eax      |
+// Word1    | instruction |        Rax        |
 //          +---------------------------------+
 //
-//          +---------------------------------------------+
-// Wide3    | instruction |      Ebx      |      Eax      |
-//          +---------------------------------------------+
+//          +-------------------------+
+// Wide1    | instruction |    Eax    |
+//          +-------------------------+
 //
-//          +------------------------------------+
-// Wide4    | instruction |  Cx  |      Eax      |
-//          +------------------------------------+
+//          +-----------------------------+
+// Wide2    | instruction | E |    Eax    |
+//          +-----------------------------+
+//
+//          +-------------------------------------+
+// Wide3    | instruction |    Ebx    |    Eax    |
+//          +-------------------------------------+
+//
+//          +-------------------------------+
+// Wide4    | instruction |  Cx  |   Eax    |
+//          +-------------------------------+
+//
+//          +---------------------------------------+
+// Wide5    | instruction |  Dx  |  Cx  |    Eax    |
+//          +---------------------------------------+
 //
 
 enum class BytecodeLayout : uint8_t {
@@ -121,7 +125,8 @@ enum class BytecodeLayout : uint8_t {
   kWide1,
   kWide2,
   kWide3,
-  kWide4
+  kWide4,
+  kWide5
 };
 
 struct BytecodeOperand {
@@ -131,18 +136,21 @@ struct BytecodeOperand {
 
 #define REGEX_BYTECODE_LIST_WITOUT_MATCHED(A)                            \
   A(RegexComment, Word1, (kPointerSize + 1), 1, const char*)             \
-  A(RegexReserveCapture, Double3, 3, 1, uint16_t)                        \
-  A(RegexStartCapture, Double3, 3, 1, uint16_t)                          \
+  A(RegexReserveCapture, Wide1, 5, 1, uint32_t)                          \
+  A(RegexStartCapture, Wide1, 5, 1, uint32_t)                            \
   A(RegexDisableRetry, None, 1, 0)                                       \
   A(RegexCheckEnd, None, 1, 0)                                           \
-  A(RegexUpdateCapture, None, 1, 0)                                      \
+  A(RegexUpdateCapture, Wide1, 5, 1, uint32_t)                           \
   A(RegexMatchAny, None, 1, 0)                                           \
-  A(RegexPopThread, None, 1, 0)                                          \
+  A(RegexPopThread, Short1, 2, 1, uint8_t)                               \
   A(RegexResetMatchedCount, None, 1, 0)                                  \
   A(RegexRune, Double3, 3, 1, u16)                                       \
   A(RegexCharRange, Double2, 5, 2, u16, u16)                             \
   A(RegexCheckPosition, Wide1, 5, 1, BytecodeLabel*)                     \
+  A(RegexJumpIfMatchedCountRange, Wide5, 8, 3, uint16_t, uint16_t,       \
+    BytecodeLabel*)                                                      \
   A(RegexJumpIfMatchedCountLT, Wide4, 7, 2, uint16_t, BytecodeLabel*)    \
+  A(RegexJumpIfMatchedCountGT, Wide4, 7, 2, uint16_t, BytecodeLabel*)    \
   A(RegexJumpIfMatchedCountEqual, Wide4, 7, 2, uint16_t, BytecodeLabel*) \
   A(RegexPushThread, Wide1, 5, 1, BytecodeLabel*)                        \
   A(RegexEvery, Word1, (kPointerSize + 1), 1, JSString*)                 \
@@ -154,8 +162,15 @@ struct BytecodeOperand {
   A(RegexEscapeSequence, Short1, 2, 1, uint8_t)                          \
   A(RegexBackReference, Wide1, 5, 1, uint32_t)                           \
   A(RegexToggleClassMatch, Short1, 2, 1, uint8_t)                        \
-  A(RegexStorePosition, None, 1, 0)                                      \
-  A(RegexLoadPosition, None, 1, 0)
+  A(RegexMatchPrologue, None, 1, 0)                                      \
+  A(RegexMatchEpilogue, None, 1, 0)                                      \
+  A(RegexLoadMatchEndPosition, None, 1, 0)                               \
+  A(RegexStoreMatchEndPosition, None, 1, 0)                              \
+  A(RegexPushMatchedCount, None, 1, 0)                                   \
+  A(RegexPopMatchedCount, None, 1, 0)                                    \
+  A(RegexEmpty, None, 1, 0)                                              \
+  A(RegexNotMatch, None, 1, 0)                                           \
+  A(RegexFlipResult, None, 1, 0)
 
 #define REGEX_BYTECODE_LIST(A)          \
   REGEX_BYTECODE_LIST_WITOUT_MATCHED(A) \
@@ -392,6 +407,28 @@ class BytecodeFetcher {
     return reinterpret_cast<T>(FetchNextWideOperand());
   }
 #endif
+
+#ifdef DEBUG
+  const char* ReadCommentWord() {
+    auto a = static_cast<uint64_t>(array_->at(pc_ + 1));
+    auto b = static_cast<uint64_t>(array_->at(pc_ + 2));
+    auto c = static_cast<uint64_t>(array_->at(pc_ + 3));
+    auto d = static_cast<uint64_t>(array_->at(pc_ + 4));
+    auto e = static_cast<uint64_t>(array_->at(pc_ + 5));
+    auto f = static_cast<uint64_t>(array_->at(pc_ + 6));
+    auto g = static_cast<uint64_t>(array_->at(pc_ + 7));
+    auto h = static_cast<uint64_t>(array_->at(pc_ + 8));
+    return reinterpret_cast<const char*>(a | (b << 8) | (c << 16) | (d << 24) |
+                                         (e << 32) | (f << 40) | (g << 48) |
+                                         (h << 56));
+  }
+#else
+  const char* FetchCommentWord() { return ""; }
+#endif
+
+  inline Bytecode CurrentBytecode() {
+    return static_cast<Bytecode>(array_->at(pc_));
+  }
 
   inline void UpdatePCToRegexFailed() { pc_ = length() - 3; }
 

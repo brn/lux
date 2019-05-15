@@ -28,7 +28,12 @@
 
 namespace lux {
 namespace regexp {
-#define ENTER()  // printf("%s\n", __FUNCTION__);
+#define ENTER_LOG()                              \
+  printf("%s %c\n", __FUNCTION__, cur().code()); \
+  const char* name = __FUNCTION__;               \
+  LUX_SCOPED([&]() { printf("%sEnd %c\n", name, cur().code()); })
+
+#define ENTER()  // ENTER_LOG()
 
 #define BASE_REPORT_SYNTAX_ERROR_(parser)                              \
   auto e = std::make_shared<lux::ErrorDescriptor>(parser->position()); \
@@ -64,11 +69,13 @@ namespace regexp {
 
 #define EXPECT_NOT_ADVANCE(parser, n, expect)                   \
   if (n != expect) {                                            \
+    update_start_pos();                                         \
     REPORT_SYNTAX_ERROR(parser, "'" << expect << "' expected"); \
   }
 
 #define EXPECT_NOT_ADVANCE_WITH_RETURN(parser, n, expect, retVal)          \
   if (n != expect) {                                                       \
+    update_start_pos();                                                    \
     REPORT_SYNTAX_ERROR_WITH_RETURN(parser, "'" << expect << "' expected", \
                                     retVal);                               \
   }
@@ -150,7 +157,7 @@ AST_VISIT(Alternate) {
   __ Bind(&pop);
   {
     __ RegexComment("Alternate.PopThread");
-    __ RegexPopThread();
+    __ RegexPopThread(0);
   }
 
   __ RegexComment("Alternative");
@@ -167,7 +174,7 @@ AST_VISIT(MatchRoot) {
   __ RegexComment("MatchRoot");
 
   __ RegexComment("MatchRoot.Store");
-  __ RegexStorePosition();
+  __ RegexMatchPrologue();
 
   AstContext new_context = {nullptr, context->failure_label};
 
@@ -176,9 +183,9 @@ AST_VISIT(MatchRoot) {
   }
 
   __ RegexComment("MatchRoot.Load");
-  __ RegexLoadPosition();
+  __ RegexMatchEpilogue();
   if (context->success_label) {
-    __ RegexJump(context->success_label);
+    __ RegexJumpIfMatched(context->success_label);
   }
 }
 
@@ -187,8 +194,12 @@ AST_VISIT(Group) {
 
   Label ok;
 
-  if (node->IsCapturable() && !IsGlobal()) {
+  if (node->IsCapture() && !IsGlobal()) {
     __ RegexStartCapture(node->captured_index());
+  }
+
+  if (node->IsPositiveLookahead()) {
+    __ RegexStoreMatchEndPosition();
   }
 
   AstContext nc = {nullptr, context->failure_label};
@@ -196,9 +207,29 @@ AST_VISIT(Group) {
     a->Visit(this, &nc);
   }
 
-  if (node->IsCapturable() && !IsGlobal()) {
-    __ RegexUpdateCapture();
+  if (node->IsCapture() && !IsGlobal()) {
+    __ RegexUpdateCapture(node->captured_index());
   }
+
+  if (node->IsPositiveLookahead()) {
+    Label ok;
+    __ RegexJumpIfMatched(&ok);
+
+    __ Bind(&ok);
+    { __ RegexLoadMatchEndPosition(); }
+  }
+
+  if (node->IsNegativeLookahead()) {
+    Label ok;
+    __ RegexJumpIfFailed(&ok);
+
+    __ Bind(&ok);
+    {
+      __ RegexFlipResult();
+      __ RegexLoadMatchEndPosition();
+    }
+  }
+
   if (context->success_label) {
     __ RegexJump(context->success_label);
   }
@@ -206,8 +237,12 @@ AST_VISIT(Group) {
 
 AST_VISIT(CharClass) {
   __ RegexComment("CharClassOpen");
-  if (!node->size()) {
+  if (!node->size() && !node->IsExclude()) {
     __ RegexJump(context->failure_label);
+    return;
+  } else if (!node->size() && node->IsExclude()) {
+    __ RegexEmpty();
+    EmitResultBranch(context);
     return;
   }
 
@@ -223,7 +258,7 @@ AST_VISIT(CharClass) {
       Label next;
       if (buf.size() > 0) {
         EmitSomeOrRune(buf);
-        __ RegexJumpIfMatched(&next);
+        __ RegexJumpIfMatched(&exit);
         buf.clear();
       }
 
@@ -246,6 +281,9 @@ AST_VISIT(CharClass) {
   __ Bind(&exit);
   {
     __ RegexToggleClassMatch(0);
+    if (node->IsExclude()) {
+      __ RegexFlipResult();
+    }
     EmitResultBranch(context);
   }
 }
@@ -265,11 +303,14 @@ AST_VISIT(CharRange) {
 AST_VISIT(Repeat) {
   __ RegexComment("Repeat");
   auto count = node->more_than();
-  Label loop, pop, next;
+  Label loop, pop, next, exit;
 
   if (count == 1) {
     __ RegexCheckPosition(&pop);
   }
+
+  __ RegexPushMatchedCount();
+  __ RegexResetMatchedCount();
 
   __ Bind(&loop);
   __ RegexCheckPosition(&next);
@@ -284,18 +325,31 @@ AST_VISIT(Repeat) {
     node->target()->Visit(this, &nc);
 
     __ Bind(&push);
-    {
-      __ RegexPushThread(&loop);
-      __ RegexJump(&next);
-    }
+    { __ RegexPushThread(&loop); }
   }
 
   __ Bind(&pop);
-  __ RegexPopThread();
+  __ RegexPopThread(0);
 
   __ Bind(&next);
-  if (count == 1) {
-    __ RegexJumpIfMatchedCountLT(count, &pop);
+  {
+    if (count == 1) {
+      if (node->type() == Repeat::SHORTEST) {
+        __ RegexJumpIfMatchedCountLT(0, &pop);
+      } else if (node->type() == Repeat::GREEDY) {
+        __ RegexJumpIfMatchedCountGT(0, &exit);
+        __ RegexComment("Repeat.Failure");
+        __ RegexNotMatch();
+      }
+    }
+  }
+
+  __ Bind(&exit);
+  {
+    __ RegexPopMatchedCount();
+    if (context->failure_label) {
+      __ RegexJumpIfFailed(context->failure_label);
+    }
   }
 }
 
@@ -305,31 +359,63 @@ AST_VISIT(RepeatRange) {
   auto least_count = node->more_than();
   auto max_count = node->less_than();
 
-  Label loop, next, pop;
+  Label loop, next, pop, failure, exit, clean;
+
+  __ RegexComment("RepeatRange.PushMatchedCount");
+  __ RegexPushMatchedCount();
+  __ RegexComment("RepeatRange.ResetMatchedCount");
+  __ RegexResetMatchedCount();
 
   if (least_count > 0) {
+    __ RegexComment("RepeatRange.CheckPos");
     __ RegexCheckPosition(&pop);
   }
 
+  __ RegexComment("RepeatRange.Push");
+  __ RegexPushThread(&next);
   __ Bind(&loop);
   {
-    __ RegexJumpIfMatchedCountEqual(max_count, &next);
+    __ RegexComment("RepeatRange.MCE");
+    __ RegexJumpIfMatchedCountEqual(max_count, &clean);
+    __ RegexComment("RepeatRange.CheckPos");
     __ RegexCheckPosition(&next);
-    __ RegexPushThread(&next);
     AstContext nc = {&loop, &pop};
     node->target()->Visit(this, &nc);
 
     __ Bind(&pop);
-    __ RegexPopThread();
+    {
+      __ RegexComment("RepeatRange.PopThread");
+      __ RegexPopThread(0);
+    }
+
+    __ Bind(&clean);
+    {
+      __ RegexComment("RepeatRange.PopThread(Ignore)");
+      __ RegexPopThread(1);
+      __ RegexJump(&next);
+    }
 
     __ Bind(&next);
     {
       if (least_count > 0) {
-        Label ok;
-        __ RegexJumpIfMatchedCountLT(least_count, &pop);
-        __ RegexResetMatchedCount();
+        __ RegexComment("RepeatRange.MCGT");
+        __ RegexJumpIfMatchedCountGT(least_count - 1, &exit);
+
+        __ RegexComment("RepeatRange.NotMatch");
+        __ RegexNotMatch();
+
+        __ RegexComment("RepeatRange.Jump");
+        __ RegexJump(&exit);
       }
     }
+  }
+
+  __ Bind(&exit);
+  {
+    __ RegexComment("RepeatRange.PopMatchedCount");
+    __ RegexPopMatchedCount();
+    __ RegexComment("RepeatRange.Jump");
+    EmitResultBranch(context);
   }
 }
 
@@ -382,6 +468,7 @@ AST_VISIT(Any) {
     case Any::EAT_ANY:
       __ RegexComment("Any");
       __ RegexMatchAny();
+      EmitResultBranch(context);
       break;
     case Any::EAT_MINIMUM_L1: {
       fall_through = true;
@@ -481,24 +568,22 @@ void Parser::Parse() {
 
 Ast* Parser::ParseRegExp() {
   ENTER();
-  auto cj = new (zone()) Conjunction();
   auto mr = new (zone()) MatchRoot();
   while (has_more() && cur() != '$' && !has_pending_error()) {
-    ParseDisjunction() >>= [&](Ast* node) {
-      mr->Push(node);
-      while (cur() == '|' && !has_pending_error()) {
-        advance();
-        ParseDisjunction() >>= [&](Ast* n) {
-          auto mra = new (zone()) MatchRoot();
-          mra->Push(n);
-          cj->Push(new (zone()) Alternate(mr, mra));
-          mr = new (zone()) MatchRoot();
-        };
-      }
-    };
+    ParseDisjunction() >>= [&](Ast* node) { mr->Push(node); };
   }
 
-  return cj->size() ? reinterpret_cast<Ast*>(cj) : reinterpret_cast<Ast*>(mr);
+  return mr;
+}
+
+LUX_INLINE Ast* PeelConjunction(Ast* node) {
+  if (node->IsConjunction()) {
+    auto c = node->UncheckedCastToConjunction();
+    if (c->size() == 1) {
+      return c->at(0);
+    }
+  }
+  return node;
 }
 
 Maybe<Ast*> Parser::ParseDisjunction() {
@@ -506,7 +591,16 @@ Maybe<Ast*> Parser::ParseDisjunction() {
   update_start_pos();
   return ParseAtom() >>= [&](Ast* node) {
     if (IsRepeatChar(cur().code())) {
-      return ParseRepeat(node);
+      ParseRepeat(node) >>= [&](Ast* a) { node = a; };
+    }
+
+    while (cur() == '|' && !has_pending_error()) {
+      advance();
+      ParseDisjunction() >>= [&](Ast* n) {
+        Ast* left = PeelConjunction(node);
+        Ast* right = PeelConjunction(n);
+        node = new (zone()) Alternate(left, right);
+      };
     }
 
     return Just(node);
@@ -514,12 +608,14 @@ Maybe<Ast*> Parser::ParseDisjunction() {
 }  // namespace regexp
 
 Maybe<Ast*> Parser::ParseAtom() {
+  ENTER();
   switch (cur()) {
     case '(':
       return ParseGroup();
     case '[':
       return ParseCharClass();
     case '.':
+      advance();
       return Just(new (zone()) Any());
     default:
       return ParseChar();
@@ -539,7 +635,7 @@ Maybe<Ast*> Parser::ParseGroup() {
     switch (cur()) {
       case ':':
         advance();
-        t = Group::UNCAPTURE;
+        t = Group::SKIP_CAPTURING;
         break;
       case '=':
         advance();
@@ -563,7 +659,8 @@ Maybe<Ast*> Parser::ParseGroup() {
   auto ret = new (zone())
       Group(t, capture_count(),
             group_specifier_names ? group_specifier_names.value() : nullptr);
-  if (t != Group::UNCAPTURE) {
+  if (t != Group::SKIP_CAPTURING && t != Group::POSITIVE_LOOKAHEAD &&
+      t != Group::NEGATIVE_LOOKAHEAD) {
     Capture();
   }
   while (has_more() && cur() != ')' && cur() != '$' && !has_pending_error()) {
@@ -664,12 +761,11 @@ Maybe<Ast*> Parser::ParseCharClass() {
     advance();
   }
 
-  ENTER();
   bool escaped = false;
   auto char_class = new (zone()) CharClass(exclude);
-
   while (has_more() && !has_pending_error() && (escaped || cur() != ']')) {
     auto current = cur();
+
     if (current == '-' && char_class->size() > 0) {
       auto prev = char_class->Last();
       if (prev && prev->IsChar() &&
@@ -689,6 +785,11 @@ Maybe<Ast*> Parser::ParseCharClass() {
               char_class->Set(char_class->size() - 1,
                               new (zone()) CharRange(prevChar->value().code(),
                                                      nextChar->value().code()));
+            } else {
+              REPORT_SYNTAX_ERROR_NO_RETURN(
+                  this,
+                  "First character class char is must be lower than sencond "
+                  "char");
             }
           } else {
             char_class->Push(next);
@@ -704,8 +805,7 @@ Maybe<Ast*> Parser::ParseCharClass() {
     }
   }
 
-  EXPECT_WITH_RETURN(this, cur(), ']', Nothing<CharClass*>())
-
+  EXPECT_WITH_RETURN(this, cur(), ']', Nothing<CharClass*>());
   return Just(char_class);
 }
 
@@ -784,10 +884,12 @@ Maybe<Ast*> Parser::ParseSingleWord(bool is_inner_char_class) {
             }
             return Just(new (zone()) BackReference(static_cast<uint32_t>(ret)));
           } else {
+            advance();
             auto code = Chars::GetAsciiCtrlCodeFromWord(current.code());
             if (code) {
-              advance();
               return Just(new (zone()) Char(Utf16CodePoint(code)));
+            } else if (is_inner_char_class) {
+              return Just(new (zone()) Char(Utf16CodePoint(current.code())));
             }
           }
       }
@@ -795,7 +897,7 @@ Maybe<Ast*> Parser::ParseSingleWord(bool is_inner_char_class) {
 
     if (current == '\\') {
       escaped = !escaped;
-      if (escaped && (!is_inner_char_class || peek() != ']')) {
+      if (escaped) {
         advance();
         continue;
       }
@@ -875,6 +977,8 @@ Maybe<Ast*> Parser::ParseRepeat(Ast* node) {
 
 template <typename T>
 Maybe<Ast*> Parser::SplitCharSequenceIf(Ast* node, T factory) {
+  ENTER();
+
   if (!node->IsCharSequence()) {
     return factory(node);
   }
@@ -916,6 +1020,7 @@ Maybe<Ast*> Parser::ParseRangeRepeat(Ast* node) {
 
   auto ret = ToInt();
   if (ret.IsNaN()) {
+    update_start_pos();
     REPORT_SYNTAX_ERROR(this, "number expected.");
   }
   start = ret.value();
@@ -936,6 +1041,7 @@ Maybe<Ast*> Parser::ParseRangeRepeat(Ast* node) {
     }
     ret = ToInt();
     if (ret.IsNaN()) {
+      update_start_pos();
       REPORT_SYNTAX_ERROR(this, "number expected.");
     }
     end = ret.value();

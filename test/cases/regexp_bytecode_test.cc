@@ -42,10 +42,11 @@ class RegExpBytecodeTest : public lux::IsolateSetup {
     lux::SourcePosition sp;
     lux::regexp::Compiler compiler(isolate_, &er, &sp);
     auto jsregexp = compiler.Compile(regexp, flag);
-    //    printf("%s\n", jsregexp->code()->ToString().c_str());
+    printf("%s\n", jsregexp->code()->ToString().c_str());
     auto ret = jsregexp->Match(isolate_, *lux::JSString::New(isolate_, input));
-    ASSERT_TRUE(lux::testing::CompareNode(regexp, ret->ToString().c_str(),
-                                          expectation));
+    ASSERT_TRUE(
+        lux::testing::CompareNode(regexp, ret->ToString().c_str(), expectation))
+        << jsregexp->code()->ToString();
     //    printf("%s\n", ret->ToString().c_str());
   }
 
@@ -57,7 +58,7 @@ class RegExpBytecodeTest : public lux::IsolateSetup {
     auto jsregexp = compiler.Compile(regexp, flag);
     //    printf("%s\n", jsregexp->code()->ToString().c_str());
     auto ret = jsregexp->Match(isolate_, *lux::JSString::New(isolate_, input));
-    ASSERT_TRUE(lux::JSSpecials::IsNull(ret)) << "Got " << ret->ToString();
+    ASSERT_TRUE(lux::JSSpecials::IsNull(*ret)) << "Got " << ret->ToString();
   }
 };
 
@@ -378,9 +379,159 @@ TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T1) {
   NotMatch("[]a", "0a0a", lux::regexp::Flag::kNone);
 }
 
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T2) {
+  NotMatch("a[]", "0a0a", lux::regexp::Flag::kNone);
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T3) {
+  RunTest("q[ax-zb](?=\\s+)", "qYqy ", lux::regexp::Flag::kNone,
+          "JSArray[String(\"qy\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T4) {
+  RunTest("q[ax-zb](?=\\s+)", "tqaqy ", lux::regexp::Flag::kNone,
+          "JSArray[String(\"qy\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T5) {
+  RunTest("q[ax-zb](?=\\s+)", "tqa\t  qy ", lux::regexp::Flag::kNone,
+          "JSArray[String(\"qa\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T6) {
+  RunTest("ab[ercst]de", "abcde", lux::regexp::Flag::kNone,
+          "JSArray[String(\"abcde\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T7) {
+  NotMatch("ab[erst]de", "abcde", lux::regexp::Flag::kNone);
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T8) {
+  RunTest("[d-h]+", "abcdefghijkl", lux::regexp::Flag::kNone,
+          "JSArray[String(\"defgh\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T9) {
+  RunTest("[1234567].{2}", "abc6defghijkl", lux::regexp::Flag::kNone,
+          "JSArray[String(\"6de\")]");
+}
+
 TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T10) {
   RunTest("[a-c\\d]+", "\n\n\\abc324234\n", lux::regexp::Flag::kNone,
           "JSArray[String(\"abc324234\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T11) {
+  RunTest("ab[.]?c", "abc", lux::regexp::Flag::kNone,
+          "JSArray[String(\"abc\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T12) {
+  RunTest("a[b]c", "abc", lux::regexp::Flag::kNone, "JSArray[String(\"abc\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T13) {
+  RunTest("[a-z][^1-9][a-z]", "a1b  b2c  c3d  def  f4g",
+          lux::regexp::Flag::kNone, "JSArray[String(\"def\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T14) {
+  RunTest("[*&$]{3}", "123*&$abc", lux::regexp::Flag::kNone,
+          "JSArray[String(\"*&$\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T15) {
+  RunTest("[\\d][\\n][^\\d]", "line1\nline2", lux::regexp::Flag::kNone,
+          "JSArray[String(\"1\nl\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A1_T17) {
+  NotMatch("[]", "a[b\n[]\tc]d", lux::regexp::Flag::kNone);
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A2_T1) {
+  RunTest("[^]a", "a\naba", lux::regexp::Flag::kMultiline,
+          "JSArray[String(\"\na\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A2_T2) {
+  RunTest("a[^]", "   a\t\n", lux::regexp::Flag::kNone,
+          "JSArray[String(\"a\t\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A2_T3) {
+  RunTest("a[^b-z]\\s+", "ab an az aY n", lux::regexp::Flag::kNone,
+          "JSArray[String(\"aY \")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A2_T4) {
+  RunTest("[^\\b]+", u8"easy\\bto\U00000008ride", lux::regexp::Flag::kNone,
+          "JSArray[String(\"easy\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A2_T5) {
+  RunTest("a[^1-9]c", "abc", lux::regexp::Flag::kNone,
+          "JSArray[String(\"abc\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A2_T6) {
+  NotMatch("a[^b]c", "abc", lux::regexp::Flag::kNone);
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A2_T7) {
+  RunTest("[^a-z]{4}", "abc#$%def%&*@ghi", lux::regexp::Flag::kNone,
+          "JSArray[String(\"%&*@\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A2_T8) {
+  RunTest("[^]", "abc#$%def%&*@ghi", lux::regexp::Flag::kNone,
+          "JSArray[String(\"a\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A3_T1) {
+  RunTest(".[\\b].", "abc\bdef", lux::regexp::Flag::kNone,
+          "JSArray[String(\"c\bd\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A3_T2) {
+  RunTest("c[\b]{3}d", "abc\b\b\bdef", lux::regexp::Flag::kNone,
+          "JSArray[String(\"c\b\b\bd\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A3_T3) {
+  RunTest("[^\\[\\b\\]]+", "abc\bdef", lux::regexp::Flag::kNone,
+          "JSArray[String(\"abc\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_13_A3_T4) {
+  RunTest("[^\\[\\b\\]]+", "abcdef", lux::regexp::Flag::kNone,
+          "JSArray[String(\"abcdef\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_15_A1_T1) {
+  RunTest("[^\\[\\b\\]]+", "abcdef", lux::regexp::Flag::kNone,
+          "JSArray[String(\"abcdef\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_3_A1_T1) {
+  RunTest("a|ab", "abc", lux::regexp::Flag::kNone, "JSArray[String(\"a\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_3_A1_T2) {
+  RunTest("((a)|(ab))((c)|(bc))", "abc", lux::regexp::Flag::kNone,
+          "JSArray[String(\"abc\"), String(\"a\"), String(\"a\"), undefined, "
+          "String(\"bc\"), undefined, String(\"bc\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_3_A1_T3) {
+  RunTest("\\d{3}|[a-z]{4}", "2, 12 and of course repeat 12",
+          lux::regexp::Flag::kNone, "JSArray[String(\"cour\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_3_A1_T4) {
+  RunTest("\\d{3}|[a-z]{4}", "2, 12 and 234 AND of course repeat 12",
+          lux::regexp::Flag::kNone, "JSArray[String(\"234\")]");
 }
 
 }  // namespace

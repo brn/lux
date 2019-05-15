@@ -50,51 +50,57 @@ const BytecodeOperand BytecodeUtil::kOperandEbx = {32,
 const BytecodeOperand BytecodeUtil::kOperandRax = {0,
                                                    ~static_cast<uint64_t>(0)};
 
-#define BYTECODE_CHECK(Name, Layout, size, argc, ...)                                            \
-  static_assert(                                                                                 \
-      BytecodeLayout::k##Layout == BytecodeLayout::kNone                                         \
-          ? size == 1                                                                            \
-          : BytecodeLayout::k##Layout == BytecodeLayout::kShort1                                 \
-                ? size == 2                                                                      \
-                : BytecodeLayout::k##Layout == BytecodeLayout::kShort2                           \
-                      ? size == 3                                                                \
-                      : BytecodeLayout::k##Layout == BytecodeLayout::kShort3                     \
-                            ? size == 4                                                          \
-                            : BytecodeLayout::k##Layout ==                                       \
-                                      BytecodeLayout::kDouble1                                   \
-                                  ? size == 4                                                    \
-                                  : BytecodeLayout::k##Layout ==                                 \
-                                            BytecodeLayout::kDouble2                             \
-                                        ? size == 5                                              \
-                                        : BytecodeLayout::k##Layout ==                           \
-                                                  BytecodeLayout::kDouble3                       \
-                                              ? size == 3                                        \
-                                              : BytecodeLayout::k##Layout ==                     \
-                                                        BytecodeLayout::kWord1                   \
-                                                    ? size == 9                                  \
-                                                    : BytecodeLayout::                           \
-                                                                  k##Layout ==                   \
-                                                              BytecodeLayout::                   \
-                                                                  kWide1                         \
-                                                          ? size == 5                            \
-                                                          : BytecodeLayout::                     \
-                                                                        k##Layout ==             \
-                                                                    BytecodeLayout::             \
-                                                                        kWide2                   \
-                                                                ? size == 6                      \
-                                                                : BytecodeLayout::               \
-                                                                              k##Layout ==       \
-                                                                          BytecodeLayout::       \
-                                                                              kWide3             \
-                                                                      ? size ==                  \
-                                                                            9                    \
-                                                                      : BytecodeLayout::         \
-                                                                                    k##Layout == \
-                                                                                BytecodeLayout:: \
-                                                                                    kWide4       \
-                                                                            ? size ==            \
-                                                                                  7              \
-                                                                            : false,             \
+#define BYTECODE_CHECK(Name, Layout, size, argc, ...)                                                  \
+  static_assert(                                                                                       \
+      BytecodeLayout::k##Layout == BytecodeLayout::kNone                                               \
+          ? size == 1                                                                                  \
+          : BytecodeLayout::k##Layout == BytecodeLayout::kShort1                                       \
+                ? size == 2                                                                            \
+                : BytecodeLayout::k##Layout == BytecodeLayout::kShort2                                 \
+                      ? size == 3                                                                      \
+                      : BytecodeLayout::k##Layout == BytecodeLayout::kShort3                           \
+                            ? size == 4                                                                \
+                            : BytecodeLayout::k##Layout ==                                             \
+                                      BytecodeLayout::kDouble1                                         \
+                                  ? size == 4                                                          \
+                                  : BytecodeLayout::k##Layout ==                                       \
+                                            BytecodeLayout::kDouble2                                   \
+                                        ? size == 5                                                    \
+                                        : BytecodeLayout::k##Layout ==                                 \
+                                                  BytecodeLayout::kDouble3                             \
+                                              ? size == 3                                              \
+                                              : BytecodeLayout::k##Layout ==                           \
+                                                        BytecodeLayout::kWord1                         \
+                                                    ? size == 9                                        \
+                                                    : BytecodeLayout::                                 \
+                                                                  k##Layout ==                         \
+                                                              BytecodeLayout::                         \
+                                                                  kWide1                               \
+                                                          ? size == 5                                  \
+                                                          : BytecodeLayout::                           \
+                                                                        k##Layout ==                   \
+                                                                    BytecodeLayout::                   \
+                                                                        kWide2                         \
+                                                                ? size == 6                            \
+                                                                : BytecodeLayout::                     \
+                                                                              k##Layout ==             \
+                                                                          BytecodeLayout::             \
+                                                                              kWide3                   \
+                                                                      ? size ==                        \
+                                                                            9                          \
+                                                                      : BytecodeLayout::               \
+                                                                                    k##Layout ==       \
+                                                                                BytecodeLayout::       \
+                                                                                    kWide4             \
+                                                                            ? size ==                  \
+                                                                                  7                    \
+                                                                            : BytecodeLayout::         \
+                                                                                          k##Layout == \
+                                                                                      BytecodeLayout:: \
+                                                                                          kWide5       \
+                                                                                  ? size ==            \
+                                                                                        8              \
+                                                                                  : false,             \
       "Bytecode " #Name " size is incorrect.");
 REGEX_BYTECODE_LIST(BYTECODE_CHECK)
 #undef BYTECODE_CHECK
@@ -240,6 +246,12 @@ std::string BytecodeUtil::ToStringField(Bytecode bc, BytecodeFetcher* fetcher,
          << "  Cx = " << +fetcher->FetchNextDoubleOperand();
       return st.str();
     }
+    case BytecodeLayout::kWide5: {
+      st << "  Eax = " << +fetcher->FetchNextWideOperand()
+         << "  Cx = " << +fetcher->FetchNextDoubleOperand()
+         << "  Dx = " << +fetcher->FetchNextDoubleOperand();
+      return st.str();
+    }
     default:
       UNREACHABLE();
   }
@@ -363,6 +375,7 @@ Handle<BytecodeExecutable> BytecodeArrayWriter::Flush() {
         array->write(index++, node->DecodeOperand(bu::kOperandE));
         array->write(index++, node->DecodeOperand(bu::kOperandF));
         break;
+      case BytecodeLayout::kWide5:
       case BytecodeLayout::kWide3:
       case BytecodeLayout::kWord1:
         INVALIDATE(bu::size(bytecode) == 9);
@@ -439,20 +452,20 @@ BytecodeNode* BytecodeBuilder::RegexFailed() {
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexReserveCapture(uint16_t v) {
+BytecodeNode* BytecodeBuilder::RegexReserveCapture(uint32_t v) {
   auto n = new (zone()) BytecodeNode(Bytecode::kRegexReserveCapture, v);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexStartCapture(uint16_t v) {
+BytecodeNode* BytecodeBuilder::RegexStartCapture(uint32_t v) {
   auto n = new (zone()) BytecodeNode(Bytecode::kRegexStartCapture, v);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexUpdateCapture() {
-  auto n = new (zone()) BytecodeNode(Bytecode::kRegexUpdateCapture);
+BytecodeNode* BytecodeBuilder::RegexUpdateCapture(uint32_t v) {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexUpdateCapture, v);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -499,11 +512,32 @@ BytecodeNode* BytecodeBuilder::RegexJumpIfMatchedCountEqual(
   return n;
 }
 
+BytecodeNode* BytecodeBuilder::RegexJumpIfMatchedCountRange(
+    uint16_t countA, uint16_t countB, BytecodeLabel* label) {
+  auto operand = bu::EncodeOperand(bu::kOperandCx, countA) |
+                 bu::EncodeOperand(bu::kOperandCx, countB);
+  auto n = new (zone())
+      BytecodeNode(Bytecode::kRegexJumpIfMatchedCountGT, operand, label->to());
+  label->AddFrom(n);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
 BytecodeNode* BytecodeBuilder::RegexJumpIfMatchedCountLT(uint16_t count,
                                                          BytecodeLabel* label) {
   auto operand = bu::EncodeOperand(bu::kOperandCx, count);
   auto n = new (zone())
       BytecodeNode(Bytecode::kRegexJumpIfMatchedCountLT, operand, label->to());
+  label->AddFrom(n);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexJumpIfMatchedCountGT(uint16_t count,
+                                                         BytecodeLabel* label) {
+  auto operand = bu::EncodeOperand(bu::kOperandCx, count);
+  auto n = new (zone())
+      BytecodeNode(Bytecode::kRegexJumpIfMatchedCountGT, operand, label->to());
   label->AddFrom(n);
   bytecode_array_writer_->Emit(n);
   return n;
@@ -524,8 +558,8 @@ BytecodeNode* BytecodeBuilder::RegexPushThread(BytecodeLabel* label) {
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexPopThread() {
-  auto n = new (zone()) BytecodeNode(Bytecode::kRegexPopThread);
+BytecodeNode* BytecodeBuilder::RegexPopThread(uint8_t f) {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexPopThread, f);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -600,14 +634,56 @@ BytecodeNode* BytecodeBuilder::RegexToggleClassMatch(uint8_t flag) {
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexStorePosition() {
-  auto n = new (zone()) BytecodeNode(Bytecode::kRegexStorePosition);
+BytecodeNode* BytecodeBuilder::RegexMatchPrologue() {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexMatchPrologue);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexLoadPosition() {
-  auto n = new (zone()) BytecodeNode(Bytecode::kRegexLoadPosition);
+BytecodeNode* BytecodeBuilder::RegexMatchEpilogue() {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexMatchEpilogue);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexLoadMatchEndPosition() {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexLoadMatchEndPosition);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexStoreMatchEndPosition() {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexStoreMatchEndPosition);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexPopMatchedCount() {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexPopMatchedCount);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexPushMatchedCount() {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexPushMatchedCount);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexEmpty() {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexEmpty);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexNotMatch() {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexNotMatch);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexFlipResult() {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexFlipResult);
   bytecode_array_writer_->Emit(n);
   return n;
 }

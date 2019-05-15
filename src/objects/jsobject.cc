@@ -97,8 +97,8 @@ Handle<JSFunction> JSFunction::New(Isolate* isolate, JSString* name,
   return make_handle(reinterpret_cast<JSFunction*>(heap_obj));
 }
 
-Object* JSFunction::Call(Isolate* isolate,
-                         std::initializer_list<Object*> parameters) {
+Value<Object> JSFunction::Call(Isolate* isolate,
+                               std::initializer_list<Object*> parameters) {
   lux::VirtualMachine vm(isolate);
   return vm.Execute(code(), parameters);
 }
@@ -118,13 +118,13 @@ JSRegExp* JSRegExp::NewWithoutHandle(Isolate* isolate, BytecodeExecutable* be,
   return reinterpret_cast<JSRegExp*>(heap_obj);
 }
 
-JSSpecials* JSRegExp::Test(Isolate* isolate, JSString* input) {
+Value<JSSpecials> JSRegExp::Test(Isolate* isolate, JSString* input) {
   lux::VirtualMachine vm(isolate);
-  return reinterpret_cast<JSSpecials*>(
-      vm.ExecuteRegex(code(), input, flag(), false));
+  return Value<JSSpecials>(reinterpret_cast<JSSpecials*>(
+      *(vm.ExecuteRegex(code(), input, flag(), false))));
 }
 
-Object* JSRegExp::Match(Isolate* isolate, JSString* input) {
+Value<Object> JSRegExp::Match(Isolate* isolate, JSString* input) {
   lux::VirtualMachine vm(isolate);
   return vm.ExecuteRegex(code(), input, flag(), true);
 }

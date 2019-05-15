@@ -33,8 +33,7 @@ using VM = VirtualMachine;
 #define VM_OP(Name, ...) exec->Name(__VA_ARGS__)
 
 #ifdef DEBUG
-#define COLLECT_EXECUTION_LOG(pos, bc, is_print)
-//  CollectExecutionLog(pos, static_cast<Bytecode>(bc), is_print)
+#define COLLECT_EXECUTION_LOG(is_print) CollectExecutionLog(is_print)
 #else
 #define COLLECT_EXECUTION_LOG(pos, bc, is_print)
 #endif
@@ -60,22 +59,36 @@ using VM = VirtualMachine;
       BytecodeFetcher* fetcher, BytecodeConstantArray* constant)
 
 REGEX_HANDLER(RegexStartCapture) {
-  auto index = fetcher->FetchNextDoubleOperand();
+  auto index = fetcher->FetchNextWideOperand();
   if (exec->collect_matched_word()) {
     exec->StartCapture(index);
   }
 }
 
 REGEX_HANDLER(RegexUpdateCapture) {
+  auto index = fetcher->FetchNextWideOperand();
   if (exec->collect_matched_word()) {
-    exec->UpdateCapture();
+    exec->UpdateCapture(index);
   }
 }
 
 REGEX_HANDLER(RegexDisableRetry) { exec->disable_retry(); }
 
-REGEX_HANDLER(RegexStorePosition) { exec->store_position(); }
-REGEX_HANDLER(RegexLoadPosition) { exec->load_position(); }
+REGEX_HANDLER(RegexMatchPrologue) {
+  exec->load_match_start();
+  exec->current_thread()->set_match_end_position(0);
+}
+REGEX_HANDLER(RegexMatchEpilogue) {
+  if (exec->current_thread()->match_end_position() == 0) {
+    exec->current_thread()->set_match_end_position(
+        exec->current_thread()->position());
+  }
+}
+REGEX_HANDLER(RegexStoreMatchEndPosition) { exec->store_position(); }
+REGEX_HANDLER(RegexLoadMatchEndPosition) { exec->load_position(); }
+REGEX_HANDLER(RegexPushMatchedCount) { exec->push_matched_count(); }
+REGEX_HANDLER(RegexPopMatchedCount) { exec->pop_matched_count(); }
+REGEX_HANDLER(RegexNotMatch) { exec->store_flag(Smi::FromInt(0)); }
 
 REGEX_HANDLER(RegexCheckEnd) {
   if (exec->is_advanceable()) {
@@ -98,9 +111,19 @@ REGEX_HANDLER(RegexMatchAny) {
 }
 
 REGEX_HANDLER(RegexReserveCapture) {
-  auto size = fetcher->FetchNextDoubleOperand();
+  auto size = fetcher->FetchNextWideOperand();
   if (exec->collect_matched_word()) {
     exec->ReserveCapture(size);
+  }
+}
+
+REGEX_HANDLER(RegexJumpIfMatchedCountRange) {
+  auto jmp = fetcher->FetchNextWideOperand();
+  auto a = fetcher->FetchNextDoubleOperand();
+  auto b = fetcher->FetchNextDoubleOperand();
+  if (a < exec->current_thread()->matched_count() &&
+      b > exec->current_thread()->matched_count()) {
+    fetcher->UpdatePC(jmp);
   }
 }
 
@@ -116,6 +139,14 @@ REGEX_HANDLER(RegexJumpIfMatchedCountLT) {
   auto jmp = fetcher->FetchNextWideOperand();
   auto max = fetcher->FetchNextDoubleOperand();
   if (max > exec->current_thread()->matched_count()) {
+    fetcher->UpdatePC(jmp);
+  }
+}
+
+REGEX_HANDLER(RegexJumpIfMatchedCountGT) {
+  auto jmp = fetcher->FetchNextWideOperand();
+  auto least = fetcher->FetchNextDoubleOperand();
+  if (exec->current_thread()->matched_count() > least) {
     fetcher->UpdatePC(jmp);
   }
 }
@@ -263,7 +294,8 @@ REGEX_HANDLER(RegexPushThread) {
 }
 
 REGEX_HANDLER(RegexPopThread) {
-  auto r = exec->PopThread();
+  auto flag = fetcher->FetchNextShortOperand();
+  auto r = exec->PopThread(flag == 1);
   if (!r) {
     fetcher->UpdatePCToRegexFailed();
   }
@@ -271,7 +303,7 @@ REGEX_HANDLER(RegexPopThread) {
 
 REGEX_HANDLER(RegexPopThreadWithPC) {
   auto pc = fetcher->FetchNextWideOperand();
-  auto r = exec->PopThread();
+  auto r = exec->PopThread(false);
   if (!r) {
     fetcher->UpdatePCToRegexFailed();
   } else {
@@ -344,6 +376,25 @@ REGEX_HANDLER(RegexComment) {
   return;
 }
 
+REGEX_HANDLER(RegexFlipResult) {
+  int match = 0;
+  if (!exec->load_flag()) {
+    match = 1;
+    exec->current_thread()->Matched();
+    exec->Advance();
+  }
+  exec->store_flag(Smi::FromInt(match));
+}
+
+REGEX_HANDLER(RegexEmpty) {
+  if (exec->input()->length() == 0) {
+    exec->store_flag(Smi::FromInt(0));
+  } else {
+    exec->Advance();
+    exec->store_flag(Smi::FromInt(1));
+  }
+}
+
 HANDLER(Comment) {
   USE(fetcher->FetchNextWordOperand());
   return;
@@ -352,7 +403,7 @@ HANDLER(Comment) {
 HANDLER(Print) {
   auto i = fetcher->FetchNextShortOperand();
   auto str = exec->load_register_value_at(i)->ToString();
-  printf("VMDebugPrint: %s\n", str.c_str());
+  Printf("VMDebugPrint: %s\n", str.c_str());
 }
 
 HANDLER(ExecIf) {
@@ -405,8 +456,8 @@ HANDLER(I32Constant) {
 HANDLER(Append) {
   auto value_reg = fetcher->FetchNextShortOperand();
   auto reg = fetcher->FetchNextShortOperand();
-  auto value = exec->load_register_value_at(value_reg);
-  auto obj = exec->load_register_value_at(reg);
+  auto value = *exec->load_register_value_at(value_reg);
+  auto obj = *exec->load_register_value_at(reg);
   INVALIDATE(obj->IsHeapObject());
   auto ho = HeapObject::Cast(obj);
   switch (ho->shape()->instance_type()) {
@@ -432,7 +483,7 @@ HANDLER(CallFastPropertyA) {
   auto obj = exec->load_register_value_at(input);
   switch (static_cast<FastProperty>(property)) {
     case FastProperty::kLength:
-      exec->store_register_value_at(output, JSObject::GetLength(isolate, obj));
+      exec->store_register_value_at(output, JSObject::GetLength(isolate, *obj));
     default:
       return;
   }
@@ -462,7 +513,7 @@ HANDLER(LoadIx) {
   auto index_reg = fetcher->FetchNextShortOperand();
   auto reg2 = fetcher->FetchNextShortOperand();
   auto obj = exec->load_register_value_at(reg1);
-  auto index_obj = exec->load_register_value_at(index_reg);
+  auto index_obj = *exec->load_register_value_at(index_reg);
 
   int index;
   if (index_obj->IsSmi()) {
@@ -476,7 +527,7 @@ HANDLER(LoadIx) {
   }
 
   if (obj->IsHeapObject()) {
-    auto v = HeapObject::Cast(obj);
+    auto v = HeapObject::Cast(*obj);
     switch (v->shape()->instance_type()) {
       case InstanceType::JS_STRING: {
         auto ret = JSString::Cast(v)->at(index);
@@ -499,14 +550,14 @@ HANDLER(Cmp) {
   auto reg1 = fetcher->FetchNextShortOperand();
   auto reg2 = fetcher->FetchNextShortOperand();
   auto valueA = exec->load_register_value_at(reg1);
-  auto valueB = exec->load_register_value_at(reg2);
+  auto valueB = *exec->load_register_value_at(reg2);
   exec->store_flag(Smi::FromInt(valueA->Equals(valueB)));
 }
 
 HANDLER(Mov) {
   auto reg1 = fetcher->FetchNextShortOperand();
   auto reg2 = fetcher->FetchNextShortOperand();
-  auto value = exec->load_register_value_at(reg1);
+  auto value = *exec->load_register_value_at(reg1);
   exec->store_register_value_at(reg2, value);
 }
 
@@ -514,29 +565,29 @@ HANDLER(Gt) {
   auto reg1 = fetcher->FetchNextShortOperand();
   auto reg2 = fetcher->FetchNextShortOperand();
   auto valueA = exec->load_register_value_at(reg1);
-  auto valueB = exec->load_register_value_at(reg2);
+  auto valueB = *exec->load_register_value_at(reg2);
   exec->store_flag(Smi::FromInt(valueA->GreaterThan(valueB)));
 }
 
 HANDLER(GtEq) {
   auto reg1 = fetcher->FetchNextShortOperand();
   auto reg2 = fetcher->FetchNextShortOperand();
-  auto valueA = exec->load_register_value_at(reg1);
-  auto valueB = exec->load_register_value_at(reg2);
+  auto valueA = *exec->load_register_value_at(reg1);
+  auto valueB = *exec->load_register_value_at(reg2);
   exec->store_flag(
       Smi::FromInt(valueA->GreaterThan(valueB) || valueA->Equals(valueB)));
 }
 
 HANDLER(Inc) {
   auto reg1 = fetcher->FetchNextShortOperand();
-  auto value = exec->load_register_value_at(reg1);
+  auto value = *exec->load_register_value_at(reg1);
   exec->store_register_value_at(reg1,
                                 Smi::FromInt(Smi::Cast(value)->value() + 1));
 }
 
 HANDLER(Dec) {
   auto reg1 = fetcher->FetchNextShortOperand();
-  auto value = exec->load_register_value_at(reg1);
+  auto value = *exec->load_register_value_at(reg1);
   exec->store_register_value_at(reg1,
                                 Smi::FromInt(Smi::Cast(value)->value() - 1));
 }
@@ -544,7 +595,7 @@ HANDLER(Dec) {
 HANDLER(Add) {
   auto reg1 = fetcher->FetchNextShortOperand();
   auto add = fetcher->FetchNextShortOperand();
-  auto value = exec->load_register_value_at(reg1);
+  auto value = *exec->load_register_value_at(reg1);
   if (value->IsSmi()) {
     exec->store_register_value_at(
         RegisterAllocator::kAcc, Smi::FromInt(Smi::Cast(value)->value() + add));
@@ -554,7 +605,7 @@ HANDLER(Add) {
 HANDLER(Sub) {
   auto reg1 = fetcher->FetchNextShortOperand();
   auto sub = fetcher->FetchNextShortOperand();
-  auto value = exec->load_register_value_at(reg1);
+  auto value = *exec->load_register_value_at(reg1);
   exec->store_register_value_at(RegisterAllocator::kAcc,
                                 Smi::FromInt(Smi::Cast(value)->value() - sub));
 }
@@ -562,7 +613,7 @@ HANDLER(Sub) {
 HANDLER(Mul) {
   auto reg1 = fetcher->FetchNextShortOperand();
   auto mul = fetcher->FetchNextShortOperand();
-  auto value = exec->load_register_value_at(reg1);
+  auto value = *exec->load_register_value_at(reg1);
   exec->store_register_value_at(RegisterAllocator::kAcc,
                                 Smi::FromInt(Smi::Cast(value)->value() * mul));
 }
@@ -570,13 +621,13 @@ HANDLER(Mul) {
 HANDLER(Div) {
   auto reg1 = fetcher->FetchNextShortOperand();
   auto div = fetcher->FetchNextShortOperand();
-  auto value = exec->load_register_value_at(reg1);
+  auto value = *exec->load_register_value_at(reg1);
   exec->store_register_value_at(RegisterAllocator::kAcc,
                                 Smi::FromInt(Smi::Cast(value)->value() * div));
 }
 
-Object* VirtualMachine::Execute(BytecodeExecutable* bytecode_executable,
-                                std::initializer_list<Object*> argv) {
+Value<Object> VirtualMachine::Execute(BytecodeExecutable* bytecode_executable,
+                                      std::initializer_list<Object*> argv) {
   Executor exec(isolate_, argv.size(), argv, bytecode_executable);
   exec.Execute();
   return exec.return_value();
@@ -622,7 +673,7 @@ Label_Exit : {
 }
 
 JSString* VirtualMachine::RegexExecutor::SliceMatchedInput(uint32_t start) {
-  auto end = current_thread()->position();
+  auto end = current_thread()->match_end_position();
   if (start == 0 && end == input()->length()) {
     return input();
   }
@@ -631,14 +682,16 @@ JSString* VirtualMachine::RegexExecutor::SliceMatchedInput(uint32_t start) {
 
 void VirtualMachine::RegexExecutor::FixInterCaptured() {
   matched_words_.push_back(
-      SliceMatchedInput(current_thread()->start_position()));
+      SliceMatchedInput(current_thread()->match_start_position()));
 }
 
 Handle<JSArray> VirtualMachine::RegexExecutor::FixCaptured() {
-  auto arr = JSArray::NewEmptyArray(isolate_, 0);
+  auto cap = !is_global() ? captured_stack_.size() + 1 : matched_words_.size();
+  auto arr = JSArray::NewEmptyArray(isolate_, 0, cap);
 
   if (!is_global()) {
-    arr->Push(isolate_, SliceMatchedInput(current_thread()->start_position()));
+    arr->Push(isolate_,
+              SliceMatchedInput(current_thread()->match_start_position()));
     for (auto& c : captured_stack_) {
       if (c->IsCaptured()) {
         auto str = input_->Slice(isolate_, c->start(), c->end());
@@ -652,12 +705,13 @@ Handle<JSArray> VirtualMachine::RegexExecutor::FixCaptured() {
       arr->Push(isolate_, str);
     }
   }
+
   return arr;
 }
 
-Object* VirtualMachine::ExecuteRegex(BytecodeExecutable* executable,
-                                     JSString* input, uint8_t flag,
-                                     bool collect_matched_word) {
+Value<Object> VirtualMachine::ExecuteRegex(BytecodeExecutable* executable,
+                                           JSString* input, uint8_t flag,
+                                           bool collect_matched_word) {
   RegexExecutor exec(isolate_, input, collect_matched_word, executable);
   if (regexp::Flag::IsMultiline(flag)) {
     exec.set_multiline();
@@ -673,9 +727,8 @@ Object* VirtualMachine::ExecuteRegex(BytecodeExecutable* executable,
   }
   exec.Execute();
   return !collect_matched_word
-             ? reinterpret_cast<Object*>(exec.is_matched()
-                                             ? isolate_->jsval_true()
-                                             : isolate_->jsval_false())
+             ? Value<Object>(exec.is_matched() ? isolate_->jsval_true()
+                                               : isolate_->jsval_false())
              : exec.captured_array();
 }
 
@@ -688,7 +741,10 @@ bool VirtualMachine::RegexExecutor::PrepareNextMatch(bool round_matched) {
   if (has_more) {
     if (is_global()) {
       if (!round_matched) {
-        current_thread()->set_position(current_thread()->position() + 1);
+        auto start = thread_stack_.size() ? thread_stack_[0]->start_position()
+                                          : current_thread()->start_position();
+        current_thread()->set_start_position(start + 1);
+        current_thread()->set_position(start + 1);
       }
       Reset();
       return true;
@@ -698,8 +754,9 @@ bool VirtualMachine::RegexExecutor::PrepareNextMatch(bool round_matched) {
         return false;
       }
       Reset();
-      current_thread()->set_position(next);
       current_thread()->set_start_position(next);
+      current_thread()->set_position(next);
+      current_thread()->set_match_start_position(next);
       return true;
     }
   }
@@ -722,15 +779,15 @@ void VirtualMachine::RegexExecutor::Execute() {
           &&Label_Matched}};
 
 Label_Retry:
+  COLLECT_EXECUTION_LOG(true);
   auto bc = fetcher_->FetchBytecodeAsInt();
-  COLLECT_EXECUTION_LOG(fetcher_->pc() - 1, bc, true);
   goto* kDispatchTable[bc];
 #define VM_EXECUTE(Name, Layout, size, n, ...)                                 \
   Label_##Name : {                                                             \
     Name##_bytecode_handler.Execute(isolate_, this, static_cast<Bytecode>(bc), \
                                     fetcher_.Get(), constant_pool_);           \
+    COLLECT_EXECUTION_LOG(true);                                               \
     auto next = fetcher_->FetchBytecodeAsInt();                                \
-    COLLECT_EXECUTION_LOG(fetcher_->pc() - 1, next, true);                     \
     goto* kDispatchTable[next];                                                \
   }
   REGEX_BYTECODE_LIST_WITOUT_MATCHED(VM_EXECUTE)
@@ -746,7 +803,7 @@ Label_Matched : {
   if (PrepareNextMatch(true)) {
     goto Label_Retry;
   }
-  captured_array_ = *FixCaptured();
+  captured_array_ = FixCaptured();
   //  DO NOTHING
 }
 }

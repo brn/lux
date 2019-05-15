@@ -193,6 +193,8 @@ class AstListTrait {
 
   iterator end() { return list_.end(); }
 
+  void Clear() { list_.clear(); }
+
  protected:
 #ifdef DEBUG
   virtual std::string ToStringList(const char* name,
@@ -257,14 +259,14 @@ class Conjunction : public Ast, public AstListTrait {
 
 class Group : public Ast, public AstListTrait {
  public:
-#define REGEXP_GROUP_TYPE_LIST(A) \
-  A(CAPTURE)                      \
-  A(UNCAPTURE)                    \
-  A(POSITIVE_LOOKAHEAD)           \
-  A(NEGATIVE_LOOKAHEAD)
+#define REGEXP_GROUP_TYPE_LIST(A)          \
+  A(CAPTURE, Capture)                      \
+  A(SKIP_CAPTURING, SkipCapturing)         \
+  A(POSITIVE_LOOKAHEAD, PositiveLookahead) \
+  A(NEGATIVE_LOOKAHEAD, NegativeLookahead)
 
   enum Type {
-#define REGEXP_GROUP_TYPE_DECL(N) N,
+#define REGEXP_GROUP_TYPE_DECL(N, n) N,
     REGEXP_GROUP_TYPE_LIST(REGEXP_GROUP_TYPE_DECL)
 #undef REGEXP_GROUP_TYPE_DECL
   };
@@ -279,7 +281,10 @@ class Group : public Ast, public AstListTrait {
   LUX_CONST_GETTER(uint16_t, captured_index, captured_index_)
   LUX_CONST_GETTER(JSString*, group_specifier_name, group_specifier_name_)
 
-  inline bool IsCapturable() const { return type_ != Group::UNCAPTURE; }
+#define DEF_REGEXP_GROUP_TYPE_GETTER(NAME, Name) \
+  LUX_INLINE bool Is##Name() { return type_ == NAME; }
+  REGEXP_GROUP_TYPE_LIST(DEF_REGEXP_GROUP_TYPE_GETTER)
+#undef DEF_REGEXP_GROUP_TYPE_GETTER
 
   inline bool HasGroupSpecifierName() const {
     return group_specifier_name_ != nullptr;
@@ -292,7 +297,7 @@ class Group : public Ast, public AstListTrait {
 #ifdef DEBUG
   std::string ToString(std::string* indent = nullptr) const {
     static std::array<const char*, 4> kGroupTypeNameMap = {{
-#define REGEXP_GROUP_VALUE_MAP_DECL(A) #A,
+#define REGEXP_GROUP_VALUE_MAP_DECL(A, a) #A,
         REGEXP_GROUP_TYPE_LIST(REGEXP_GROUP_VALUE_MAP_DECL)
 #undef REGEXP_GROUP_VALUE_MAP_DECL
     }};
@@ -345,7 +350,7 @@ class CharClass : public Ast, public AstListTrait {
 #ifdef DEBUG
   std::string ToString(std::string* indent = nullptr) const {
     std::stringstream st;
-    st << "[CharClass exclude = " << (exclude_ ? "true" : "false") << "]\n";
+    st << "CharClass exclude = " << (exclude_ ? "true" : "false");
     return ToStringList(st.str().c_str(), indent);
   }
 #endif
@@ -468,7 +473,7 @@ class CharSequence : public Ast, public AstListTrait {
   CharSequence() : Ast(Ast::CHAR_SEQUENCE), AstListTrait() {}
 
   std::string ToString(std::string* indent = nullptr) const {
-    return ToStringList("Conjunction", indent);
+    return ToStringList("CharSequence", indent);
   }
 
   REGEXP_VISIT_INTERNAL_METHOD_DECL(CharSequence);

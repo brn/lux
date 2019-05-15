@@ -24,10 +24,10 @@
 #define SRC_OBJECTS_JSOBJECT_INL_H_
 
 namespace lux {
-Handle<JSString> JSString::Slice(Isolate* isolate,
-                                 uint32_t start, uint32_t end) {
-  PRECONDITION_ASSERT(start >= 0 && end >= 0
-                      && start <= end && end <= length());
+Handle<JSString> JSString::Slice(Isolate* isolate, uint32_t start,
+                                 uint32_t end) {
+  PRECONDITION_ASSERT(start >= 0 && end >= 0 && start <= end &&
+                      end <= length());
   auto size = end - start;
   auto str = JSString::New(isolate, size);
   auto arr = U32FixedArray::New(isolate, size);
@@ -72,7 +72,7 @@ void JSArray::Push(Isolate* isolate, Object* object) {
 }
 
 Object* JSArray::Pop(Isolate* isolate) {
-  auto new_length = length() > 0? length() - 1: 0;
+  auto new_length = length() > 0 ? length() - 1 : 0;
   Object* value = isolate->jsval_undefined();
   if (length() != 0) {
     value = element()->at(new_length - 1);
@@ -83,7 +83,7 @@ Object* JSArray::Pop(Isolate* isolate) {
 }
 
 Object* JSArray::Shift(Isolate* isolate) {
-  auto new_length = length() > 0? length() - 1: 0;
+  auto new_length = length() > 0 ? length() - 1 : 0;
   Object* value = isolate->jsval_undefined();
   if (length() != 0) {
     value = element()->at(0);
@@ -101,7 +101,7 @@ Object* JSArray::Unshift(Isolate* isolate, Object* new_value) {
     value = element()->at(0);
   }
   element()->write(0, new_value);
-  set_length(length() == 0? 1: length());
+  set_length(length() == 0 ? 1 : length());
   return value;
 }
 }  // namespace lux

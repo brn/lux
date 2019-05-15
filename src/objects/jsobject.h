@@ -272,7 +272,8 @@ class JSFunction : public HeapObject {
   static Handle<JSFunction> New(Isolate* isolate, JSString* name,
                                 uint8_t length, BytecodeExecutable* be);
 
-  Object* Call(Isolate* isolate, std::initializer_list<Object*> parameters);
+  Value<Object> Call(Isolate* isolate,
+                     std::initializer_list<Object*> parameters);
 
   inline BytecodeExecutable* code() const {
     return *FIELD_PROPERTY(BytecodeExecutable**, this, kCodeOffset);
@@ -306,8 +307,8 @@ class JSRegExp : public HeapObject {
                                     BytecodeExecutable* executable,
                                     uint8_t flag);
 
-  JSSpecials* Test(Isolate* isolate, JSString*);
-  Object* Match(Isolate* isolate, JSString*);
+  Value<JSSpecials> Test(Isolate* isolate, JSString*);
+  Value<Object> Match(Isolate* isolate, JSString*);
 
   BytecodeExecutable* code() const {
     return *FIELD_PROPERTY(BytecodeExecutable**, this, kCodeOffset);
