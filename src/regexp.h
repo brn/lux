@@ -97,7 +97,8 @@ struct AstContext {
 
 class Visitor {
  public:
-  explicit Visitor(Isolate* isolate, uint16_t captured_count,
+  explicit Visitor(Isolate* isolate, uint32_t captured_count,
+                   uint32_t matches_count_count,
                    BytecodeBuilder* bytecode_builder,
                    ZoneAllocator* zone_allocator, uint8_t flag);
 
@@ -124,9 +125,11 @@ class Visitor {
     return (flag_ & Flag::kGlobal) == Flag::kGlobal;
   }
   LUX_CONST_GETTER(uint16_t, captured_count, captured_count_)
+  LUX_CONST_GETTER(uint32_t, matches_count_count, matches_count_count_);
 
   uint8_t flag_;
-  uint16_t captured_count_;
+  uint32_t captured_count_;
+  uint32_t matches_count_count_;
   Isolate* isolate_;
   Bitset<uint8_t> flags_;
   BytecodeLabel matched_;
@@ -179,6 +182,7 @@ class AstListTrait {
  public:
   using AstList = std::vector<Ast*>;
   using iterator = AstList::iterator;
+  using reverse_iterator = AstList::reverse_iterator;
   Ast* at(int index) const { return list_[index]; }
 
   void Set(int index, Ast* ast) { list_[index] = ast; }
@@ -192,6 +196,12 @@ class AstListTrait {
   iterator begin() { return list_.begin(); }
 
   iterator end() { return list_.end(); }
+
+  reverse_iterator rbegin() { return list_.rbegin(); }
+
+  reverse_iterator rend() { return list_.rend(); }
+
+  inline void erase(iterator begin, iterator end) { list_.erase(begin, end); }
 
   void Clear() { list_.clear(); }
 
@@ -396,9 +406,14 @@ class Repeat : public Ast {
  public:
   enum Type { GREEDY, SHORTEST };
 
-  Repeat(Type type, int32_t more_than, Ast* node)
-      : Ast(Ast::REPEAT), type_(type), more_than_(more_than), target_(node) {}
+  Repeat(Type type, int32_t more_than, Ast* node, uint32_t index)
+      : Ast(Ast::REPEAT),
+        type_(type),
+        more_than_(more_than),
+        index_(index),
+        target_(node) {}
 
+  LUX_CONST_GETTER(uint32_t, index, index_);
   LUX_CONST_PROPERTY(Ast*, target, target_)
   LUX_CONST_PROPERTY(int32_t, more_than, more_than_)
   LUX_CONST_PROPERTY(Type, type, type_)
@@ -409,7 +424,8 @@ class Repeat : public Ast {
   std::string ToString(std::string* indent = nullptr) const {
     std::stringstream st;
     st << (indent == nullptr ? "" : *indent) << "[Repeat more than "
-       << more_than_ << "]\n";
+       << more_than_ << " type = " << (type_ == GREEDY ? "GREEDY" : "SHORTEST")
+       << "]\n";
     if (target_ != nullptr) {
       if (indent != nullptr) {
         (*indent) += "  ";
@@ -426,20 +442,24 @@ class Repeat : public Ast {
  private:
   Type type_;
   int32_t more_than_;
+  uint32_t index_;
   Ast* target_;
 };
 
 class RepeatRange : public Ast {
  public:
   RepeatRange() : Ast(Ast::REPEAT) {}
-  explicit RepeatRange(int32_t more_than, int32_t less_than, Ast* node)
+  explicit RepeatRange(int32_t more_than, int32_t less_than, Ast* node,
+                       uint32_t index)
       : Ast(Ast::REPEAT),
         more_than_(more_than),
         less_than_(less_than),
+        index_(index),
         target_(node) {}
 
   LUX_CONST_PROPERTY(int32_t, more_than, more_than_)
   LUX_CONST_PROPERTY(int32_t, less_than, less_than_)
+  LUX_CONST_GETTER(uint32_t, index, index_);
   LUX_CONST_PROPERTY(Ast*, target, target_)
 
   REGEXP_VISIT_INTERNAL_METHOD_DECL(RepeatRange);
@@ -465,6 +485,7 @@ class RepeatRange : public Ast {
  private:
   int32_t more_than_;
   int32_t less_than_;
+  uint32_t index_;
   Ast* target_;
 };
 
@@ -624,6 +645,7 @@ class Parser {
   Parser(Isolate* isolate, ErrorReporter* error_reporter,
          SourcePosition* source_position, Handle<JSString> source)
       : capture_count_(0),
+        matches_count_count_(0),
         isolate_(isolate),
         reporter_(error_reporter),
         source_position_(source_position),
@@ -636,6 +658,7 @@ class Parser {
   Root* node() { return &root_; }
 
   LUX_CONST_GETTER(uint32_t, capture_count, capture_count_)
+  LUX_CONST_GETTER(uint32_t, matches_count_count, matches_count_count_);
 
  private:
   LUX_GETTER(SourcePosition&, position, *source_position_)
@@ -671,6 +694,8 @@ class Parser {
 
   inline void Capture() { capture_count_++; }
 
+  inline uint32_t RequireMatchesCount() { return matches_count_count_++; }
+
   inline bool IsRepeat(Ast* node) {
     return node->IsRepeat() || node->IsRepeatRange();
   }
@@ -695,6 +720,7 @@ class Parser {
   ZoneAllocator* zone() { return &zone_allocator_; }
 
   uint32_t capture_count_;
+  uint32_t matches_count_count_;
   Root root_;
   Isolate* isolate_;
   ErrorReporter* reporter_;

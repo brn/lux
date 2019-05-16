@@ -458,6 +458,12 @@ BytecodeNode* BytecodeBuilder::RegexReserveCapture(uint32_t v) {
   return n;
 }
 
+BytecodeNode* BytecodeBuilder::RegexReserveMatchesCount(uint32_t v) {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexReserveMatchesCount, v);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
 BytecodeNode* BytecodeBuilder::RegexStartCapture(uint32_t v) {
   auto n = new (zone()) BytecodeNode(Bytecode::kRegexStartCapture, v);
   bytecode_array_writer_->Emit(n);
@@ -658,14 +664,14 @@ BytecodeNode* BytecodeBuilder::RegexStoreMatchEndPosition() {
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexPopMatchedCount() {
-  auto n = new (zone()) BytecodeNode(Bytecode::kRegexPopMatchedCount);
+BytecodeNode* BytecodeBuilder::RegexLoadMatchedCount(uint32_t i) {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexLoadMatchedCount, i);
   bytecode_array_writer_->Emit(n);
   return n;
 }
 
-BytecodeNode* BytecodeBuilder::RegexPushMatchedCount() {
-  auto n = new (zone()) BytecodeNode(Bytecode::kRegexPushMatchedCount);
+BytecodeNode* BytecodeBuilder::RegexStoreMatchedCount(uint32_t i) {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexStoreMatchedCount, i);
   bytecode_array_writer_->Emit(n);
   return n;
 }
@@ -678,6 +684,12 @@ BytecodeNode* BytecodeBuilder::RegexEmpty() {
 
 BytecodeNode* BytecodeBuilder::RegexNotMatch() {
   auto n = new (zone()) BytecodeNode(Bytecode::kRegexNotMatch);
+  bytecode_array_writer_->Emit(n);
+  return n;
+}
+
+BytecodeNode* BytecodeBuilder::RegexSetMatch() {
+  auto n = new (zone()) BytecodeNode(Bytecode::kRegexSetMatch);
   bytecode_array_writer_->Emit(n);
   return n;
 }

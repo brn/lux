@@ -287,6 +287,23 @@ TEST_F(RegExpTest, UnGroupedRepeat) {
           "          [CharRange from = '97 to = 122']\n");
 }
 
+TEST_F(RegExpTest, Malicious) {
+  RunTest("(aa*)?(aa*)?ac",
+          "[Root]\n"
+          "  [MatchRoot]\n"
+          "    [RepeatRange more than 0, less than 1]\n"
+          "      [Group type = CAPTURE]\n"
+          "        [Repeat more than 0 type = GREEDY]\n"
+          "          [Char 'a']\n"
+          "    [RepeatRange more than 0, less than 1]\n"
+          "      [Group type = CAPTURE]\n"
+          "        [Repeat more than 0 type = GREEDY]\n"
+          "          [Char 'a']\n"
+          "    [CharSequence]\n"
+          "      [Char 'a']\n"
+          "      [Char 'c']\n");
+}
+
 TEST_F(RegExpTest, GroupParenError) {
   RunTest<true>("(aa*|bb*", nullptr, lux::SourcePosition(8, 8, 0, 0));
 }

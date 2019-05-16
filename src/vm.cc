@@ -79,16 +79,27 @@ REGEX_HANDLER(RegexMatchPrologue) {
   exec->current_thread()->set_match_end_position(0);
 }
 REGEX_HANDLER(RegexMatchEpilogue) {
-  if (exec->current_thread()->match_end_position() == 0) {
+  if (!exec->load_flag()) {
+    if (exec->HasThread()) {
+      exec->PopThread(false);
+    }
+  } else if (exec->current_thread()->match_end_position() == 0) {
     exec->current_thread()->set_match_end_position(
         exec->current_thread()->position());
   }
 }
 REGEX_HANDLER(RegexStoreMatchEndPosition) { exec->store_position(); }
 REGEX_HANDLER(RegexLoadMatchEndPosition) { exec->load_position(); }
-REGEX_HANDLER(RegexPushMatchedCount) { exec->push_matched_count(); }
-REGEX_HANDLER(RegexPopMatchedCount) { exec->pop_matched_count(); }
+REGEX_HANDLER(RegexStoreMatchedCount) {
+  auto i = fetcher->FetchNextWideOperand();
+  exec->current_thread()->StoreMatchesCount(i);
+}
+REGEX_HANDLER(RegexLoadMatchedCount) {
+  auto i = fetcher->FetchNextWideOperand();
+  exec->current_thread()->LoadMatchesCount(i);
+}
 REGEX_HANDLER(RegexNotMatch) { exec->store_flag(Smi::FromInt(0)); }
+REGEX_HANDLER(RegexSetMatch) { exec->store_flag(Smi::FromInt(1)); }
 
 REGEX_HANDLER(RegexCheckEnd) {
   if (exec->is_advanceable()) {
@@ -115,6 +126,11 @@ REGEX_HANDLER(RegexReserveCapture) {
   if (exec->collect_matched_word()) {
     exec->ReserveCapture(size);
   }
+}
+
+REGEX_HANDLER(RegexReserveMatchesCount) {
+  auto size = fetcher->FetchNextWideOperand();
+  exec->current_thread()->ReserveMatchesCount(size);
 }
 
 REGEX_HANDLER(RegexJumpIfMatchedCountRange) {

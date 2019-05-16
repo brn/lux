@@ -152,6 +152,15 @@ class VirtualMachine {
      public:
       Thread(uint32_t pc, uint32_t start_position,
              uint32_t match_start_position, uint32_t match_end_position,
+             uint32_t position, uint32_t matched_count,
+             const std::vector<uint32_t>& matches_count_stack, Smi* flag)
+          : Thread(pc, start_position, match_start_position, match_end_position,
+                   position, matched_count, flag) {
+        matches_count_stack_ = matches_count_stack;
+      }
+
+      Thread(uint32_t pc, uint32_t start_position,
+             uint32_t match_start_position, uint32_t match_end_position,
              uint32_t position, uint32_t matched_count, Smi* flag)
           : start_position_(start_position),
             match_start_position_(match_start_position),
@@ -167,10 +176,27 @@ class VirtualMachine {
       LUX_CONST_PROPERTY(uint32_t, pc, pc_)
       LUX_CONST_PROPERTY(uint32_t, position, position_)
       LUX_CONST_PROPERTY(uint32_t, matched_count, matched_count_)
+      LUX_CONST_PROPERTY(std::vector<uint32_t>, matches_count_stack,
+                         matches_count_stack_)
       LUX_CONST_PROPERTY(Smi*, flag, flag_)
       void Matched() { matched_count_++; }
       void Advance() { position_++; }
       void ResetMatchedCount() { matched_count_ = 0; }
+
+      LUX_INLINE void StoreMatchesCount(uint32_t i) {
+        INVALIDATE(matches_count_stack_.size() > 0);
+        matches_count_stack_[i] = matched_count();
+      }
+      LUX_INLINE void LoadMatchesCount(uint32_t i) {
+        INVALIDATE(matches_count_stack_.size() > 0);
+        set_matched_count(matches_count_stack_[i]);
+      }
+      LUX_INLINE void ReserveMatchesCount(uint32_t size) {
+        matches_count_stack_.resize(size);
+        for (auto i = 0; i < size; i++) {
+          matches_count_stack_[i] = 0;
+        }
+      }
 
      private:
       uint32_t start_position_;
@@ -179,6 +205,7 @@ class VirtualMachine {
       uint32_t pc_;
       uint32_t position_;
       uint32_t matched_count_;
+      std::vector<uint32_t> matches_count_stack_;
       Smi* flag_;
     };
 
@@ -201,17 +228,6 @@ class VirtualMachine {
     }
     LUX_INLINE void load_position() {
       current_thread()->set_match_end_position(position_);
-    }
-    LUX_INLINE void push_matched_count() {
-      puts("@@@@@@@@@@@@@@@@@@@@@@@@PUSH");
-      matched_count_stack_.push_back(current_thread()->matched_count());
-    }
-    LUX_INLINE void pop_matched_count() {
-      puts("@@@@@@@@@@@@@@@@@@@@@@@@POP");
-      auto x = matched_count_stack_.back();
-      INVALIDATE(matched_count_stack_.size() > 0);
-      matched_count_stack_.pop_back();
-      current_thread()->set_matched_count(x);
     }
 
     void EnableClassMatch() { vm_flag_.set(kClassMatch); }
@@ -256,17 +272,16 @@ class VirtualMachine {
     inline void ClearAllThread() { thread_stack_.clear(); }
 
     inline void NewThread(uint32_t pc) {
-      puts("|||||||||||||||||||||||||||||||||||PUSH");
-      auto t = new (zone()) Thread(pc, current_thread_->start_position(),
-                                   current_thread_->match_start_position(),
-                                   current_thread_->match_end_position(),
-                                   current_thread_->position(),
-                                   current_thread_->matched_count(), flag_);
+      auto t = new (zone())
+          Thread(pc, current_thread_->start_position(),
+                 current_thread_->match_start_position(),
+                 current_thread_->match_end_position(),
+                 current_thread_->position(), current_thread_->matched_count(),
+                 current_thread()->matches_count_stack(), flag_);
       thread_stack_.push_back(t);
     }
 
     Thread* PopThread(bool is_delete_thread) {
-      puts("|||||||||||||||||||||||||||||||||||POP");
       INVALIDATE(thread_stack_.size() > 0);
       auto ret = thread_stack_.back();
       thread_stack_.pop_back();
@@ -303,7 +318,7 @@ class VirtualMachine {
       captured_stack_.at(index)->set_end(current_thread()->position());
     }
 
-    inline void ReserveCapture(uint16_t size) {
+    inline void ReserveCapture(uint32_t size) {
       captured_stack_.resize(size);
       for (auto i = 0; i < size; i++) {
         captured_stack_[i] = new (zone()) Captured(0);
@@ -422,9 +437,8 @@ class VirtualMachine {
    private:
     uint32_t position_;
     ZoneAllocator* zone() { return &zone_allocator_; }
-    std::vector<uint32_t> matched_count_stack_;
-    std::vector<Captured*> captured_stack_;
     std::vector<Thread*> thread_stack_;
+    std::vector<Captured*> captured_stack_;
     std::vector<JSString*> matched_words_;
     Value<Object> captured_array_;
     Thread* current_thread_;

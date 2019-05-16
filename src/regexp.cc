@@ -100,11 +100,13 @@ const char* Ast::kNodeTypeStringList[] = {
 #define __ builder()->
 using Label = BytecodeLabel;
 
-Visitor::Visitor(Isolate* isolate, uint16_t captured_count,
+Visitor::Visitor(Isolate* isolate, uint32_t captured_count,
+                 uint32_t matches_count_count,
                  BytecodeBuilder* bytecode_builder,
                  ZoneAllocator* zone_allocator, uint8_t flag)
     : flag_(flag),
       captured_count_(captured_count),
+      matches_count_count_(matches_count_count),
       isolate_(isolate),
       bytecode_builder_(bytecode_builder),
       zone_allocator_(zone_allocator) {}
@@ -122,6 +124,7 @@ AST_VISIT(Root) {
   if (!IsGlobal()) {
     __ RegexReserveCapture(captured_count());
   }
+  __ RegexReserveMatchesCount(matches_count_count());
   node->regexp()->Visit(this, &new_context);
 
   if (node->is_to_end()) {
@@ -145,14 +148,20 @@ AST_VISIT(Conjunction) {
 
 AST_VISIT(Alternate) {
   __ RegexComment("Alternate");
-  Label next, ok, pop;
-  AstContext then_context = {&ok, &pop};
+  Label next, ok, pop, clean;
+  AstContext then_context = {&clean, &pop};
   AstContext else_context = {&ok, context->failure_label};
 
   __ RegexComment("Alternate.PushThread");
   __ RegexPushThread(&next);
   node->left()->Visit(this, &then_context);
   __ RegexComment("Alternate.Branch");
+
+  __ Bind(&clean);
+  {
+    __ RegexPopThread(1);
+    __ RegexJump(&ok);
+  }
 
   __ Bind(&pop);
   {
@@ -176,16 +185,19 @@ AST_VISIT(MatchRoot) {
   __ RegexComment("MatchRoot.Store");
   __ RegexMatchPrologue();
 
-  AstContext new_context = {nullptr, context->failure_label};
+  Label cleanup;
+
+  AstContext new_context = {nullptr, &cleanup};
 
   for (auto& a : *node) {
     a->Visit(this, &new_context);
   }
 
-  __ RegexComment("MatchRoot.Load");
-  __ RegexMatchEpilogue();
-  if (context->success_label) {
-    __ RegexJumpIfMatched(context->success_label);
+  __ Bind(&cleanup);
+  {
+    __ RegexComment("MatchRoot.Load");
+    __ RegexMatchEpilogue();
+    EmitResultBranch(context);
   }
 }
 
@@ -238,6 +250,7 @@ AST_VISIT(Group) {
 AST_VISIT(CharClass) {
   __ RegexComment("CharClassOpen");
   if (!node->size() && !node->IsExclude()) {
+    __ RegexNotMatch();
     __ RegexJump(context->failure_label);
     return;
   } else if (!node->size() && node->IsExclude()) {
@@ -303,53 +316,75 @@ AST_VISIT(CharRange) {
 AST_VISIT(Repeat) {
   __ RegexComment("Repeat");
   auto count = node->more_than();
-  Label loop, pop, next, exit;
+  Label loop, pop, exit;
 
-  if (count == 1) {
-    __ RegexCheckPosition(&pop);
-  }
-
-  __ RegexPushMatchedCount();
-  __ RegexResetMatchedCount();
-
-  __ Bind(&loop);
-  __ RegexCheckPosition(&next);
-  if (node->type() == Repeat::GREEDY) {
-    __ RegexPushThread(&next);
-    AstContext nc = {&loop, &pop};
-    node->target()->Visit(this, &nc);
-  } else {
-    INVALIDATE(node->type() == Repeat::SHORTEST);
-    Label push;
-    AstContext nc = {&push, &next};
-    node->target()->Visit(this, &nc);
-
-    __ Bind(&push);
-    { __ RegexPushThread(&loop); }
-  }
-
-  __ Bind(&pop);
-  __ RegexPopThread(0);
-
-  __ Bind(&next);
-  {
-    if (count == 1) {
-      if (node->type() == Repeat::SHORTEST) {
-        __ RegexJumpIfMatchedCountLT(0, &pop);
-      } else if (node->type() == Repeat::GREEDY) {
-        __ RegexJumpIfMatchedCountGT(0, &exit);
-        __ RegexComment("Repeat.Failure");
-        __ RegexNotMatch();
+  auto target = node->target();
+  if (target->IsGroup()) {
+    auto g = target->UncheckedCastToGroup();
+    if (g->size() == 1 && g->Last()->IsRepeat()) {
+      auto r = g->Last()->UncheckedCastToRepeat();
+      if (r->more_than() == 0 || (count == 1 && r->more_than() == 1)) {
+        __ RegexComment("Repeat.Skip");
+        target->Visit(this, context);
+        return;
       }
     }
   }
 
+  __ RegexStoreMatchedCount(node->index());
+  __ RegexResetMatchedCount();
+
+  if (count == 1) {
+    __ RegexComment("Repeat.Check");
+    __ RegexCheckPosition(&pop);
+  }
+
+  __ RegexComment("Repeat.Loop");
+  __ Bind(&loop);
+  __ RegexComment("Repeat.Check");
+  __ RegexCheckPosition(&exit);
+
+  if (node->type() == Repeat::GREEDY) {
+    __ RegexComment("Repeat.Greedy");
+    __ RegexPushThread(&exit);
+    Label match, failure;
+    AstContext nc = {&loop, &exit};
+    node->target()->Visit(this, &nc);
+  } else {
+    __ RegexComment("Repeat.Ungreedy");
+    INVALIDATE(node->type() == Repeat::SHORTEST);
+    Label push;
+    AstContext nc = {&push, &exit};
+    node->target()->Visit(this, &nc);
+
+    __ Bind(&push);
+    {
+      __ RegexComment("Repeat.PushThread");
+      __ RegexPushThread(&loop);
+      __ RegexComment("Repeat.Jump");
+      __ RegexJump(&exit);
+    }
+  }
+
+  __ Bind(&pop);
+  __ RegexComment("Repeat.PopThread");
+  __ RegexPopThread(0);
+
   __ Bind(&exit);
   {
-    __ RegexPopMatchedCount();
-    if (context->failure_label) {
-      __ RegexJumpIfFailed(context->failure_label);
+    Label end;
+    if (count == 0) {
+      __ RegexComment("Repeat.SetMatch");
+      __ RegexSetMatch();
+    } else {
+      __ RegexJumpIfMatchedCountGT(0, &end);
+      __ RegexNotMatch();
     }
+
+    __ Bind(&end);
+    __ RegexLoadMatchedCount(node->index());
+    __ RegexComment("Repeat.Branch");
+    EmitResultBranch(context);
   }
 }
 
@@ -359,43 +394,23 @@ AST_VISIT(RepeatRange) {
   auto least_count = node->more_than();
   auto max_count = node->less_than();
 
-  Label loop, next, pop, failure, exit, clean;
+  Label loop, check, exit;
 
   __ RegexComment("RepeatRange.PushMatchedCount");
-  __ RegexPushMatchedCount();
+  __ RegexStoreMatchedCount(node->index());
   __ RegexComment("RepeatRange.ResetMatchedCount");
   __ RegexResetMatchedCount();
 
-  if (least_count > 0) {
-    __ RegexComment("RepeatRange.CheckPos");
-    __ RegexCheckPosition(&pop);
-  }
-
-  __ RegexComment("RepeatRange.Push");
-  __ RegexPushThread(&next);
   __ Bind(&loop);
   {
+    Label check_length;
     __ RegexComment("RepeatRange.MCE");
-    __ RegexJumpIfMatchedCountEqual(max_count, &clean);
-    __ RegexComment("RepeatRange.CheckPos");
-    __ RegexCheckPosition(&next);
-    AstContext nc = {&loop, &pop};
+    __ RegexJumpIfMatchedCountEqual(max_count, &exit);
+
+    AstContext nc = {&loop, &check};
     node->target()->Visit(this, &nc);
 
-    __ Bind(&pop);
-    {
-      __ RegexComment("RepeatRange.PopThread");
-      __ RegexPopThread(0);
-    }
-
-    __ Bind(&clean);
-    {
-      __ RegexComment("RepeatRange.PopThread(Ignore)");
-      __ RegexPopThread(1);
-      __ RegexJump(&next);
-    }
-
-    __ Bind(&next);
+    __ Bind(&check);
     {
       if (least_count > 0) {
         __ RegexComment("RepeatRange.MCGT");
@@ -406,6 +421,8 @@ AST_VISIT(RepeatRange) {
 
         __ RegexComment("RepeatRange.Jump");
         __ RegexJump(&exit);
+      } else {
+        __ RegexSetMatch();
       }
     }
   }
@@ -413,7 +430,8 @@ AST_VISIT(RepeatRange) {
   __ Bind(&exit);
   {
     __ RegexComment("RepeatRange.PopMatchedCount");
-    __ RegexPopMatchedCount();
+    __ RegexLoadMatchedCount(node->index());
+    __ RegexStoreMatchedCount(node->index());
     __ RegexComment("RepeatRange.Jump");
     EmitResultBranch(context);
   }
@@ -444,6 +462,7 @@ AST_VISIT(CharSequence) {
         EmitEveryOrRune(buf, context);
         buf.clear();
       }
+
       __ RegexComment("CharSequence.Others");
       child->Visit(this, context);
     }
@@ -572,7 +591,6 @@ Ast* Parser::ParseRegExp() {
   while (has_more() && cur() != '$' && !has_pending_error()) {
     ParseDisjunction() >>= [&](Ast* node) { mr->Push(node); };
   }
-
   return mr;
 }
 
@@ -591,6 +609,9 @@ Maybe<Ast*> Parser::ParseDisjunction() {
   update_start_pos();
   return ParseAtom() >>= [&](Ast* node) {
     if (IsRepeatChar(cur().code())) {
+      ParseRepeat(node) >>= [&](Ast* a) { node = a; };
+    }
+    if (cur() == '?') {
       ParseRepeat(node) >>= [&](Ast* a) { node = a; };
     }
 
@@ -915,11 +936,16 @@ Maybe<Ast*> Parser::ParseSingleWord(bool is_inner_char_class) {
 Maybe<Ast*> Parser::ParseRepeat(Ast* node) {
   ENTER();
   update_start_pos();
+  std::string i;
 
   switch (cur()) {
     case '?': {
+      advance();
       if (node->IsRepeat()) {
-        node->UncheckedCastToRepeat()->set_type(Repeat::Type::SHORTEST);
+        auto r = node->UncheckedCastToRepeat();
+        r->set_type(Repeat::Type::SHORTEST);
+        r->set_more_than(0);
+        return Just(node);
       } else if (node->IsAny()) {
         auto any = node->UncheckedCastToAny();
         if (any->Is(Any::Type::EAT_GREEDY)) {
@@ -927,10 +953,11 @@ Maybe<Ast*> Parser::ParseRepeat(Ast* node) {
         } else {
           any->set_type(Any::Type::EAT_MINIMUM_L1);
         }
+        return Just(node);
       }
-      advance();
       return SplitCharSequenceIf(node, [&](Ast* c) {
-        return Just(new (zone()) RepeatRange(0, 1, c));
+        return Just(new (zone())
+                        Repeat(Repeat::SHORTEST, 0, c, RequireMatchesCount()));
       });
     }
     case '{': {
@@ -952,7 +979,8 @@ Maybe<Ast*> Parser::ParseRepeat(Ast* node) {
         return Just(new (zone()) Any(Any::EAT_GREEDY));
       }
       return SplitCharSequenceIf(node, [&](Ast* c) -> Maybe<Ast*> {
-        return Just(new (zone()) Repeat(Repeat::GREEDY, 0, c));
+        return Just(new (zone())
+                        Repeat(Repeat::GREEDY, 0, c, RequireMatchesCount()));
       });
     }
     case '+': {
@@ -965,7 +993,8 @@ Maybe<Ast*> Parser::ParseRepeat(Ast* node) {
         return Just(new (zone()) Any(Any::EAT_GREEDY_L1));
       }
       return SplitCharSequenceIf(node, [&](Ast* a) -> Maybe<Ast*> {
-        return Just(new (zone()) Repeat(Repeat::GREEDY, 1, a));
+        return Just(new (zone())
+                        Repeat(Repeat::GREEDY, 1, a, RequireMatchesCount()));
       });
     }
     default:
@@ -984,15 +1013,34 @@ Maybe<Ast*> Parser::SplitCharSequenceIf(Ast* node, T factory) {
   }
   auto char_sequence = node->UncheckedCastToCharSequence();
   if (char_sequence->size() == 0) {
+    return factory(node);
+  }
+
+  if (char_sequence->size() == 1) {
     return factory(char_sequence->Last());
   }
-  auto conjunction = new (zone()) Conjunction();
-  for (auto& ast : *char_sequence) {
-    conjunction->Push(ast);
-  }
-  return factory(char_sequence->Last()) >>= [&](Ast* ast) {
-    conjunction->Set(conjunction->size() - 1, ast);
-    return Just(conjunction);
+
+  return factory(char_sequence->Last()) >>= [&](Ast* ast) -> Maybe<Ast*> {
+    if (ast->IsRepeat()) {
+      auto r = ast->UncheckedCastToRepeat();
+      if (r->target()->IsChar()) {
+        auto c = r->target()->UncheckedCastToChar();
+        auto it = char_sequence->rbegin();
+        auto end = char_sequence->rend();
+        while (it != end && (*it)->IsChar() &&
+               (*it)->UncheckedCastToChar()->value().code() ==
+                   c->value().code()) {
+          ++it;
+        }
+        char_sequence->erase(it.base(), char_sequence->end());
+      }
+    }
+
+    if (char_sequence->size() == 0) {
+      return Just(ast);
+    }
+    char_sequence->Set(char_sequence->size() - 1, ast);
+    return Just(char_sequence);
   };
 }
 
@@ -1037,7 +1085,7 @@ Maybe<Ast*> Parser::ParseRangeRepeat(Ast* node) {
       update_start_pos();
       return Just(new (zone()) Repeat(
           cur() == '?' ? Repeat::Type::SHORTEST : Repeat::Type::GREEDY, start,
-          node));
+          node, RequireMatchesCount()));
     }
     ret = ToInt();
     if (ret.IsNaN()) {
@@ -1055,7 +1103,8 @@ Maybe<Ast*> Parser::ParseRangeRepeat(Ast* node) {
   if (!has_end_range) {
     end = start;
   }
-  return Just(new (zone()) RepeatRange(start, end, node));
+  return Just(new (zone())
+                  RepeatRange(start, end, node, RequireMatchesCount()));
 }
 
 void Parser::SkipWhiteSpace() {
@@ -1078,7 +1127,8 @@ Handle<JSRegExp> Compiler::Compile(const char* source, uint8_t flag) {
   parser.Parse();
   ZoneAllocator zone_allocator;
   BytecodeBuilder bytecode_builder(isolate_, &zone_allocator);
-  Visitor visitor(isolate_, parser.capture_count(), &bytecode_builder,
+  Visitor visitor(isolate_, parser.capture_count(),
+                  parser.matches_count_count(), &bytecode_builder,
                   &zone_allocator, flag);
   parser.node()->Visit(&visitor, nullptr);
   auto executable = bytecode_builder.flush();

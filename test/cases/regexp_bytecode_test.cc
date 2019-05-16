@@ -42,7 +42,7 @@ class RegExpBytecodeTest : public lux::IsolateSetup {
     lux::SourcePosition sp;
     lux::regexp::Compiler compiler(isolate_, &er, &sp);
     auto jsregexp = compiler.Compile(regexp, flag);
-    printf("%s\n", jsregexp->code()->ToString().c_str());
+    //    printf("%s\n", jsregexp->code()->ToString().c_str());
     auto ret = jsregexp->Match(isolate_, *lux::JSString::New(isolate_, input));
     ASSERT_TRUE(
         lux::testing::CompareNode(regexp, ret->ToString().c_str(), expectation))
@@ -96,6 +96,28 @@ TEST_F(RegExpBytecodeTest, SimpleCharClassGlobal) {
 TEST_F(RegExpBytecodeTest, SimpleCharClassGlobal2) {
   RunTest("([ae][bx][cg])", "abcdefgdabc", lux::regexp::Flag::kGlobal,
           "JSArray[String(\"abc\"), String(\"abc\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Malicious) {
+  RunTest("a*a*a*a*a*a*ac", "aaaaaaaaaaaaaaaaaaaac", lux::regexp::Flag::kNone,
+          "JSArray[String(\"aaaaaaaaaaaaaaaaaaaac\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Malicious2) {
+  RunTest("a*?a*?a*?a*?a*?a*?ac", "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac",
+          lux::regexp::Flag::kNone,
+          "JSArray[String(\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Malicious3) {
+  RunTest("(?:aaaa*)?(?:aaaa*)?(?:aaaa*)?(?:aaaa*)?(?:aaaaa*)?(?:aaaa*)?ac",
+          "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac", lux::regexp::Flag::kNone,
+          "JSArray[String(\"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaac\")]");
+}
+
+TEST_F(RegExpBytecodeTest, Malicious4) {
+  RunTest("(?:aa*)?(?:aa*)?ac", "aaaaaaac", lux::regexp::Flag::kNone,
+          "JSArray[String(\"aaaaaaac\")]");
 }
 
 TEST_F(RegExpBytecodeTest, Test262_S15_10_2_10_A1_1_T1) {
@@ -533,5 +555,15 @@ TEST_F(RegExpBytecodeTest, Test262_S15_10_2_3_A1_T4) {
   RunTest("\\d{3}|[a-z]{4}", "2, 12 and 234 AND of course repeat 12",
           lux::regexp::Flag::kNone, "JSArray[String(\"234\")]");
 }
+
+TEST_F(RegExpBytecodeTest, Test262_S15_10_2_3_A1_T5) {
+  NotMatch("\\d{3}|[a-z]{4}", "2, 12 and 23 AND 0.00.1",
+           lux::regexp::Flag::kNone);
+}
+
+/*TEST_F(RegExpBytecodeTest, Test262_S15_10_2_3_A1_T6) {
+  RunTest("ab|cd|ef", "AEKFCD", lux::regexp::Flag::kIgnoreCase,
+          "JSArray[String(\"CD\")]");
+          }*/
 
 }  // namespace

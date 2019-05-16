@@ -137,6 +137,7 @@ struct BytecodeOperand {
 #define REGEX_BYTECODE_LIST_WITOUT_MATCHED(A)                            \
   A(RegexComment, Word1, (kPointerSize + 1), 1, const char*)             \
   A(RegexReserveCapture, Wide1, 5, 1, uint32_t)                          \
+  A(RegexReserveMatchesCount, Wide1, 5, 1, uint32_t)                     \
   A(RegexStartCapture, Wide1, 5, 1, uint32_t)                            \
   A(RegexDisableRetry, None, 1, 0)                                       \
   A(RegexCheckEnd, None, 1, 0)                                           \
@@ -166,10 +167,11 @@ struct BytecodeOperand {
   A(RegexMatchEpilogue, None, 1, 0)                                      \
   A(RegexLoadMatchEndPosition, None, 1, 0)                               \
   A(RegexStoreMatchEndPosition, None, 1, 0)                              \
-  A(RegexPushMatchedCount, None, 1, 0)                                   \
-  A(RegexPopMatchedCount, None, 1, 0)                                    \
+  A(RegexStoreMatchedCount, Wide1, 5, 1, uint32_t)                       \
+  A(RegexLoadMatchedCount, Wide1, 5, 1, uint32_t)                        \
   A(RegexEmpty, None, 1, 0)                                              \
   A(RegexNotMatch, None, 1, 0)                                           \
+  A(RegexSetMatch, None, 1, 0)                                           \
   A(RegexFlipResult, None, 1, 0)
 
 #define REGEX_BYTECODE_LIST(A)          \
