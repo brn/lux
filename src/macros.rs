@@ -15,3 +15,9 @@ macro_rules! gb {
     mb!($val) * 1024
   };
 }
+
+macro_rules! generics_braces {
+  ($($i:item),*) => (
+    <$($i)*>
+  )
+}

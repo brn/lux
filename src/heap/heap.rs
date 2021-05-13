@@ -1,6 +1,5 @@
 use super::allocator::*;
 use crate::def;
-use std::alloc::Layout;
 
 pub struct Heap {
   space: *mut def::Byte,
@@ -24,15 +23,14 @@ impl Heap {
     };
   }
 
-  pub fn allocate<'a, T>(&mut self) -> Option<&'a mut T> {
-    let layout = Layout::new::<T>();
-    if !self.has_enough_space(layout.size()) {
+  pub fn allocate<'a>(&mut self, size: usize) -> Option<*mut def::Byte> {
+    if !self.has_enough_space(size) {
       return None;
     }
     unsafe {
-      let ret = &mut *(self.space as *mut T);
-      self.current = self.current.offset(layout.size() as isize);
-      self.used += layout.size();
+      let ret = self.current;
+      self.current = self.current.offset(size as isize);
+      self.used += size;
       return Some(ret);
     }
   }

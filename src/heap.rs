@@ -1,22 +1,43 @@
 mod allocator;
 mod copying;
+mod handle;
 mod heap;
+mod marksweep;
 
-pub use super::heap::allocator::Managed;
+pub use self::handle::*;
 use super::heap::copying::*;
+use super::heap::marksweep::*;
+use crate::def::*;
 
 pub struct Heap {
-  heap: CopyingHeap,
+  first: CopyingHeap,
+  second: MarkSweep,
 }
 
 impl Heap {
-  pub fn allocate<'a, T>(&mut self) -> Managed<'a, T> {
-    let result = self.heap.allocate::<T>();
+  pub fn new() -> Heap {
+    return Heap {
+      first: CopyingHeap::new(),
+      second: MarkSweep::new(),
+    };
+  }
+
+  pub fn allocate<'a>(&mut self, size: usize) -> *mut Byte {
+    let result = self.first.allocate(size);
     if result.is_some() {
       return result.unwrap();
     }
 
-    self.heap.gc();
-    return self.allocate();
+    self.first.gc();
+    return self.allocate(size);
+  }
+
+  pub fn allocate_persist<'a>(&mut self, size: usize) -> *mut Byte {
+    let result = self.second.allocate_persistent(size);
+    if result.is_some() {
+      return result.unwrap();
+    }
+
+    panic!("Failed to allocate persistent memory");
   }
 }

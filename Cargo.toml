@@ -11,7 +11,9 @@ nix = "0.20.0"
 libc = "0.2"
 bitflags = "1.2"
 num-traits = "0.2"
+num-derive = "0.2"
 num = "0.4"
+static_assertions = "1.1.0"
 
 [[bin]]
 name = "lux"

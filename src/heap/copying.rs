@@ -1,5 +1,7 @@
 use super::allocator::*;
 use super::heap::*;
+use crate::def::*;
+use std::mem::size_of;
 
 pub struct CopyingHeap {
   from_space: Heap,
@@ -14,13 +16,8 @@ impl CopyingHeap {
     };
   }
 
-  pub fn allocate<'a, T>(&mut self) -> Option<Managed<'a, T>> {
-    let ret = self.from_space.allocate::<T>();
-    if ret.is_none() {
-      return None;
-    }
-
-    return Some(Managed::wrap(ret.unwrap()));
+  pub fn allocate<'a>(&mut self, size: usize) -> Option<*mut Byte> {
+    return self.from_space.allocate(size);
   }
 
   pub fn gc(&mut self) {}
