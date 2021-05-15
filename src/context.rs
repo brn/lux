@@ -2,7 +2,7 @@ use super::heap::*;
 use crate::def::*;
 use crate::structs::{HeapObject, JsBoolean, JsNull, JsUndefined};
 
-pub struct Context {
+pub struct LuxContext {
   js_true: Addr,
   js_false: Addr,
   js_undefined: Addr,
@@ -10,10 +10,10 @@ pub struct Context {
   pub heap: Heap,
 }
 
-impl Context {
-  pub fn new() -> Context {
+impl LuxContext {
+  pub fn new() -> LuxContext {
     let heap = Heap::new();
-    let mut c = Context {
+    let mut c = LuxContext {
       heap,
       js_true: std::ptr::null_mut(),
       js_false: std::ptr::null_mut(),
@@ -25,14 +25,6 @@ impl Context {
     c.js_undefined = JsUndefined::persist(&mut c).raw_heap();
     c.js_null = JsNull::persist(&mut c).raw_heap();
     return c;
-  }
-
-  pub fn allocate(&mut self, size: usize) -> *mut Byte {
-    return self.heap.allocate(size);
-  }
-
-  pub fn allocate_persist(&mut self, size: usize) -> *mut Byte {
-    return self.heap.allocate(size);
   }
 
   pub fn js_true(&self) -> JsBoolean {
@@ -49,5 +41,44 @@ impl Context {
 
   pub fn js_undefined(&self) -> JsUndefined {
     return JsUndefined::from_ptr(self.js_undefined);
+  }
+}
+
+pub trait Context {
+  fn allocate(&mut self, size: usize) -> Addr;
+  fn allocate_persist(&mut self, size: usize) -> Addr;
+}
+
+impl Context for LuxContext {
+  fn allocate(&mut self, size: usize) -> Addr {
+    return self.heap.allocate(size);
+  }
+
+  fn allocate_persist(&mut self, size: usize) -> Addr {
+    return self.heap.allocate(size);
+  }
+}
+
+#[cfg(test)]
+pub mod testing {
+  use super::*;
+  use std::alloc::{alloc, Layout};
+
+  pub struct MockedContext {}
+
+  impl MockedContext {
+    pub fn new() -> MockedContext {
+      return MockedContext {};
+    }
+  }
+
+  impl Context for MockedContext {
+    fn allocate(&mut self, size: usize) -> Addr {
+      return unsafe { alloc(Layout::from_size_align(size, ALIGNMENT).unwrap()) };
+    }
+
+    fn allocate_persist(&mut self, size: usize) -> Addr {
+      return unsafe { alloc(Layout::from_size_align(size, ALIGNMENT).unwrap()) };
+    }
   }
 }

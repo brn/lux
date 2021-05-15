@@ -20,7 +20,7 @@ impl JsUndefined {
   fn byte_length(&self) -> usize {
     return Cell::SIZE;
   }
-  pub fn persist<'a>(context: &'a mut Context) -> JsUndefined {
+  pub fn persist(context: &mut impl Context) -> JsUndefined {
     let cell = Cell::persist(context, Cell::SIZE, Shape::undefined());
     return JsUndefined { heap: cell.raw_heap() };
   }
@@ -42,7 +42,7 @@ impl JsNull {
   fn byte_length(&self) -> usize {
     return Cell::SIZE;
   }
-  pub fn persist<'a>(context: &'a mut Context) -> JsNull {
+  pub fn persist(context: &mut impl Context) -> JsNull {
     let cell = Cell::persist(context, Cell::SIZE, Shape::null());
     return JsNull { heap: cell.raw_heap() };
   }
@@ -67,12 +67,17 @@ impl JsBoolean {
     return JsBoolean::SIZE;
   }
 
-  pub fn persist<'a>(context: &'a mut Context, val: bool) -> JsBoolean {
-    let cell = Cell::persist(context, JsBoolean::SIZE, Shape::null());
-    let heap = cell.raw_heap();
-    let value_addr = field_addr(heap, Cell::SIZE);
-    unsafe { *value_addr = if val { 1 } else { 0 } };
-    return JsBoolean { heap };
+  #[cfg(test)]
+  pub fn alloc_for_test(val: bool) -> JsBoolean {
+    use std::alloc::{alloc, Layout};
+    let layout = Layout::from_size_align(JsBoolean::SIZE, ALIGNMENT).unwrap();
+    let cell = Cell::new_into_heap(unsafe { alloc(layout) }, JsBoolean::SIZE, Shape::boolean());
+    return JsBoolean::init(cell, val);
+  }
+
+  pub fn persist<'a>(context: &mut impl Context, val: bool) -> JsBoolean {
+    let cell = Cell::persist(context, JsBoolean::SIZE, Shape::boolean());
+    return JsBoolean::init(cell, val);
   }
 
   pub fn is_true(&self) -> bool {
@@ -82,5 +87,37 @@ impl JsBoolean {
 
   pub fn wrap(heap: Addr) -> JsBoolean {
     return JsBoolean { heap };
+  }
+
+  #[inline]
+  fn init(cell: Cell, val: bool) -> JsBoolean {
+    let heap = cell.raw_heap();
+    let value_addr = field_addr(heap, Cell::SIZE);
+    unsafe { *value_addr = if val { 1 } else { 0 } };
+    return JsBoolean { heap };
+  }
+}
+
+#[cfg(test)]
+mod js_global_test {
+  use super::*;
+
+  #[test]
+  fn js_boolean_init_test() {
+    let js_true = JsBoolean::alloc_for_test(true);
+    assert_eq!(js_true.size(), JsBoolean::SIZE);
+    assert_eq!(js_true.shape(), Shape::boolean());
+  }
+
+  #[test]
+  fn js_boolean_true_test() {
+    let js_true = JsBoolean::alloc_for_test(true);
+    assert_eq!(js_true.is_true(), true);
+  }
+
+  #[test]
+  fn js_boolean_false_test() {
+    let js_true = JsBoolean::alloc_for_test(false);
+    assert_eq!(js_true.is_true(), false);
   }
 }

@@ -13,6 +13,8 @@ enum ShapeTag {
   Object,
   Array,
   InternalArray,
+  StringPiece,
+  FixedU16Array,
 }
 assert_eq_size!(ShapeTag, u8);
 
@@ -76,6 +78,18 @@ impl Shape {
   pub const fn internal_array() -> Shape {
     return Shape {
       tag: ShapeTag::InternalArray,
+    };
+  }
+
+  pub const fn string_piece() -> Shape {
+    return Shape {
+      tag: ShapeTag::StringPiece,
+    };
+  }
+
+  pub const fn fixed_u16_array() -> Shape {
+    return Shape {
+      tag: ShapeTag::FixedU16Array,
     };
   }
 }

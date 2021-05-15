@@ -4,6 +4,7 @@ use crate::context::Context;
 use crate::def::*;
 use crate::impl_repr_convertion;
 use crate::utility::*;
+use std::marker::PhantomData;
 use std::mem::size_of;
 
 #[repr(C)]
@@ -147,6 +148,39 @@ mod header_tests {
   }
 }
 
+#[derive(Copy, Clone)]
+pub struct HeapLayout<T: Copy> {
+  heap: Addr,
+  _phantom_data: PhantomData<T>,
+}
+
+impl<T: Copy> HeapLayout<T> {
+  pub fn new(heap: Addr) -> HeapLayout<T> {
+    return HeapLayout::<T> {
+      heap,
+      _phantom_data: PhantomData,
+    };
+  }
+
+  pub fn as_ref(&self) -> &T {
+    return unsafe { &*(self.heap as *const T) };
+  }
+
+  pub fn as_ref_mut(&mut self) -> &mut T {
+    return unsafe { &mut *(self.heap as *mut T) };
+  }
+
+  pub fn heap(&self) -> Addr {
+    return self.heap;
+  }
+
+  pub fn set(&self, value: &T) {
+    unsafe {
+      *(self.heap as *mut T) = *value;
+    };
+  }
+}
+
 pub trait HeapObject: Into<Repr> + Copy {
   fn raw_heap(&self) -> Addr;
   fn size(&self) -> usize;
@@ -168,28 +202,37 @@ pub trait HeapObject: Into<Repr> + Copy {
   }
 }
 
+macro_rules! _priv_impl_heap_object_body {
+  () => {
+    fn size(&self) -> usize {
+      return self.byte_length();
+    }
+
+    fn from_ptr(heap: *mut Byte) -> Self {
+      return Self::wrap(heap);
+    }
+
+    fn raw_heap(&self) -> Addr {
+      return self.heap;
+    }
+
+    fn out(&mut self) -> Addr {
+      let ret = self.heap;
+      self.heap = std::ptr::null_mut();
+      return ret;
+    }
+  };
+}
+
 #[macro_export]
 macro_rules! impl_heap_object {
-  ($name:ident $(< $( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+ >)?) => {
-    impl $(< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? HeapObject for $name $(< $( $lt ),+ >)? {
-      fn size(&self) -> usize {
-        return self.byte_length();
-      }
-
-      fn from_ptr(heap: *mut Byte) -> Self {
-        return Self::wrap(heap);
-      }
-
-      fn raw_heap(&self) -> Addr {
-        return self.heap;
-      }
-
-      fn out(&mut self) -> Addr {
-        let ret = self.heap;
-        self.heap = std::ptr::null_mut();
-        return ret;
-      }
+  ($name:ident) => {
+    impl HeapObject for $name {
+      _priv_impl_heap_object_body!();
     }
+  };
+  () => {
+    _priv_impl_heap_object_body!();
   };
 }
 
@@ -206,12 +249,12 @@ pub fn field_addr(this: Addr, offset: usize) -> Addr {
 impl Cell {
   pub const TYPE: Shape = Shape::cell();
   pub const SIZE: usize = size_of::<Header>();
-  pub fn new(context: &mut Context, size: usize, shape: Shape) -> Cell {
+  pub fn new(context: &mut impl Context, size: usize, shape: Shape) -> Cell {
     let heap = context.allocate(size);
     return Cell::new_into_heap(heap, size, shape);
   }
 
-  pub fn persist(context: &mut Context, size: usize, shape: Shape) -> Cell {
+  pub fn persist(context: &mut impl Context, size: usize, shape: Shape) -> Cell {
     let heap = context.allocate_persist(size);
     return Cell::new_into_heap(heap, size, shape);
   }
@@ -223,6 +266,10 @@ impl Cell {
       (*header).set_shape(shape);
       return Cell { heap };
     }
+  }
+
+  pub fn get_header(&self) -> &mut Header {
+    return unsafe { &mut *(self.heap as *mut Header) };
   }
 
   pub fn get_body(&self) -> Addr {

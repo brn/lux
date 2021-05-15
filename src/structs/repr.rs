@@ -38,18 +38,16 @@ impl Repr {
 
 #[macro_export]
 macro_rules! impl_repr_convertion {
-  ($name:ident $(< $( $lt:tt $( : $clt:tt $(+ $dlt:tt )* )? ),+ >)?) => {
-    impl $(< $( $lt $( : $clt $(+ $dlt )* )? ),+ >)? From<$name $(< $( $lt ),+ >)?> for Repr {
-      fn from(obj: $name $(< $( $lt ),+ >)?) -> Repr {
+  ($name:ident) => {
+    impl From<$name> for Repr {
+      fn from(obj: $name) -> Repr {
         return Repr::new(obj.heap);
       }
     }
   };
-}
-
-#[cfg(test)]
-mod repr_test {
-  use super::*;
-
-  struct Test {}
+  ($name:ty) => {
+    fn from(obj: $name) -> Repr {
+      return Repr::new(obj.heap);
+    }
+  };
 }
