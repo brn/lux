@@ -36,18 +36,17 @@ impl Repr {
   }
 }
 
-#[macro_export]
 macro_rules! impl_repr_convertion {
   ($name:ident) => {
-    impl From<$name> for Repr {
-      fn from(obj: $name) -> Repr {
-        return Repr::new(obj.heap);
+    impl From<$name> for crate::structs::Repr {
+      fn from(obj: $name) -> crate::structs::Repr {
+        return crate::structs::Repr::new(obj.raw_heap());
       }
     }
   };
   ($name:ty) => {
-    fn from(obj: $name) -> Repr {
-      return Repr::new(obj.heap);
+    fn from(obj: $name) -> crate::structs::Repr {
+      return crate::structs::Repr::new(obj.raw_heap());
     }
   };
 }

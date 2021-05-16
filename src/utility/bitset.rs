@@ -35,6 +35,7 @@ pub trait BitOperator<BitNum> {
   fn right_most_empty_slot(&self) -> u32;
 }
 
+#[derive(Copy, Clone)]
 pub struct Bitset<BitType: BitNum> {
   bit_field: BitType,
 }

@@ -1,13 +1,13 @@
+mod shape;
+#[macro_use]
+mod repr;
 #[macro_use]
 mod cell;
 #[macro_use]
 mod js_globals;
 #[macro_use]
 mod internal_array;
-#[macro_use]
-mod repr;
 mod js_object;
-mod shape;
 mod string;
 mod util;
 

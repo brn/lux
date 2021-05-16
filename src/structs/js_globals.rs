@@ -3,15 +3,12 @@ use super::repr::Repr;
 use super::shape::*;
 use crate::context::Context;
 use crate::def::*;
-use crate::impl_repr_convertion;
 use crate::utility::align;
 use std::mem::size_of;
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Copy, Clone)]
-pub struct JsUndefined {
-  heap: *mut Byte,
-}
+pub struct JsUndefined(HeapLayout<VoidHeapBody>);
 impl_heap_object!(JsUndefined);
 impl_repr_convertion!(JsUndefined);
 
@@ -21,19 +18,16 @@ impl JsUndefined {
     return Cell::SIZE;
   }
   pub fn persist(context: &mut impl Context) -> JsUndefined {
-    let cell = Cell::persist(context, Cell::SIZE, Shape::undefined());
-    return JsUndefined { heap: cell.raw_heap() };
+    return JsUndefined(HeapLayout::<VoidHeapBody>::new(context, Cell::SIZE, Shape::undefined()));
   }
   pub fn wrap(heap: Addr) -> JsUndefined {
-    return JsUndefined { heap };
+    return JsUndefined(HeapLayout::<VoidHeapBody>::wrap(heap));
   }
 }
 
-#[repr(C)]
+#[repr(transparent)]
 #[derive(Copy, Clone)]
-pub struct JsNull {
-  heap: *mut Byte,
-}
+pub struct JsNull(HeapLayout<VoidHeapBody>);
 impl_heap_object!(JsNull);
 impl_repr_convertion!(JsNull);
 
@@ -43,81 +37,75 @@ impl JsNull {
     return Cell::SIZE;
   }
   pub fn persist(context: &mut impl Context) -> JsNull {
-    let cell = Cell::persist(context, Cell::SIZE, Shape::null());
-    return JsNull { heap: cell.raw_heap() };
+    return JsNull(HeapLayout::<VoidHeapBody>::persist(context, Cell::SIZE, Shape::null()));
   }
   pub fn wrap(heap: Addr) -> JsNull {
-    return JsNull { heap };
+    return JsNull(HeapLayout::<VoidHeapBody>::wrap(heap));
   }
 }
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct JsBoolean {
-  heap: *mut Byte,
+struct JsBooleanBody {
+  value: u8,
 }
+
+#[repr(transparent)]
+#[derive(Copy, Clone)]
+pub struct JsBoolean(HeapLayout<JsBooleanBody>);
 impl_heap_object!(JsBoolean);
 impl_repr_convertion!(JsBoolean);
 
 impl JsBoolean {
   pub const TYPE: Shape = Shape::boolean();
-  pub const SIZE: usize = align(Cell::SIZE + size_of::<u8>(), ALIGNMENT);
-
-  fn byte_length(&self) -> usize {
-    return JsBoolean::SIZE;
-  }
-
-  #[cfg(test)]
-  pub fn alloc_for_test(val: bool) -> JsBoolean {
-    use std::alloc::{alloc, Layout};
-    let layout = Layout::from_size_align(JsBoolean::SIZE, ALIGNMENT).unwrap();
-    let cell = Cell::new_into_heap(unsafe { alloc(layout) }, JsBoolean::SIZE, Shape::boolean());
-    return JsBoolean::init(cell, val);
-  }
+  pub const SIZE: usize = Cell::SIZE + size_of::<JsBooleanBody>();
 
   pub fn persist<'a>(context: &mut impl Context, val: bool) -> JsBoolean {
-    let cell = Cell::persist(context, JsBoolean::SIZE, Shape::boolean());
-    return JsBoolean::init(cell, val);
+    let layout = HeapLayout::<JsBooleanBody>::persist(context, JsBoolean::SIZE, Shape::boolean());
+    return JsBoolean::init(layout, val);
   }
 
   pub fn is_true(&self) -> bool {
-    let value = field_addr(self.heap, Cell::SIZE);
-    return unsafe { (*value) == 1 };
+    return self.0.as_ref().value == 1;
   }
 
   pub fn wrap(heap: Addr) -> JsBoolean {
-    return JsBoolean { heap };
+    return JsBoolean(HeapLayout::<JsBooleanBody>::wrap(heap));
   }
 
   #[inline]
-  fn init(cell: Cell, val: bool) -> JsBoolean {
-    let heap = cell.raw_heap();
-    let value_addr = field_addr(heap, Cell::SIZE);
-    unsafe { *value_addr = if val { 1 } else { 0 } };
-    return JsBoolean { heap };
+  fn init(mut layout: HeapLayout<JsBooleanBody>, val: bool) -> JsBoolean {
+    let body = layout.as_ref_mut();
+    body.value = if val { 1 } else { 0 };
+    debug_assert!(layout.size() == JsBoolean::SIZE);
+    return JsBoolean(layout);
   }
 }
 
 #[cfg(test)]
 mod js_global_test {
   use super::*;
+  use crate::context::testing::*;
 
   #[test]
   fn js_boolean_init_test() {
-    let js_true = JsBoolean::alloc_for_test(true);
+    let mut mc = MockedContext::new();
+    let js_true = JsBoolean::persist(&mut mc, true);
     assert_eq!(js_true.size(), JsBoolean::SIZE);
     assert_eq!(js_true.shape(), Shape::boolean());
   }
 
   #[test]
   fn js_boolean_true_test() {
-    let js_true = JsBoolean::alloc_for_test(true);
+    let mut mc = MockedContext::new();
+    let js_true = JsBoolean::persist(&mut mc, true);
     assert_eq!(js_true.is_true(), true);
   }
 
   #[test]
   fn js_boolean_false_test() {
-    let js_true = JsBoolean::alloc_for_test(false);
+    let mut mc = MockedContext::new();
+    let js_true = JsBoolean::persist(&mut mc, false);
     assert_eq!(js_true.is_true(), false);
   }
 }

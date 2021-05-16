@@ -2,12 +2,12 @@ use super::repr::*;
 use super::shape::Shape;
 use crate::context::Context;
 use crate::def::*;
-use crate::impl_repr_convertion;
 use crate::utility::*;
 use std::marker::PhantomData;
 use std::mem::size_of;
 
 #[repr(C)]
+#[derive(Copy, Clone)]
 pub struct Header {
   ///
   /// Use as object size information and used as forwarded pointer and mark bit.
@@ -28,6 +28,11 @@ const DATA_FIELD_START: usize = SIZE_TAG_START + SIZE_TAG_SIZE;
 const DATA_FIELD_SIZE: usize = 56;
 
 impl Header {
+  #[inline]
+  fn init(&mut self) {
+    self.field.assign(0);
+  }
+
   #[inline]
   pub fn set_size(&mut self, size: usize) {
     debug_assert!(size <= 0xffffffffffffff, "Size must be less than 56bit integer");
@@ -85,7 +90,7 @@ impl Header {
   }
 
   #[inline]
-  pub fn shape(&mut self) -> Shape {
+  pub fn shape(&self) -> Shape {
     let mask = self.field.mask_range(TYPE_TAG_START, SIZE_TAG_START);
     return Shape::from_tag(mask.bits() as u8);
   }
@@ -93,6 +98,26 @@ impl Header {
   #[inline]
   fn is_size_used_as_size(&self) -> bool {
     return self.field.get(SIZE_TAG_START);
+  }
+}
+
+impl std::fmt::Debug for Header {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    return write!(
+      f,
+      "
+{:?} {{
+  size: {:?},
+  shape: {:?},
+  mark: {:?},
+  is_size_used_as_size: {:?}
+}}",
+      std::any::type_name::<Header>(),
+      self.size(),
+      self.shape(),
+      self.is_marked(),
+      self.is_size_used_as_size(),
+    );
   }
 }
 
@@ -148,51 +173,136 @@ mod header_tests {
   }
 }
 
-#[derive(Copy, Clone)]
-pub struct HeapLayout<T: Copy> {
-  heap: Addr,
-  _phantom_data: PhantomData<T>,
-}
+#[derive(Copy, Clone, Debug)]
+#[repr(transparent)]
+pub struct BareHeapLayout<T: Copy>(Addr, PhantomData<T>);
 
-impl<T: Copy> HeapLayout<T> {
-  pub fn new(heap: Addr) -> HeapLayout<T> {
-    return HeapLayout::<T> {
-      heap,
-      _phantom_data: PhantomData,
-    };
+impl<T: Copy> BareHeapLayout<T> {
+  pub fn new(context: &mut impl Context, size: usize) -> BareHeapLayout<T> {
+    return BareHeapLayout::<T>(context.allocate(size), PhantomData);
+  }
+
+  pub fn new_into_heap(heap: Addr) -> BareHeapLayout<T> {
+    return BareHeapLayout::<T>(heap, PhantomData);
+  }
+
+  pub fn persist(context: &mut impl Context, size: usize) -> BareHeapLayout<T> {
+    return BareHeapLayout::<T>(context.allocate_persist(size), PhantomData);
   }
 
   pub fn as_ref(&self) -> &T {
-    return unsafe { &*(self.heap as *const T) };
+    return unsafe { std::mem::transmute::<Addr, &T>(self.0) };
   }
 
   pub fn as_ref_mut(&mut self) -> &mut T {
-    return unsafe { &mut *(self.heap as *mut T) };
+    return unsafe { std::mem::transmute::<Addr, &mut T>(self.0) };
   }
 
-  pub fn heap(&self) -> Addr {
-    return self.heap;
+  pub fn as_addr(&self) -> Addr {
+    return self.0;
+  }
+
+  pub fn set(&mut self, data: Addr) {
+    self.0 = data;
+  }
+
+  pub fn out(&mut self) {
+    self.0 = std::ptr::null_mut();
+  }
+}
+
+#[derive(Copy, Clone)]
+#[repr(transparent)]
+pub struct HeapLayout<T: Copy>(Addr, PhantomData<T>);
+
+#[derive(Copy, Clone)]
+pub struct VoidHeapBody {}
+
+impl<T: Copy> HeapLayout<T> {
+  pub fn new(context: &mut impl Context, size: usize, shape: Shape) -> HeapLayout<T> {
+    return HeapLayout::<T>(Cell::init_heap(context, size, shape), PhantomData);
+  }
+
+  pub fn new_into_heap(heap: Addr, size: usize, shape: Shape) -> HeapLayout<T> {
+    return HeapLayout::<T>(Cell::init_into_heap(heap, size, shape), PhantomData);
+  }
+
+  pub fn persist(context: &mut impl Context, size: usize, shape: Shape) -> HeapLayout<T> {
+    return HeapLayout::<T>(Cell::init_persistent_heap(context, size, shape), PhantomData);
+  }
+
+  pub fn wrap(heap: Addr) -> HeapLayout<T> {
+    return HeapLayout::<T>(heap, PhantomData);
+  }
+
+  pub fn as_ref(&self) -> &T {
+    return unsafe { std::mem::transmute::<Addr, &T>(self.0.offset(Cell::SIZE as isize)) };
+  }
+
+  pub fn as_ref_mut(&mut self) -> &mut T {
+    return unsafe { std::mem::transmute::<Addr, &mut T>(self.0.offset(Cell::SIZE as isize)) };
+  }
+
+  pub fn as_addr(&self) -> Addr {
+    return self.0;
+  }
+
+  pub fn out(&mut self) {
+    self.0 = std::ptr::null_mut();
   }
 
   pub fn set(&self, value: &T) {
     unsafe {
-      *(self.heap as *mut T) = *value;
+      *(self.0.offset(Cell::SIZE as isize) as *mut T) = *value;
     };
+  }
+
+  pub fn size(&self) -> usize {
+    return Cell::wrap(self.0).get_header().size();
+  }
+
+  pub fn cell(&self) -> Cell {
+    return Cell::wrap(self.0);
+  }
+}
+
+impl<T: Copy> std::fmt::Debug for HeapLayout<T> {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    return write!(
+      f,
+      "{:?}
+{:?} {{
+  header_addr: {:p},
+  body_addr: {:p}
+}}",
+      self.cell().get_header(),
+      std::any::type_name::<HeapLayout<T>>(),
+      self.0,
+      unsafe { self.0.offset(Cell::SIZE as isize) }
+    );
+  }
+}
+
+impl<T: Copy> std::fmt::Display for HeapLayout<T> {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    return write!(f, "{:?}", self);
   }
 }
 
 pub trait HeapObject: Into<Repr> + Copy {
   fn raw_heap(&self) -> Addr;
-  fn size(&self) -> usize;
+  fn size(&self) -> usize {
+    return self.cell().get_header().size();
+  }
+
   fn from_ptr(heap: *mut Byte) -> Self;
 
   fn shape(&self) -> Shape {
-    let header = self.raw_heap() as *mut Header;
-    return unsafe { (*header).shape() };
+    return self.cell().get_header().shape();
   }
 
   fn cell(&self) -> Cell {
-    return Cell { heap: self.raw_heap() };
+    return Cell::wrap(self.raw_heap());
   }
 
   fn out(&mut self) -> Addr;
@@ -204,27 +314,22 @@ pub trait HeapObject: Into<Repr> + Copy {
 
 macro_rules! _priv_impl_heap_object_body {
   () => {
-    fn size(&self) -> usize {
-      return self.byte_length();
-    }
-
     fn from_ptr(heap: *mut Byte) -> Self {
       return Self::wrap(heap);
     }
 
     fn raw_heap(&self) -> Addr {
-      return self.heap;
+      return self.0.as_addr();
     }
 
     fn out(&mut self) -> Addr {
-      let ret = self.heap;
-      self.heap = std::ptr::null_mut();
+      let ret = self.0.as_addr();
+      self.0.out();
       return ret;
     }
   };
 }
 
-#[macro_export]
 macro_rules! impl_heap_object {
   ($name:ident) => {
     impl HeapObject for $name {
@@ -236,52 +341,46 @@ macro_rules! impl_heap_object {
   };
 }
 
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct Cell {
-  heap: Addr,
-}
-
-pub fn field_addr(this: Addr, offset: usize) -> Addr {
-  unsafe { this.offset(offset as isize) }
-}
+#[repr(transparent)]
+#[derive(Copy, Clone, Debug)]
+pub struct Cell(BareHeapLayout<Header>);
 
 impl Cell {
   pub const TYPE: Shape = Shape::cell();
   pub const SIZE: usize = size_of::<Header>();
-  pub fn new(context: &mut impl Context, size: usize, shape: Shape) -> Cell {
+  pub fn init_heap(context: &mut impl Context, size: usize, shape: Shape) -> Addr {
     let heap = context.allocate(size);
-    return Cell::new_into_heap(heap, size, shape);
+    return Cell::init_into_heap(heap, size, shape);
   }
 
-  pub fn persist(context: &mut impl Context, size: usize, shape: Shape) -> Cell {
+  pub fn init_persistent_heap(context: &mut impl Context, size: usize, shape: Shape) -> Addr {
     let heap = context.allocate_persist(size);
-    return Cell::new_into_heap(heap, size, shape);
+    return Cell::init_into_heap(heap, size, shape);
   }
 
-  pub fn new_into_heap(heap: *mut Byte, size: usize, shape: Shape) -> Cell {
-    let header = heap as *mut Header;
-    unsafe {
-      (*header).set_size(size);
-      (*header).set_shape(shape);
-      return Cell { heap };
-    }
+  pub fn init_into_heap(heap: Addr, size: usize, shape: Shape) -> Addr {
+    let mut layout = BareHeapLayout::<Header>::new_into_heap(heap);
+    let header = layout.as_ref_mut();
+    header.init();
+    header.set_size(size);
+    header.set_shape(shape);
+    return heap;
   }
 
-  pub fn get_header(&self) -> &mut Header {
-    return unsafe { &mut *(self.heap as *mut Header) };
+  pub fn get_header_mut(&mut self) -> &mut Header {
+    return self.0.as_ref_mut();
+  }
+
+  pub fn get_header(&self) -> &Header {
+    return self.0.as_ref();
   }
 
   pub fn get_body(&self) -> Addr {
-    return field_addr(self.heap, Cell::SIZE);
-  }
-
-  fn byte_length(&self) -> usize {
-    return Cell::SIZE;
+    return unsafe { self.0.as_addr().offset(Cell::SIZE as isize) };
   }
 
   fn wrap(heap: Addr) -> Cell {
-    return Cell { heap };
+    return Cell(BareHeapLayout::<Header>::new_into_heap(heap));
   }
 }
 

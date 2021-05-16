@@ -5,9 +5,6 @@ extern crate bitflags;
 extern crate static_assertions;
 
 #[macro_use]
-extern crate proc_macro;
-
-#[macro_use]
 pub mod macros;
 
 pub mod context;

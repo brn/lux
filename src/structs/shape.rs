@@ -3,6 +3,7 @@ use num_traits::FromPrimitive;
 
 #[derive(Debug, PartialEq, FromPrimitive)]
 enum ShapeTag {
+  Invalid = 0,
   Cell,
   Undefined,
   Null,
@@ -15,6 +16,8 @@ enum ShapeTag {
   InternalArray,
   StringPiece,
   FixedU16Array,
+  StringRope,
+  __Sentinel,
 }
 assert_eq_size!(ShapeTag, u8);
 
@@ -31,10 +34,14 @@ impl std::cmp::PartialEq for Shape {
 
 impl Shape {
   pub fn from_tag(tag: u8) -> Shape {
-    debug_assert!(tag <= ShapeTag::Array as u8);
+    debug_assert!(tag <= ShapeTag::__Sentinel as u8);
     return Shape {
       tag: ShapeTag::from_u8(tag).unwrap(),
     };
+  }
+
+  pub const fn invalid() -> Shape {
+    return Shape { tag: ShapeTag::Invalid };
   }
 
   pub const fn cell() -> Shape {
@@ -84,6 +91,12 @@ impl Shape {
   pub const fn string_piece() -> Shape {
     return Shape {
       tag: ShapeTag::StringPiece,
+    };
+  }
+
+  pub const fn string_rope() -> Shape {
+    return Shape {
+      tag: ShapeTag::StringRope,
     };
   }
 
