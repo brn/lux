@@ -206,6 +206,10 @@ impl<T: Copy + From<Addr> + Into<Addr>> BareHeapLayout<T> {
     return T::from(self.0);
   }
 
+  pub fn is_null(&self) -> bool {
+    return self.0.is_null();
+  }
+
   pub unsafe fn ref_unchecked(&self) -> &T {
     return &*(self.0 as *mut T);
   }

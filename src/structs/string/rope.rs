@@ -10,6 +10,7 @@ use std::ops::{Index, IndexMut};
 #[repr(C)]
 #[derive(Copy, Clone)]
 struct StringPieceBody {
+  parent: BareHeapLayout<StringPiece>,
   length: usize,
   offset: usize,
   data: BareHeapLayout<FixedU16CodePointArray>,
@@ -54,13 +55,23 @@ impl StringPiece {
   }
 
   pub fn split(&mut self, context: &mut impl Context, index: usize) {
-    let length = self.length();
-    let str = self.str();
-    let body = self.0.as_ref_mut();
-    body.left.set(&StringPiece::new_with_offset(context, str, 0, index));
-    body
-      .right
-      .set(&StringPiece::new_with_offset(context, str, index, length - index));
+    {
+      let length = self.length();
+      let str = self.str();
+      let body = self.0.as_ref_mut();
+      let left = StringPiece::new_with_offset(context, str, 0, index);
+      let right = StringPiece::new_with_offset(context, str, index, length - index);
+      body.left.set(&left);
+      body.right.set(&right);
+      body.length = left.length();
+    }
+    let mut left = self.0.as_ref_mut().left.handle();
+    let mut right = self.0.as_ref_mut().right.handle();
+    left.set_parent(*self);
+    right.set_parent(*self);
+    if !self.0.as_ref().parent.is_null() {
+      self.parent().update_length_rec(left.length() + right.length());
+    }
   }
 
   #[inline]
@@ -96,9 +107,35 @@ impl StringPiece {
     return self.0.as_ref().data.handle().data();
   }
 
+  #[inline]
+  fn set_parent(&mut self, parent: StringPiece) {
+    self.0.as_ref_mut().parent.set(&parent);
+  }
+
+  #[inline]
+  fn parent(&self) -> StringPiece {
+    return self.0.as_ref().parent.handle();
+  }
+
+  #[inline]
+  fn update_length_rec(&mut self, length: usize) {
+    self.0.as_ref_mut().length = length;
+    if !self.0.as_ref().parent.is_null() {
+      let mut length = 0;
+      if !self.0.as_ref_mut().left.is_null() {
+        length += self.0.as_ref_mut().left.handle().length();
+      }
+      if !self.0.as_ref_mut().right.is_null() {
+        length += self.0.as_ref_mut().right.handle().length();
+      }
+      self.parent().update_length_rec(length);
+    }
+  }
+
   fn init(context: &mut impl Context, str: FixedU16CodePointArray) -> HeapLayout<StringPieceBody> {
     let mut layout = HeapLayout::<StringPieceBody>::new(context, StringPiece::SIZE, Shape::string_piece());
     let body = layout.as_ref_mut();
+    body.parent.set_null();
     body.length = str.length();
     body.data.set(&str);
     body.left.set_null();
