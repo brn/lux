@@ -12,6 +12,10 @@ impl BitNum for u32 {}
 impl BitNum for u64 {}
 
 pub trait BitOperator<BitNum> {
+  fn bits_ref(&self) -> &BitNum;
+
+  fn bits_ref_mut(&mut self) -> &mut BitNum;
+
   fn bits(&self) -> BitNum;
 
   fn assign(&mut self, bit_value: BitNum);
@@ -35,6 +39,7 @@ pub trait BitOperator<BitNum> {
   fn right_most_empty_slot(&self) -> u32;
 }
 
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Bitset<BitType: BitNum> {
   bit_field: BitType,
@@ -43,6 +48,15 @@ pub struct Bitset<BitType: BitNum> {
 macro_rules! impl_bit_operator_for_usize {
   ($T:ty, $mod:ident) => {
     impl BitOperator<$T> for $mod<$T> {
+      #[inline]
+      fn bits_ref(&self) -> &$T {
+        return &self.bit_field;
+      }
+
+      fn bits_ref_mut(&mut self) -> &mut $T {
+        return &mut self.bit_field;
+      }
+
       #[inline]
       fn bits(&self) -> $T {
         return self.bit_field;
@@ -114,10 +128,11 @@ macro_rules! impl_bit_operator_for_usize {
   };
 }
 
+#[repr(C)]
 pub struct MaskedBitset<BitType: BitNum> {
+  bit_field: BitType,
   shift: usize,
   masked_bits: BitType,
-  bit_field: BitType,
 }
 
 impl<BitType: BitNum> MaskedBitset<BitType> {
@@ -179,6 +194,23 @@ impl<BitType: BitNum> Bitset<BitType> {
     );
   }
 }
+
+macro_rules! impl_from_for_usize {
+  ($name:tt) => {
+    impl From<$name> for Bitset<$name> {
+      fn from(a: $name) -> Bitset<$name> {
+        let mut bs = Bitset::<$name>::new();
+        bs.bit_field = a;
+        return bs;
+      }
+    }
+  };
+}
+
+impl_from_for_usize!(u8);
+impl_from_for_usize!(u16);
+impl_from_for_usize!(u32);
+impl_from_for_usize!(u64);
 
 impl_bit_operator_for_usize!(u8, Bitset);
 impl_bit_operator_for_usize!(u16, Bitset);

@@ -44,7 +44,7 @@ macro_rules! impl_repr_convertion {
       }
     }
   };
-  ($name:ty) => {
+  (<bare>, $name:ty) => {
     fn from(obj: $name) -> crate::structs::Repr {
       return crate::structs::Repr::new(obj.raw_heap());
     }

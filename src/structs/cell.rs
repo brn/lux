@@ -101,6 +101,18 @@ impl Header {
   }
 }
 
+impl From<Addr> for Header {
+  fn from(a: Addr) -> Header {
+    unreachable!();
+  }
+}
+
+impl Into<Addr> for Header {
+  fn into(self) -> Addr {
+    unreachable!();
+  }
+}
+
 impl std::fmt::Debug for Header {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     return write!(
@@ -175,38 +187,46 @@ mod header_tests {
 
 #[derive(Copy, Clone, Debug)]
 #[repr(transparent)]
-pub struct BareHeapLayout<T: Copy>(Addr, PhantomData<T>);
+pub struct BareHeapLayout<T: Copy + From<Addr>>(Addr, PhantomData<T>);
 
-impl<T: Copy> BareHeapLayout<T> {
+impl<T: Copy + From<Addr> + Into<Addr>> BareHeapLayout<T> {
   pub fn new(context: &mut impl Context, size: usize) -> BareHeapLayout<T> {
     return BareHeapLayout::<T>(context.allocate(size), PhantomData);
-  }
-
-  pub fn new_into_heap(heap: Addr) -> BareHeapLayout<T> {
-    return BareHeapLayout::<T>(heap, PhantomData);
   }
 
   pub fn persist(context: &mut impl Context, size: usize) -> BareHeapLayout<T> {
     return BareHeapLayout::<T>(context.allocate_persist(size), PhantomData);
   }
 
-  pub fn as_ref(&self) -> &T {
-    return unsafe { std::mem::transmute::<Addr, &T>(self.0) };
+  pub fn wrap(heap: Addr) -> BareHeapLayout<T> {
+    return BareHeapLayout::<T>(heap, PhantomData);
   }
 
-  pub fn as_ref_mut(&mut self) -> &mut T {
-    return unsafe { std::mem::transmute::<Addr, &mut T>(self.0) };
+  pub fn handle(&self) -> T {
+    return T::from(self.0);
+  }
+
+  pub unsafe fn ref_unchecked(&self) -> &T {
+    return &*(self.0 as *mut T);
+  }
+
+  pub unsafe fn ref_mut_unchecked(&mut self) -> &mut T {
+    return &mut *(self.0 as *mut T);
   }
 
   pub fn as_addr(&self) -> Addr {
     return self.0;
   }
 
-  pub fn set(&mut self, data: Addr) {
+  pub fn set(&mut self, data: &T) {
+    self.0 = (*data).into();
+  }
+
+  pub fn set_ptr(&mut self, data: Addr) {
     self.0 = data;
   }
 
-  pub fn out(&mut self) {
+  pub fn set_null(&mut self) {
     self.0 = std::ptr::null_mut();
   }
 }
@@ -258,11 +278,11 @@ impl<T: Copy> HeapLayout<T> {
   }
 
   pub fn size(&self) -> usize {
-    return Cell::wrap(self.0).get_header().size();
+    return self.cell().get_header().size();
   }
 
   pub fn cell(&self) -> Cell {
-    return Cell::wrap(self.0);
+    return Cell::from(self.0);
   }
 }
 
@@ -289,23 +309,19 @@ impl<T: Copy> std::fmt::Display for HeapLayout<T> {
   }
 }
 
-pub trait HeapObject: Into<Repr> + Copy {
+pub trait HeapObject: Into<Repr> + Copy + From<Addr> {
   fn raw_heap(&self) -> Addr;
   fn size(&self) -> usize {
     return self.cell().get_header().size();
   }
-
-  fn from_ptr(heap: *mut Byte) -> Self;
 
   fn shape(&self) -> Shape {
     return self.cell().get_header().shape();
   }
 
   fn cell(&self) -> Cell {
-    return Cell::wrap(self.raw_heap());
+    return Cell::from(self.raw_heap());
   }
-
-  fn out(&mut self) -> Addr;
 
   fn is_out(&self) -> bool {
     return self.raw_heap() == std::ptr::null_mut();
@@ -314,18 +330,8 @@ pub trait HeapObject: Into<Repr> + Copy {
 
 macro_rules! _priv_impl_heap_object_body {
   () => {
-    fn from_ptr(heap: *mut Byte) -> Self {
-      return Self::wrap(heap);
-    }
-
     fn raw_heap(&self) -> Addr {
       return self.0.as_addr();
-    }
-
-    fn out(&mut self) -> Addr {
-      let ret = self.0.as_addr();
-      self.0.out();
-      return ret;
     }
   };
 }
@@ -336,8 +342,43 @@ macro_rules! impl_heap_object {
       _priv_impl_heap_object_body!();
     }
   };
-  () => {
+  (<bare>) => {
     _priv_impl_heap_object_body!();
+  };
+}
+
+macro_rules! impl_from_addr {
+  ($name:tt, $layout:tt) => {
+    impl From<Addr> for $name {
+      fn from(a: Addr) -> $name {
+        return $name($layout::wrap(a));
+      }
+    }
+  };
+  (<bare>, $layout:tt,$($args:expr),*) => {
+    fn from(a: Addr) -> Self {
+      return Self($layout::wrap(a), $($args ,)*);
+    }
+  };
+  (<bare>, $layout:tt) => {
+    fn from(a: Addr) -> Self {
+      return Self($layout::wrap(a));
+    }
+  }
+}
+
+macro_rules! impl_into_addr {
+  ($name:tt) => {
+    impl Into<Addr> for $name {
+      fn into(self) -> Addr {
+        return self.0.as_addr();
+      }
+    }
+  };
+  (<bare>) => {
+    fn into(self) -> Addr {
+      return self.0.as_addr();
+    }
   };
 }
 
@@ -359,30 +400,34 @@ impl Cell {
   }
 
   pub fn init_into_heap(heap: Addr, size: usize, shape: Shape) -> Addr {
-    let mut layout = BareHeapLayout::<Header>::new_into_heap(heap);
-    let header = layout.as_ref_mut();
+    let mut layout = BareHeapLayout::<Header>::wrap(heap);
+    let header = unsafe { layout.ref_mut_unchecked() };
     header.init();
     header.set_size(size);
     header.set_shape(shape);
     return heap;
   }
 
-  pub fn get_header_mut(&mut self) -> &mut Header {
-    return self.0.as_ref_mut();
+  pub fn get_header(&self) -> &Header {
+    return unsafe { self.0.ref_unchecked() };
   }
 
-  pub fn get_header(&self) -> &Header {
-    return self.0.as_ref();
+  pub fn get_header_mut(&mut self) -> &mut Header {
+    return unsafe { self.0.ref_mut_unchecked() };
   }
 
   pub fn get_body(&self) -> Addr {
     return unsafe { self.0.as_addr().offset(Cell::SIZE as isize) };
   }
-
-  fn wrap(heap: Addr) -> Cell {
-    return Cell(BareHeapLayout::<Header>::new_into_heap(heap));
-  }
 }
 
-impl_heap_object!(Cell);
-impl_repr_convertion!(Cell);
+macro_rules! impl_object {
+  ($name:ident, $layout:ident) => {
+    impl_from_addr!($name, $layout);
+    impl_into_addr!($name);
+    impl_heap_object!($name);
+    impl_repr_convertion!($name);
+  };
+}
+
+impl_object!(Cell, BareHeapLayout);

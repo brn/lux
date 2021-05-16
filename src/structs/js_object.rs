@@ -22,6 +22,7 @@ pub mod testing {
   #[repr(transparent)]
   #[derive(Copy, Clone)]
   pub struct TestObject(HeapLayout<TestObjectBody>);
+  impl_from_addr!(TestObject, HeapLayout);
   impl_heap_object!(TestObject);
   impl_repr_convertion!(TestObject);
 
@@ -70,7 +71,7 @@ enum WellKnownSymbolType {
 #[repr(transparent)]
 #[derive(Copy, Clone)]
 pub struct JsSymbol(HeapLayout<VoidHeapBody>);
-
+impl_from_addr!(JsSymbol, HeapLayout);
 impl_heap_object!(JsSymbol);
 impl_repr_convertion!(JsSymbol);
 

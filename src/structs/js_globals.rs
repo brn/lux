@@ -9,8 +9,7 @@ use std::mem::size_of;
 #[repr(transparent)]
 #[derive(Copy, Clone)]
 pub struct JsUndefined(HeapLayout<VoidHeapBody>);
-impl_heap_object!(JsUndefined);
-impl_repr_convertion!(JsUndefined);
+impl_object!(JsUndefined, HeapLayout);
 
 impl JsUndefined {
   pub const TYPE: Shape = Shape::undefined();
@@ -28,8 +27,7 @@ impl JsUndefined {
 #[repr(transparent)]
 #[derive(Copy, Clone)]
 pub struct JsNull(HeapLayout<VoidHeapBody>);
-impl_heap_object!(JsNull);
-impl_repr_convertion!(JsNull);
+impl_object!(JsNull, HeapLayout);
 
 impl JsNull {
   pub const TYPE: Shape = Shape::null();
@@ -53,8 +51,7 @@ struct JsBooleanBody {
 #[repr(transparent)]
 #[derive(Copy, Clone)]
 pub struct JsBoolean(HeapLayout<JsBooleanBody>);
-impl_heap_object!(JsBoolean);
-impl_repr_convertion!(JsBoolean);
+impl_object!(JsBoolean, HeapLayout);
 
 impl JsBoolean {
   pub const TYPE: Shape = Shape::boolean();

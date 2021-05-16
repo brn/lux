@@ -28,19 +28,19 @@ impl LuxContext {
   }
 
   pub fn js_true(&self) -> JsBoolean {
-    return JsBoolean::from_ptr(self.js_true);
+    return JsBoolean::from(self.js_true);
   }
 
   pub fn js_false(&self) -> JsBoolean {
-    return JsBoolean::from_ptr(self.js_false);
+    return JsBoolean::from(self.js_false);
   }
 
   pub fn js_null(&self) -> JsNull {
-    return JsNull::from_ptr(self.js_null);
+    return JsNull::from(self.js_null);
   }
 
   pub fn js_undefined(&self) -> JsUndefined {
-    return JsUndefined::from_ptr(self.js_undefined);
+    return JsUndefined::from(self.js_undefined);
   }
 }
 

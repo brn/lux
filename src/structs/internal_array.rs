@@ -20,10 +20,16 @@ struct InternalArrayBody {
 pub struct InternalArray<T: Copy>(HeapLayout<InternalArrayBody>, PhantomData<T>);
 
 impl<T: Copy> HeapObject for InternalArray<T> {
-  impl_heap_object!();
+  impl_heap_object!(<bare>);
 }
 impl<T: Copy> From<InternalArray<T>> for Repr {
-  impl_repr_convertion!(InternalArray<T>);
+  impl_repr_convertion!(<bare>, InternalArray<T>);
+}
+impl<T: Copy> From<Addr> for InternalArray<T> {
+  impl_from_addr!(<bare>, HeapLayout, PhantomData);
+}
+impl<T: Copy> Into<Addr> for InternalArray<T> {
+  impl_into_addr!(<bare>);
 }
 
 impl<T: Copy> Index<usize> for InternalArray<T> {

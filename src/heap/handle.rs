@@ -15,11 +15,6 @@ impl<T: Into<Repr> + HeapObject> GcHandle<T> {
       _phantom_type: PhantomData,
     };
   }
-
-  pub fn out(this: &mut Self) -> T {
-    let ptr = this.value.out();
-    return T::from_ptr(ptr);
-  }
 }
 
 impl<T: Into<Repr> + HeapObject> Deref for GcHandle<T> {
@@ -36,9 +31,7 @@ impl<T: Into<Repr> + HeapObject> DerefMut for GcHandle<T> {
 }
 
 impl<'a, T: Into<Repr> + HeapObject> Drop for GcHandle<T> {
-  fn drop(&mut self) {
-    if !self.value.is_out() {}
-  }
+  fn drop(&mut self) {}
 }
 
 #[cfg(test)]

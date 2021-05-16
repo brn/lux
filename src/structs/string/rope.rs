@@ -12,16 +12,15 @@ use std::ops::{Index, IndexMut};
 struct StringPieceBody {
   length: usize,
   offset: usize,
-  data: Addr,
-  left: Addr,
-  right: Addr,
+  data: BareHeapLayout<FixedU16CodePointArray>,
+  left: BareHeapLayout<StringPiece>,
+  right: BareHeapLayout<StringPiece>,
 }
 
 #[repr(transparent)]
 #[derive(Copy, Clone)]
 struct StringPiece(HeapLayout<StringPieceBody>);
-impl_heap_object!(StringPiece);
-impl_repr_convertion!(StringPiece);
+impl_object!(StringPiece, HeapLayout);
 
 impl StringPiece {
   const SIZE: usize = Cell::SIZE + size_of::<StringPieceBody>();
@@ -58,25 +57,27 @@ impl StringPiece {
     let length = self.length();
     let str = self.str();
     let body = self.0.as_ref_mut();
-    body.left = StringPiece::new_with_offset(context, str, 0, index).raw_heap();
-    body.right = StringPiece::new_with_offset(context, str, index, length - index).raw_heap();
+    body.left.set(&StringPiece::new_with_offset(context, str, 0, index));
+    body
+      .right
+      .set(&StringPiece::new_with_offset(context, str, index, length - index));
   }
 
   #[inline]
   pub fn left(&self) -> Option<StringPiece> {
-    return if self.0.as_ref().left.is_null() {
+    return if self.0.as_ref().left.as_addr().is_null() {
       None
     } else {
-      Some(StringPiece::wrap(self.0.as_ref().left))
+      Some(self.0.as_ref().left.handle())
     };
   }
 
   #[inline]
   pub fn right(&self) -> Option<StringPiece> {
-    return if self.0.as_ref().right.is_null() {
+    return if self.0.as_ref().right.as_addr().is_null() {
       None
     } else {
-      Some(StringPiece::wrap(self.0.as_ref().right))
+      Some(self.0.as_ref().right.handle())
     };
   }
 
@@ -87,21 +88,21 @@ impl StringPiece {
 
   #[inline]
   pub fn str(&self) -> FixedU16CodePointArray {
-    return FixedU16CodePointArray::wrap(self.0.as_ref().data);
+    return self.0.as_ref().data.handle();
   }
 
   #[inline]
   fn str_ptr(&self) -> *mut u16 {
-    return FixedU16CodePointArray::wrap(self.0.as_ref().data).data();
+    return self.0.as_ref().data.handle().data();
   }
 
   fn init(context: &mut impl Context, str: FixedU16CodePointArray) -> HeapLayout<StringPieceBody> {
     let mut layout = HeapLayout::<StringPieceBody>::new(context, StringPiece::SIZE, Shape::string_piece());
     let body = layout.as_ref_mut();
     body.length = str.length();
-    body.data = str.raw_heap();
-    body.left = std::ptr::null_mut();
-    body.right = std::ptr::null_mut();
+    body.data.set(&str);
+    body.left.set_null();
+    body.right.set_null();
     return layout;
   }
 }
@@ -189,8 +190,7 @@ struct StringRopeBody {
 #[repr(transparent)]
 #[derive(Copy, Clone)]
 pub struct StringRope(HeapLayout<StringRopeBody>);
-impl_heap_object!(StringRope);
-impl_repr_convertion!(StringRope);
+impl_object!(StringRope, HeapLayout);
 
 impl StringRope {
   const SIZE: usize = Cell::SIZE + size_of::<StringRopeBody>();
