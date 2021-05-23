@@ -1,10 +1,12 @@
 use super::repr::*;
 use super::shape::Shape;
-use crate::context::Context;
+use super::string::JsString;
+use crate::context::AllocationOnlyContext;
 use crate::def::*;
 use crate::utility::*;
 use std::marker::PhantomData;
 use std::mem::size_of;
+use std::ops::{Deref, DerefMut};
 
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -190,16 +192,20 @@ mod header_tests {
 pub struct BareHeapLayout<T: Copy + From<Addr>>(Addr, PhantomData<T>);
 
 impl<T: Copy + From<Addr> + Into<Addr>> BareHeapLayout<T> {
-  pub fn new(context: &mut impl Context, size: usize) -> BareHeapLayout<T> {
+  pub fn new(context: &mut impl AllocationOnlyContext, size: usize) -> BareHeapLayout<T> {
     return BareHeapLayout::<T>(context.allocate(size), PhantomData);
   }
 
-  pub fn persist(context: &mut impl Context, size: usize) -> BareHeapLayout<T> {
+  pub fn persist(context: &mut impl AllocationOnlyContext, size: usize) -> BareHeapLayout<T> {
     return BareHeapLayout::<T>(context.allocate_persist(size), PhantomData);
   }
 
   pub fn wrap(heap: Addr) -> BareHeapLayout<T> {
     return BareHeapLayout::<T>(heap, PhantomData);
+  }
+
+  pub fn null() -> BareHeapLayout<T> {
+    return BareHeapLayout::<T>(std::ptr::null_mut(), PhantomData);
   }
 
   pub fn handle(&self) -> T {
@@ -222,8 +228,8 @@ impl<T: Copy + From<Addr> + Into<Addr>> BareHeapLayout<T> {
     return self.0;
   }
 
-  pub fn set(&mut self, data: &T) {
-    self.0 = (*data).into();
+  pub fn set(&mut self, data: T) {
+    self.0 = data.into();
   }
 
   pub fn set_ptr(&mut self, data: Addr) {
@@ -235,6 +241,12 @@ impl<T: Copy + From<Addr> + Into<Addr>> BareHeapLayout<T> {
   }
 }
 
+impl<T: Copy + From<Addr> + Into<Addr>> From<Addr> for BareHeapLayout<T> {
+  fn from(a: Addr) -> BareHeapLayout<T> {
+    return BareHeapLayout::<T>(a, PhantomData);
+  }
+}
+
 #[derive(Copy, Clone)]
 #[repr(transparent)]
 pub struct HeapLayout<T: Copy>(Addr, PhantomData<T>);
@@ -243,7 +255,7 @@ pub struct HeapLayout<T: Copy>(Addr, PhantomData<T>);
 pub struct VoidHeapBody {}
 
 impl<T: Copy> HeapLayout<T> {
-  pub fn new(context: &mut impl Context, size: usize, shape: Shape) -> HeapLayout<T> {
+  pub fn new(context: &mut impl AllocationOnlyContext, size: usize, shape: Shape) -> HeapLayout<T> {
     return HeapLayout::<T>(Cell::init_heap(context, size, shape), PhantomData);
   }
 
@@ -251,12 +263,20 @@ impl<T: Copy> HeapLayout<T> {
     return HeapLayout::<T>(Cell::init_into_heap(heap, size, shape), PhantomData);
   }
 
-  pub fn persist(context: &mut impl Context, size: usize, shape: Shape) -> HeapLayout<T> {
+  pub fn persist(context: &mut impl AllocationOnlyContext, size: usize, shape: Shape) -> HeapLayout<T> {
     return HeapLayout::<T>(Cell::init_persistent_heap(context, size, shape), PhantomData);
   }
 
   pub fn wrap(heap: Addr) -> HeapLayout<T> {
     return HeapLayout::<T>(heap, PhantomData);
+  }
+
+  pub fn null() -> HeapLayout<T> {
+    return HeapLayout::<T>(std::ptr::null_mut(), PhantomData);
+  }
+
+  pub fn is_null(&self) -> bool {
+    return self.0.is_null();
   }
 
   pub fn as_ref(&self) -> &T {
@@ -275,18 +295,35 @@ impl<T: Copy> HeapLayout<T> {
     self.0 = std::ptr::null_mut();
   }
 
-  pub fn set(&self, value: &T) {
+  pub fn set(this: &HeapLayout<T>, value: &T) {
     unsafe {
-      *(self.0.offset(Cell::SIZE as isize) as *mut T) = *value;
+      *(this.0.offset(Cell::SIZE as isize) as *mut T) = *value;
     };
   }
 
-  pub fn size(&self) -> usize {
-    return self.cell().get_header().size();
+  pub fn size(this: &HeapLayout<T>) -> usize {
+    return this.cell().get_header().size();
   }
 
   pub fn cell(&self) -> Cell {
     return Cell::from(self.0);
+  }
+
+  pub fn shape(&self) -> Shape {
+    return self.cell().get_header().shape();
+  }
+}
+
+impl<T: Copy> Deref for HeapLayout<T> {
+  type Target = T;
+  fn deref(&self) -> &T {
+    return self.as_ref();
+  }
+}
+
+impl<T: Copy> DerefMut for HeapLayout<T> {
+  fn deref_mut(&mut self) -> &mut T {
+    return self.as_ref_mut();
   }
 }
 
@@ -315,6 +352,10 @@ impl<T: Copy> std::fmt::Display for HeapLayout<T> {
 
 pub trait HeapObject: Into<Repr> + Copy + From<Addr> {
   fn raw_heap(&self) -> Addr;
+  fn is_js_value(&self) -> bool {
+    return Shape::is_js_value(self.cell().get_header().shape());
+  }
+
   fn size(&self) -> usize {
     return self.cell().get_header().size();
   }
@@ -334,7 +375,7 @@ pub trait HeapObject: Into<Repr> + Copy + From<Addr> {
 
 macro_rules! _priv_impl_heap_object_body {
   () => {
-    fn raw_heap(&self) -> Addr {
+    fn raw_heap(&self) -> crate::def::Addr {
       return self.0.as_addr();
     }
   };
@@ -342,46 +383,84 @@ macro_rules! _priv_impl_heap_object_body {
 
 macro_rules! impl_heap_object {
   ($name:ident) => {
-    impl HeapObject for $name {
+    impl crate::structs::HeapObject for $name {
       _priv_impl_heap_object_body!();
     }
   };
-  (<bare>) => {
-    _priv_impl_heap_object_body!();
+  ($name:ident<$($type:tt : $bound:ident),+$(,)?>) => {
+    impl<$($type : $bound),*> HeapObject for $name<$($type,)*> {
+      _priv_impl_heap_object_body!();
+    }
   };
 }
 
 macro_rules! impl_from_addr {
   ($name:tt, $layout:tt) => {
-    impl From<Addr> for $name {
-      fn from(a: Addr) -> $name {
+    impl From<crate::def::Addr> for $name {
+      fn from(a: crate::def::Addr) -> $name {
         return $name($layout::wrap(a));
       }
     }
   };
-  (<bare>, $layout:tt,$($args:expr),*) => {
-    fn from(a: Addr) -> Self {
-      return Self($layout::wrap(a), $($args ,)*);
+  ($name:ident<$($type:tt : $bound:ident),+$(,)?>, $layout:tt, $($args:expr),+) => {
+    impl<$($type : $bound),*> From<crate::def::Addr> for $name<$($type,)*> {
+      fn from(a: crate::def::Addr) -> Self {
+        return Self($layout::wrap(a), $($args ,)*);
+      }
     }
   };
-  (<bare>, $layout:tt) => {
-    fn from(a: Addr) -> Self {
-      return Self($layout::wrap(a));
+  ($name:ident<$($type:tt : $bound:ident),+$(,)?>, $layout:tt) => {
+    impl<$($type : $bound),*> From<crate::def::Addr> for $name<$($type,)*> {
+      fn from(a: crate::def::Addr) -> Self {
+        return Self($layout::wrap(a));
+      }
     }
   }
 }
 
 macro_rules! impl_into_addr {
   ($name:tt) => {
-    impl Into<Addr> for $name {
-      fn into(self) -> Addr {
+    impl Into<crate::def::Addr> for $name {
+      fn into(self) -> crate::def::Addr {
         return self.0.as_addr();
       }
     }
   };
-  (<bare>) => {
-    fn into(self) -> Addr {
-      return self.0.as_addr();
+  ($name:ident<$($type:tt : $bound:ident),+$(,)?>) => {
+    impl<$($type: $bound),*> Into<crate::def::Addr> for $name<$($type,)*> {
+      fn into(self) -> crate::def::Addr {
+        return self.0.as_addr();
+      }
+    }
+  };
+}
+
+macro_rules! impl_deref_heap {
+  ($name:tt, $layout:ident, $body:ty) => {
+    impl std::ops::Deref for $name {
+      type Target = $layout<$body>;
+      fn deref(&self) -> &$layout<$body> {
+        return &self.0;
+      }
+    }
+
+    impl std::ops::DerefMut for $name {
+      fn deref_mut(&mut self) -> &mut $layout<$body> {
+        return &mut self.0;
+      }
+    }
+  };
+  ($name:ident<$($type:tt: $bound:ident),+$(,)?>, $layout:ident, $body:ty) => {
+    impl<$($type : $bound),*> std::ops::Deref for $name<$($type,)+> {
+      type Target = $layout<$body>;
+      fn deref(&self) -> &$layout<$body> {
+        return &self.0;
+      }
+    }
+    impl<$($type : $bound,)*> std::ops::DerefMut for $name<$($type,)+> {
+      fn deref_mut(&mut self) -> &mut $layout<$body> {
+        return &mut self.0;
+      }
     }
   };
 }
@@ -393,12 +472,12 @@ pub struct Cell(BareHeapLayout<Header>);
 impl Cell {
   pub const TYPE: Shape = Shape::cell();
   pub const SIZE: usize = size_of::<Header>();
-  pub fn init_heap(context: &mut impl Context, size: usize, shape: Shape) -> Addr {
+  pub fn init_heap(context: &mut impl AllocationOnlyContext, size: usize, shape: Shape) -> Addr {
     let heap = context.allocate(size);
     return Cell::init_into_heap(heap, size, shape);
   }
 
-  pub fn init_persistent_heap(context: &mut impl Context, size: usize, shape: Shape) -> Addr {
+  pub fn init_persistent_heap(context: &mut impl AllocationOnlyContext, size: usize, shape: Shape) -> Addr {
     let heap = context.allocate_persist(size);
     return Cell::init_into_heap(heap, size, shape);
   }
@@ -425,13 +504,37 @@ impl Cell {
   }
 }
 
-macro_rules! impl_object {
-  ($name:ident, $layout:ident) => {
+macro_rules! impl_bare_object {
+  ($name:ident, $layout:ident<$body:ty>) => {
     impl_from_addr!($name, $layout);
     impl_into_addr!($name);
     impl_heap_object!($name);
-    impl_repr_convertion!($name);
+    impl_repr_convertion!($name, $layout);
   };
 }
 
-impl_object!(Cell, BareHeapLayout);
+macro_rules! impl_object {
+  ($name:ident, $layout:ident<$body:ty>) => {
+    impl_from_addr!($name, $layout);
+    impl_into_addr!($name);
+    impl_heap_object!($name);
+    impl_repr_convertion!($name, $layout);
+    impl_deref_heap!($name, $layout, $body);
+  };
+  ($name:ident<$($type:tt : $bound:ident),+$(,)?>, $layout:ident<$body:ty>) => {
+    impl_from_addr!($name<$($type: $bound),+>, $layout);
+    impl_into_addr!($name<$($type: $bound),+>);
+    impl_heap_object!($name<$($type: $bound),+>);
+    impl_repr_convertion!($name<$($type: $bound),+>,$layout);
+    impl_deref_heap!($name<$($type: $bound),+>, $layout, $body);
+  };
+  ($name:ident<$($type:tt : $bound:ident),+$(,)?>, $layout:ident<$body:ty>, $($args:expr),+) => {
+    impl_from_addr!($name<$($type: $bound),+>, $layout, $($args),*);
+    impl_into_addr!($name<$($type: $bound),+>);
+    impl_heap_object!($name<$($type: $bound),+>);
+    impl_repr_convertion!($name<$($type: $bound),+>,$layout, $($args),*);
+    impl_deref_heap!($name<$($type: $bound),+>, $layout, $body);
+  };
+}
+
+impl_bare_object!(Cell, BareHeapLayout<Header>);

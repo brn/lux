@@ -13,6 +13,7 @@ pub struct Heap {
   first: CopyingHeap,
   second: MarkSweep,
 }
+unsafe impl Sync for Heap {}
 
 impl Heap {
   pub fn new() -> Heap {

@@ -4,10 +4,11 @@ extern crate bitflags;
 #[macro_use]
 extern crate static_assertions;
 
+extern crate xxhash_rust;
+
 #[macro_use]
 pub mod macros;
 
-pub mod context;
 pub mod def;
 pub mod heap;
 
@@ -16,3 +17,7 @@ pub mod utility;
 
 #[macro_use]
 pub mod structs;
+
+pub mod unicode;
+#[macro_use]
+pub mod context;

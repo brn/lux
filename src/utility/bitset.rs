@@ -1,10 +1,10 @@
 use super::bitutil::*;
 use num::Unsigned;
-use num_traits::PrimInt;
+use num_traits::{NumAssign, PrimInt, ToPrimitive};
 use std::mem::size_of;
 use std::ops::*;
 
-pub trait BitNum: PrimInt + BitOrAssign + BitAndAssign + Unsigned + std::fmt::Display + std::fmt::Binary {}
+pub trait BitNum: PrimInt + NumAssign + std::fmt::Display + std::fmt::Binary {}
 
 impl BitNum for u8 {}
 impl BitNum for u16 {}

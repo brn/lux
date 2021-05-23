@@ -1,10 +1,14 @@
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 
-#[derive(Debug, PartialEq, FromPrimitive)]
-enum ShapeTag {
+#[derive(Copy, Clone, Debug, PartialEq, FromPrimitive)]
+pub enum ShapeTag {
   Invalid = 0,
+  Context,
   Cell,
+  Name,
+  ShadowClass,
+  _JsValueSepBeg,
   Undefined,
   Null,
   Boolean,
@@ -13,10 +17,21 @@ enum ShapeTag {
   Number,
   Object,
   Array,
+  _JsValueSepEnd,
+  OwnProperties,
+  HashMap,
+  HashMapEntry,
+  PropertyDescriptor,
   InternalArray,
   StringPiece,
   FixedU16Array,
   StringRope,
+  FlattenString,
+  SmallString,
+  OneByteChar,
+  Error,
+  TypeError,
+  GlobalObjects,
   __Sentinel,
 }
 assert_eq_size!(ShapeTag, u8);
@@ -33,6 +48,14 @@ impl std::cmp::PartialEq for Shape {
 }
 
 impl Shape {
+  pub fn is_js_value(shape: Shape) -> bool {
+    return shape.tag() as u8 > ShapeTag::_JsValueSepBeg as u8 && (shape.tag() as u8) < ShapeTag::_JsValueSepEnd as u8;
+  }
+
+  pub fn tag(&self) -> ShapeTag {
+    return self.tag;
+  }
+
   pub fn from_tag(tag: u8) -> Shape {
     debug_assert!(tag <= ShapeTag::__Sentinel as u8);
     return Shape {
@@ -44,8 +67,22 @@ impl Shape {
     return Shape { tag: ShapeTag::Invalid };
   }
 
+  pub const fn context() -> Shape {
+    return Shape { tag: ShapeTag::Context };
+  }
+
+  pub const fn shadow_class() -> Shape {
+    return Shape {
+      tag: ShapeTag::ShadowClass,
+    };
+  }
+
   pub const fn cell() -> Shape {
     return Shape { tag: ShapeTag::Cell };
+  }
+
+  pub const fn name() -> Shape {
+    return Shape { tag: ShapeTag::Name };
   }
 
   pub const fn undefined() -> Shape {
@@ -82,6 +119,18 @@ impl Shape {
     return Shape { tag: ShapeTag::Array };
   }
 
+  pub const fn property_descriptor() -> Shape {
+    return Shape {
+      tag: ShapeTag::PropertyDescriptor,
+    };
+  }
+
+  pub const fn own_properties() -> Shape {
+    return Shape {
+      tag: ShapeTag::OwnProperties,
+    };
+  }
+
   pub const fn internal_array() -> Shape {
     return Shape {
       tag: ShapeTag::InternalArray,
@@ -100,9 +149,53 @@ impl Shape {
     };
   }
 
+  pub const fn flatten_string() -> Shape {
+    return Shape {
+      tag: ShapeTag::FlattenString,
+    };
+  }
+
+  pub const fn small_string() -> Shape {
+    return Shape {
+      tag: ShapeTag::SmallString,
+    };
+  }
+
+  pub const fn one_byte_char() -> Shape {
+    return Shape {
+      tag: ShapeTag::OneByteChar,
+    };
+  }
+
   pub const fn fixed_u16_array() -> Shape {
     return Shape {
       tag: ShapeTag::FixedU16Array,
+    };
+  }
+
+  pub const fn error() -> Shape {
+    return Shape { tag: ShapeTag::Error };
+  }
+
+  pub const fn type_error() -> Shape {
+    return Shape {
+      tag: ShapeTag::TypeError,
+    };
+  }
+
+  pub const fn global_objects() -> Shape {
+    return Shape {
+      tag: ShapeTag::GlobalObjects,
+    };
+  }
+
+  pub const fn hash_map() -> Shape {
+    return Shape { tag: ShapeTag::HashMap };
+  }
+
+  pub const fn hash_map_entry() -> Shape {
+    return Shape {
+      tag: ShapeTag::HashMapEntry,
     };
   }
 }

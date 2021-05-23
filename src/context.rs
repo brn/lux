@@ -1,84 +1,183 @@
 use super::heap::*;
 use crate::def::*;
-use crate::structs::{HeapObject, JsBoolean, JsNull, JsUndefined};
+use crate::structs::{BareHeapLayout, Cell, HeapLayout, HeapObject, InternalArray, JsString, Repr, ShadowClass, Shape};
+use once_cell::sync::Lazy as SyncLazy;
+use once_cell::unsync::Lazy;
+use std::alloc::{alloc, dealloc, Layout};
+use std::mem::size_of;
 
-pub struct LuxContext {
-  js_true: Addr,
-  js_false: Addr,
-  js_undefined: Addr,
-  js_null: Addr,
-  pub heap: Heap,
+#[derive(Copy, Clone)]
+pub struct GlobalObjectsLayout {
+  js_true: BareHeapLayout<Repr>,
+  js_false: BareHeapLayout<Repr>,
+  js_undefined: BareHeapLayout<Repr>,
+  js_null: BareHeapLayout<Repr>,
+  empty_internal_array: BareHeapLayout<InternalArray<Repr>>,
+  empty_string: BareHeapLayout<JsString>,
+  infinity_str: BareHeapLayout<JsString>,
+  true_str: BareHeapLayout<JsString>,
+  false_str: BareHeapLayout<JsString>,
+  null_str: BareHeapLayout<JsString>,
+  undefined_str: BareHeapLayout<JsString>,
+  empty_shadow_class: BareHeapLayout<ShadowClass>,
 }
 
+#[derive(Copy, Clone)]
+pub struct GlobalObjects(HeapLayout<GlobalObjectsLayout>);
+impl_object!(GlobalObjects, HeapLayout<GlobalObjectsLayout>);
+
+impl GlobalObjects {
+  const SIZE: usize = Cell::SIZE + size_of::<GlobalObjectsLayout>();
+
+  pub fn new(context: &mut impl AllocationOnlyContext) -> GlobalObjects {
+    let mut layout = HeapLayout::<GlobalObjectsLayout>::persist(context, GlobalObjects::SIZE, Shape::global_objects());
+    layout.js_true.set(Repr::js_true());
+    layout.js_false.set(Repr::js_false());
+    layout.js_undefined.set(Repr::js_undefined());
+    layout.js_null.set(Repr::js_null());
+    layout.empty_internal_array.set(InternalArray::<Repr>::new(context, 0));
+    let empty_array = InternalArray::<u16>::new(context, 0);
+    let empty_string = JsString::new(context, empty_array);
+    layout.empty_string.set(empty_string);
+    layout.infinity_str.set(JsString::from_utf8(context, "infinity"));
+    layout.true_str.set(JsString::from_utf8(context, "true"));
+    layout.false_str.set(JsString::from_utf8(context, "false"));
+    layout.undefined_str.set(JsString::from_utf8(context, "undefined"));
+    layout.null_str.set(JsString::from_utf8(context, "null"));
+    layout.empty_shadow_class.set(ShadowClass::empty(context));
+    return GlobalObjects(layout);
+  }
+}
+
+static mut HEAP: SyncLazy<Heap> = SyncLazy::new(|| {
+  return Heap::new();
+});
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct LuxContextLayout {
+  globals: BareHeapLayout<GlobalObjects>,
+}
+
+#[repr(transparent)]
+#[derive(Copy, Clone)]
+pub struct LuxContext(HeapLayout<LuxContextLayout>);
+impl_object!(LuxContext, HeapLayout<LuxContextLayout>);
+
 impl LuxContext {
+  const SIZE: usize = Cell::SIZE + size_of::<LuxContextLayout>();
   pub fn new() -> LuxContext {
-    let heap = Heap::new();
-    let mut c = LuxContext {
-      heap,
-      js_true: std::ptr::null_mut(),
-      js_false: std::ptr::null_mut(),
-      js_undefined: std::ptr::null_mut(),
-      js_null: std::ptr::null_mut(),
-    };
-    c.js_true = JsBoolean::persist(&mut c, true).raw_heap();
-    c.js_false = JsBoolean::persist(&mut c, false).raw_heap();
-    c.js_undefined = JsUndefined::persist(&mut c).raw_heap();
-    c.js_null = JsNull::persist(&mut c).raw_heap();
+    let l = Layout::from_size_align(LuxContext::SIZE, ALIGNMENT).unwrap();
+    let heap = unsafe { alloc(l) };
+    let mut layout = HeapLayout::<LuxContextLayout>::new_into_heap(heap, LuxContext::SIZE, Shape::context());
+    let mut c = LuxContext(layout);
+    layout.globals.set(GlobalObjects::new(&mut c));
     return c;
   }
 
-  pub fn js_true(&self) -> JsBoolean {
-    return JsBoolean::from(self.js_true);
-  }
-
-  pub fn js_false(&self) -> JsBoolean {
-    return JsBoolean::from(self.js_false);
-  }
-
-  pub fn js_null(&self) -> JsNull {
-    return JsNull::from(self.js_null);
-  }
-
-  pub fn js_undefined(&self) -> JsUndefined {
-    return JsUndefined::from(self.js_undefined);
+  pub unsafe fn destroy(&mut self) {
+    let l = Layout::from_size_align(LuxContext::SIZE, ALIGNMENT).unwrap();
+    dealloc(self.raw_heap(), l);
   }
 }
 
-pub trait Context {
+pub trait AllocationOnlyContext {
   fn allocate(&mut self, size: usize) -> Addr;
   fn allocate_persist(&mut self, size: usize) -> Addr;
 }
 
-impl Context for LuxContext {
-  fn allocate(&mut self, size: usize) -> Addr {
-    return self.heap.allocate(size);
+pub trait Context: AllocationOnlyContext {
+  fn globals(&self) -> GlobalObjects;
+
+  fn js_true(&self) -> Repr {
+    return self.globals().js_true.handle();
   }
 
-  fn allocate_persist(&mut self, size: usize) -> Addr {
-    return self.heap.allocate(size);
+  fn js_false(&self) -> Repr {
+    return self.globals().js_false.handle();
+  }
+
+  fn js_null(&self) -> Repr {
+    return self.globals().js_null.handle();
+  }
+
+  fn js_undefined(&self) -> Repr {
+    return self.globals().js_undefined.handle();
+  }
+
+  fn empty_internal_array<T: Copy>(&self) -> InternalArray<T> {
+    let h = self.globals().empty_internal_array.handle();
+    let p = &h as *const InternalArray<Repr> as *const u8;
+    return unsafe { *(p as *const InternalArray<T>) };
+  }
+
+  fn empty_string(&self) -> JsString {
+    return self.globals().empty_string.handle();
+  }
+
+  fn intinify_str(&self) -> JsString {
+    return self.globals().infinity_str.handle();
+  }
+
+  fn true_str(&self) -> JsString {
+    return self.globals().true_str.handle();
+  }
+
+  fn false_str(&self) -> JsString {
+    return self.globals().false_str.handle();
+  }
+
+  fn null_str(&self) -> JsString {
+    return self.globals().null_str.handle();
+  }
+
+  fn undefined_str(&self) -> JsString {
+    return self.globals().undefined_str.handle();
+  }
+
+  fn empty_shadow_class(&self) -> ShadowClass {
+    return self.globals().empty_shadow_class.handle();
   }
 }
 
-#[cfg(test)]
-pub mod testing {
-  use super::*;
-  use std::alloc::{alloc, Layout};
-
-  pub struct MockedContext {}
-
-  impl MockedContext {
-    pub fn new() -> MockedContext {
-      return MockedContext {};
-    }
+#[cfg(not(feature = "nogc"))]
+impl AllocationOnlyContext for LuxContext {
+  fn allocate(&mut self, size: usize) -> Addr {
+    return unsafe { HEAP.allocate(size) };
   }
 
-  impl Context for MockedContext {
-    fn allocate(&mut self, size: usize) -> Addr {
-      return unsafe { alloc(Layout::from_size_align(size, ALIGNMENT).unwrap()) };
-    }
+  fn allocate_persist(&mut self, size: usize) -> Addr {
+    return unsafe { HEAP.allocate_persist(size) };
+  }
+}
 
-    fn allocate_persist(&mut self, size: usize) -> Addr {
-      return unsafe { alloc(Layout::from_size_align(size, ALIGNMENT).unwrap()) };
-    }
+#[cfg(feature = "nogc")]
+impl AllocationOnlyContext for LuxContext {
+  fn allocate(&mut self, size: usize) -> Addr {
+    return unsafe { alloc(Layout::from_size_align(size, ALIGNMENT).unwrap()) };
+  }
+
+  fn allocate_persist(&mut self, size: usize) -> Addr {
+    return unsafe { alloc(Layout::from_size_align(size, ALIGNMENT).unwrap()) };
+  }
+}
+
+impl Context for LuxContext {
+  fn globals(&self) -> GlobalObjects {
+    return self.globals.handle();
+  }
+}
+
+pub mod isolate {
+  use super::*;
+
+  thread_local!(
+    pub static CONTEXT: Lazy<LuxContext> = Lazy::new(|| {
+      return LuxContext::new();
+    })
+  );
+
+  pub fn context() -> LuxContext {
+    return CONTEXT.with(|m| **m);
   }
 }
