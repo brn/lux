@@ -22,6 +22,7 @@ pub use self::hash_map::HashMap;
 pub use self::internal_array::*;
 pub use self::js_globals::*;
 pub use self::js_object::*;
+pub use self::object::{JsObject, JsSymbol, SymbolRegistry};
 pub use self::repr::{FromUnchecked, Repr};
 pub use self::shadow_class::*;
 pub use self::shape::Shape;

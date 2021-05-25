@@ -3,13 +3,14 @@ use super::hash_map::{ContextHash, ContextHashMut};
 use super::js_globals::*;
 use super::repr::*;
 use super::shape::Shape;
-use super::string::JsString;
+use super::string::{FixedU16CodePointArray, JsString};
 use crate::context::*;
 use crate::def::*;
 use num_derive::FromPrimitive;
 use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct JsVal(HeapLayout<UintPtr>);
 impl_object!(JsVal, HeapLayout<UintPtr>);
@@ -74,7 +75,7 @@ pub struct NameLayout {
   name: BareHeapLayout<Repr>,
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct Name(HeapLayout<NameLayout>);
 impl_object!(Name, HeapLayout<NameLayout>);
@@ -88,8 +89,23 @@ impl Name {
     return Name(layout);
   }
 
+  pub fn from_utf8(context: &mut impl AllocationOnlyContext, name: &str) -> Name {
+    let mut layout = HeapLayout::<NameLayout>::new(context, Name::SIZE, Shape::name());
+    let array = FixedU16CodePointArray::from_utf8(context, name);
+    layout.name.set(Repr::from(JsString::new(context, array)));
+    layout.hash = Name::calc_hash_from_fixed_array(context, array);
+    return Name(layout);
+  }
+
   pub fn hash(&self) -> u64 {
     return self.hash;
+  }
+
+  pub fn equals(&self, context: &mut impl Context, other: Name) -> bool {
+    if Cell::from(self.name.handle()).shape() == Shape::string() {
+      return self.to_string(context) == other.to_string(context);
+    }
+    unreachable!();
   }
 
   fn calc_hash(mut layout: HeapLayout<NameLayout>, context: &mut impl Context) {
@@ -98,6 +114,19 @@ impl Name {
       layout.hash = JsString::from(layout.name.handle())
         .flatten(context)
         .context_hash(context, &mut hasher);
+    }
+    unreachable!();
+  }
+
+  fn calc_hash_from_fixed_array(context: &mut impl AllocationOnlyContext, array: FixedU16CodePointArray) -> u64 {
+    let mut hasher = DefaultHasher::new();
+    array.hash(&mut hasher);
+    return hasher.finish();
+  }
+
+  fn to_string(&self, context: &mut impl Context) -> FixedU16CodePointArray {
+    if Cell::from(self.name.handle()).shape() == Shape::string() {
+      return JsString::from(self.name.handle()).flatten(context);
     }
     unreachable!();
   }
@@ -127,10 +156,12 @@ impl ContextHashMut for Name {
 
 impl std::cmp::PartialEq for Name {
   fn eq(&self, other: &Name) -> bool {
-    if self.shape() != other.shape() {
+    let shape_a = Cell::from(self.name.handle()).shape();
+    let shape_b = Cell::from(other.name.handle()).shape();
+    if shape_a != shape_b {
       return false;
     }
-    if self.shape() == Shape::string() && other.shape() == Shape::string() {
+    if shape_a == Shape::string() {
       let mut context = isolate::context();
       return JsString::from(self.name.handle()).flatten(&mut context)
         == JsString::from(other.name.handle()).flatten(&mut context);
@@ -156,7 +187,7 @@ pub mod testing {
     value: u32,
   }
 
-  #[repr(transparent)]
+  #[repr(C)]
   #[derive(Copy, Clone)]
   pub struct TestObject(HeapLayout<TestObjectBody>);
   impl_object!(TestObject, HeapLayout<TestObjectBody>);
@@ -183,35 +214,5 @@ pub mod testing {
     fn wrap(heap: Addr) -> TestObject {
       return TestObject(HeapLayout::<TestObjectBody>::wrap(heap));
     }
-  }
-}
-
-#[derive(Debug, PartialEq, FromPrimitive)]
-enum WellKnownSymbolType {
-  AsyncIterator,
-  HasInstance,
-  IsConcatSpreadable,
-  Iterator,
-  Match,
-  MatchAll,
-  Replace,
-  Search,
-  Species,
-  Split,
-  ToPrimitive,
-  ToStringTag,
-  Unscopables,
-}
-
-#[repr(transparent)]
-#[derive(Copy, Clone)]
-pub struct JsSymbol(HeapLayout<VoidHeapBody>);
-impl_object!(JsSymbol, HeapLayout<VoidHeapBody>);
-
-impl JsSymbol {
-  const SIZE: usize = Cell::SIZE;
-
-  fn wrap(heap: Addr) -> JsSymbol {
-    return JsSymbol(HeapLayout::<VoidHeapBody>::wrap(heap));
   }
 }

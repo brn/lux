@@ -10,7 +10,7 @@ pub struct JsErrorLayout {
   message: BareHeapLayout<JsString>,
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct JsError(HeapLayout<JsErrorLayout>);
 impl_object!(JsError, HeapLayout<JsErrorLayout>);
@@ -30,7 +30,7 @@ pub struct JsTypeErrorLayout {
   message: BareHeapLayout<JsString>,
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct JsTypeError(HeapLayout<JsTypeErrorLayout>);
 impl_object!(JsTypeError, HeapLayout<JsTypeErrorLayout>);

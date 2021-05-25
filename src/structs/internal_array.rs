@@ -29,7 +29,7 @@ pub struct InternalArrayLayout {
   length: usize,
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct InternalArray<T: InternalArrayElement>(HeapLayout<InternalArrayLayout>, PhantomData<T>);
 impl_object!(

@@ -8,6 +8,7 @@ pub enum ShapeTag {
   Cell,
   Name,
   ShadowClass,
+  SymbolRegistry,
   _JsValueSepBeg,
   Undefined,
   Null,
@@ -74,6 +75,12 @@ impl Shape {
   pub const fn shadow_class() -> Shape {
     return Shape {
       tag: ShapeTag::ShadowClass,
+    };
+  }
+
+  pub const fn symbol_registry() -> Shape {
+    return Shape {
+      tag: ShapeTag::SymbolRegistry,
     };
   }
 

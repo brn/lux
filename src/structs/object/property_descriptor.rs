@@ -26,7 +26,7 @@ impl From<HeapLayout<DataPropertyDescriptorLayout>> for HeapLayout<AccessorPrope
   }
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct PropertyDescriptor(HeapLayout<DataPropertyDescriptorLayout>);
 impl_object!(PropertyDescriptor, HeapLayout<DataPropertyDescriptorLayout>);

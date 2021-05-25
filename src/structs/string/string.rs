@@ -40,7 +40,7 @@ pub struct JsStringLayout {
   backend: BareHeapLayout<Repr>,
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct JsString(HeapLayout<JsStringLayout>);
 impl_object!(JsString, HeapLayout<JsStringLayout>);

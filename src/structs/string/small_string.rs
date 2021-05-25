@@ -15,7 +15,7 @@ pub struct SmallStringLayout {
   str: BareHeapLayout<FixedU16CodePointArray>,
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct SmallString(HeapLayout<SmallStringLayout>);
 impl_object!(SmallString, HeapLayout<SmallStringLayout>);
@@ -113,7 +113,7 @@ pub struct OneByteCharLayout {
   ch: BareHeapLayout<OneByte>,
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct OneByteChar(HeapLayout<OneByteCharLayout>);
 impl_object!(OneByteChar, HeapLayout<OneByteCharLayout>);

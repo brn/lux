@@ -1,6 +1,8 @@
 use super::heap::*;
 use crate::def::*;
-use crate::structs::{BareHeapLayout, Cell, HeapLayout, HeapObject, InternalArray, JsString, Repr, ShadowClass, Shape};
+use crate::structs::{
+  BareHeapLayout, Cell, HeapLayout, HeapObject, InternalArray, JsString, Name, Repr, ShadowClass, Shape, SymbolRegistry,
+};
 use once_cell::sync::Lazy as SyncLazy;
 use once_cell::unsync::Lazy;
 use std::alloc::{alloc, dealloc, Layout};
@@ -19,7 +21,21 @@ pub struct GlobalObjectsLayout {
   false_str: BareHeapLayout<JsString>,
   null_str: BareHeapLayout<JsString>,
   undefined_str: BareHeapLayout<JsString>,
+  async_iterator_symbol_str: BareHeapLayout<Name>,
+  has_instance_symbol_str: BareHeapLayout<Name>,
+  is_concat_spreadable_symbol_str: BareHeapLayout<Name>,
+  iterator_symbol_str: BareHeapLayout<Name>,
+  match_symbol_str: BareHeapLayout<Name>,
+  match_all_symbol_str: BareHeapLayout<Name>,
+  replace_symbol_str: BareHeapLayout<Name>,
+  search_symbol_str: BareHeapLayout<Name>,
+  species_symbol_str: BareHeapLayout<Name>,
+  split_symbol_str: BareHeapLayout<Name>,
+  to_primitive_symbol_str: BareHeapLayout<Name>,
+  to_string_tag_symbol_str: BareHeapLayout<Name>,
+  unscopables_symbol_str: BareHeapLayout<Name>,
   empty_shadow_class: BareHeapLayout<ShadowClass>,
+  symbol_registry: BareHeapLayout<SymbolRegistry>,
 }
 
 #[derive(Copy, Clone)]
@@ -45,6 +61,40 @@ impl GlobalObjects {
     layout.undefined_str.set(JsString::from_utf8(context, "undefined"));
     layout.null_str.set(JsString::from_utf8(context, "null"));
     layout.empty_shadow_class.set(ShadowClass::empty(context));
+    layout.symbol_registry.set(SymbolRegistry::persist(context));
+    layout
+      .async_iterator_symbol_str
+      .set(Name::from_utf8(context, "Symbol.asyncIterator"));
+    layout
+      .has_instance_symbol_str
+      .set(Name::from_utf8(context, "Symbol.hasInstance"));
+    layout
+      .is_concat_spreadable_symbol_str
+      .set(Name::from_utf8(context, "Symbol.isConcatSpreadable"));
+    layout
+      .iterator_symbol_str
+      .set(Name::from_utf8(context, "Symbol.iterator"));
+    layout.match_symbol_str.set(Name::from_utf8(context, "Symbol.match"));
+    layout
+      .match_all_symbol_str
+      .set(Name::from_utf8(context, "Symbol.matchAll"));
+    layout
+      .replace_symbol_str
+      .set(Name::from_utf8(context, "Symbol.replace"));
+    layout.search_symbol_str.set(Name::from_utf8(context, "Symbol.search"));
+    layout
+      .species_symbol_str
+      .set(Name::from_utf8(context, "Symbol.species"));
+    layout.split_symbol_str.set(Name::from_utf8(context, "Symbol.split"));
+    layout
+      .to_primitive_symbol_str
+      .set(Name::from_utf8(context, "Symbol.toPrimitive"));
+    layout
+      .to_string_tag_symbol_str
+      .set(Name::from_utf8(context, "Symbol.toStringTag"));
+    layout
+      .unscopables_symbol_str
+      .set(Name::from_utf8(context, "Symbol.unscopables"));
     return GlobalObjects(layout);
   }
 }
@@ -59,7 +109,7 @@ pub struct LuxContextLayout {
   globals: BareHeapLayout<GlobalObjects>,
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct LuxContext(HeapLayout<LuxContextLayout>);
 impl_object!(LuxContext, HeapLayout<LuxContextLayout>);
@@ -137,6 +187,50 @@ pub trait Context: AllocationOnlyContext {
 
   fn empty_shadow_class(&self) -> ShadowClass {
     return self.globals().empty_shadow_class.handle();
+  }
+
+  fn symbol_registry(&self) -> SymbolRegistry {
+    return self.globals().symbol_registry.handle();
+  }
+
+  fn async_iterator_symbol_str(&self) -> Name {
+    return self.globals().async_iterator_symbol_str.handle();
+  }
+  fn has_instance_symbol_str(&self) -> Name {
+    return self.globals().has_instance_symbol_str.handle();
+  }
+  fn is_concat_spreadable_symbol_str(&self) -> Name {
+    return self.globals().is_concat_spreadable_symbol_str.handle();
+  }
+  fn iterator_symbol_str(&self) -> Name {
+    return self.globals().iterator_symbol_str.handle();
+  }
+  fn match_symbol_str(&self) -> Name {
+    return self.globals().match_symbol_str.handle();
+  }
+  fn match_all_symbol_str(&self) -> Name {
+    return self.globals().match_all_symbol_str.handle();
+  }
+  fn replace_symbol_str(&self) -> Name {
+    return self.globals().replace_symbol_str.handle();
+  }
+  fn search_symbol_str(&self) -> Name {
+    return self.globals().search_symbol_str.handle();
+  }
+  fn species_symbol_str(&self) -> Name {
+    return self.globals().species_symbol_str.handle();
+  }
+  fn split_symbol_str(&self) -> Name {
+    return self.globals().split_symbol_str.handle();
+  }
+  fn to_primitive_symbol_str(&self) -> Name {
+    return self.globals().to_primitive_symbol_str.handle();
+  }
+  fn to_string_tag_symbol_str(&self) -> Name {
+    return self.globals().to_string_tag_symbol_str.handle();
+  }
+  fn unscopables_symbol_str(&self) -> Name {
+    return self.globals().unscopables_symbol_str.handle();
   }
 }
 

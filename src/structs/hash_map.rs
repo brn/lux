@@ -28,7 +28,7 @@ struct HashMapEntryLayout<K: HashMapKey, V: Copy> {
   position: usize,
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 struct HashMapEntry<K: HashMapKey, V: Copy>(HeapLayout<HashMapEntryLayout<K, V>>);
 impl_object!(HashMapEntry<K: HashMapKey, V: Copy>, HeapLayout<HashMapEntryLayout<K, V>>);
@@ -62,7 +62,7 @@ pub struct HashMapLayout<K: HashMapKey, V: Copy> {
   storage: BareHeapLayout<InternalArray<HashMapEntry<K, V>>>,
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct HashMap<K: HashMapKey, V: Copy>(HeapLayout<HashMapLayout<K, V>>);
 impl_object!(HashMap<K: HashMapKey, V: Copy>, HeapLayout<HashMapLayout<K, V>>);

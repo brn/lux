@@ -35,7 +35,7 @@ pub struct StringPieceLayout {
   right: BareHeapLayout<StringPiece>,
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone, Debug)]
 struct StringPiece(HeapLayout<StringPieceLayout>);
 impl_object!(StringPiece, HeapLayout<StringPieceLayout>);
@@ -530,7 +530,7 @@ pub struct FlattenStringLayout {
   str: BareHeapLayout<FixedU16CodePointArray>,
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct FlattenString(HeapLayout<FlattenStringLayout>);
 impl_object!(FlattenString, HeapLayout<FlattenStringLayout>);
@@ -594,7 +594,7 @@ pub struct StringRopeLayout {
   piece: BareHeapLayout<StringPiece>,
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct StringRope(HeapLayout<StringRopeLayout>);
 impl_object!(StringRope, HeapLayout<StringRopeLayout>);

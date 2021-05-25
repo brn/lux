@@ -188,67 +188,87 @@ mod header_tests {
 }
 
 #[derive(Copy, Clone, Debug)]
-#[repr(transparent)]
-pub struct BareHeapLayout<T: Copy + From<Addr>>(Addr, PhantomData<T>);
+#[repr(C)]
+pub struct BareHeapLayout<T: Copy + From<Addr>>(u64, PhantomData<T>);
 
 impl<T: Copy + From<Addr> + Into<Addr>> BareHeapLayout<T> {
   pub fn new(context: &mut impl AllocationOnlyContext, size: usize) -> BareHeapLayout<T> {
-    return BareHeapLayout::<T>(context.allocate(size), PhantomData);
+    return BareHeapLayout::<T>(context.allocate(size) as u64, PhantomData);
   }
 
   pub fn persist(context: &mut impl AllocationOnlyContext, size: usize) -> BareHeapLayout<T> {
-    return BareHeapLayout::<T>(context.allocate_persist(size), PhantomData);
+    return BareHeapLayout::<T>(context.allocate_persist(size) as u64, PhantomData);
   }
 
   pub fn wrap(heap: Addr) -> BareHeapLayout<T> {
-    return BareHeapLayout::<T>(heap, PhantomData);
+    return BareHeapLayout::<T>(heap as u64, PhantomData);
   }
 
   pub fn null() -> BareHeapLayout<T> {
-    return BareHeapLayout::<T>(std::ptr::null_mut(), PhantomData);
+    return BareHeapLayout::<T>(std::ptr::null_mut::<T>() as u64, PhantomData);
   }
 
   pub fn handle(&self) -> T {
-    return T::from(self.0);
+    return T::from(self.addr());
   }
 
   pub fn is_null(&self) -> bool {
-    return self.0.is_null();
+    return (self.addr()).is_null();
   }
 
   pub unsafe fn ref_unchecked(&self) -> &T {
-    return &*(self.0 as *mut T);
+    return &*(self.addr() as *mut T);
   }
 
   pub unsafe fn ref_mut_unchecked(&mut self) -> &mut T {
-    return &mut *(self.0 as *mut T);
+    return &mut *(self.addr() as *mut T);
   }
 
   pub fn as_addr(&self) -> Addr {
-    return self.0;
+    return self.addr();
+  }
+
+  pub fn as_value(&self) -> u64 {
+    return self.addr() as u64;
   }
 
   pub fn set(&mut self, data: T) {
-    self.0 = data.into();
+    self.0 = data.into() as u64;
   }
 
   pub fn set_ptr(&mut self, data: Addr) {
+    self.0 = data as u64;
+  }
+
+  pub fn set_value(&mut self, data: u64) {
     self.0 = data;
   }
 
   pub fn set_null(&mut self) {
-    self.0 = std::ptr::null_mut();
+    self.0 = std::ptr::null_mut::<T>() as u64;
+  }
+
+  pub fn set_flag(&mut self) {
+    self.0 = self.0 | 0x1;
+  }
+
+  pub fn get_flag(&self) -> bool {
+    return self.0 & 1 == 1;
+  }
+
+  fn addr(&self) -> Addr {
+    return ((self.0 >> 1) << 1) as Addr;
   }
 }
 
 impl<T: Copy + From<Addr> + Into<Addr>> From<Addr> for BareHeapLayout<T> {
   fn from(a: Addr) -> BareHeapLayout<T> {
-    return BareHeapLayout::<T>(a, PhantomData);
+    return BareHeapLayout::<T>(a as u64, PhantomData);
   }
 }
 
 #[derive(Copy, Clone)]
-#[repr(transparent)]
+#[repr(C)]
 pub struct HeapLayout<T: Copy>(Addr, PhantomData<T>);
 
 #[derive(Copy, Clone)]
@@ -371,6 +391,10 @@ pub trait HeapObject: Into<Repr> + Copy + From<Addr> {
   fn is_out(&self) -> bool {
     return self.raw_heap() == std::ptr::null_mut();
   }
+
+  fn is_same_heap_object(&self, other: impl HeapObject) -> bool {
+    return self.raw_heap() == other.raw_heap();
+  }
 }
 
 macro_rules! _priv_impl_heap_object_body {
@@ -465,7 +489,7 @@ macro_rules! impl_deref_heap {
   };
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone, Debug)]
 pub struct Cell(BareHeapLayout<Header>);
 

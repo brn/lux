@@ -2,7 +2,6 @@ use crate::def::*;
 
 const NAN_BIT: u64 = 0x7ff8000000000000;
 const NAN_MASK: u64 = !NAN_BIT;
-const INVALID: u64 = 0xffffffffffffffff;
 const INFINITY: u64 = 0x7ff0000000000002;
 const UNDEFINED: u64 = 0x7ff0000000000003;
 const NULL: u64 = 0x7ff0000000000004;
@@ -22,7 +21,7 @@ impl Repr {
   }
 
   pub fn invalid() -> Repr {
-    return Repr(f64::from_bits(INVALID));
+    return Repr(f64::from_bits(0x7ff8000000000000));
   }
 
   pub fn js_true() -> Repr {
@@ -58,13 +57,13 @@ impl Repr {
   }
 
   pub fn is_invalid(&self) -> bool {
-    return self.0.to_bits() == INVALID;
+    return self.0.to_bits() == NAN_BIT;
   }
 
   pub fn unbox(self) -> Option<Addr> {
     if self.is_boxed() {
       return Some((self.0.to_bits() & NAN_MASK) as Addr);
-    }
+    };
     return None;
   }
 

@@ -7,7 +7,7 @@ use crate::context::Context;
 use crate::def::*;
 use std::mem::size_of;
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct JsUndefined(HeapLayout<VoidHeapBody>);
 impl_object!(JsUndefined, HeapLayout<VoidHeapBody>);
@@ -35,7 +35,7 @@ impl AbstractConvs for JsUndefined {
   }
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct JsNull(HeapLayout<VoidHeapBody>);
 impl_object!(JsNull, HeapLayout<VoidHeapBody>);
@@ -69,7 +69,7 @@ pub struct JsBooleanLayout {
   value: u8,
 }
 
-#[repr(transparent)]
+#[repr(C)]
 #[derive(Copy, Clone)]
 pub struct JsBoolean(HeapLayout<JsBooleanLayout>);
 impl_object!(JsBoolean, HeapLayout<JsBooleanLayout>);

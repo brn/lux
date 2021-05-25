@@ -1,12 +1,12 @@
 use super::super::hash_map::{ContextHash, ContextHashMut};
 use super::super::internal_array::InternalArray;
-use crate::context::Context;
+use crate::context::{AllocationOnlyContext, Context};
 use std::hash::Hash;
 use std::hash::Hasher;
 
 pub type FixedU16CodePointArray = InternalArray<u16>;
 
-pub fn from_utf8(context: &mut impl Context, str: &str) -> FixedU16CodePointArray {
+pub fn from_utf8(context: &mut impl AllocationOnlyContext, str: &str) -> FixedU16CodePointArray {
   let u16_vec = str.encode_utf16().collect::<Vec<_>>();
   let mut array = FixedU16CodePointArray::new(context, u16_vec.len());
   for c in u16_vec {
@@ -16,7 +16,7 @@ pub fn from_utf8(context: &mut impl Context, str: &str) -> FixedU16CodePointArra
 }
 
 impl FixedU16CodePointArray {
-  pub fn from_utf8(context: &mut impl Context, str: &str) -> FixedU16CodePointArray {
+  pub fn from_utf8(context: &mut impl AllocationOnlyContext, str: &str) -> FixedU16CodePointArray {
     return from_utf8(context, str);
   }
 }
