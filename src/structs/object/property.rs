@@ -24,11 +24,11 @@ impl PropertyName {
   }
 
   pub fn is_symbol(&self) -> bool {
-    return self.is_symbol();
+    return self.0.is_symbol();
   }
 
   pub fn is_string(&self) -> bool {
-    return self.is_string();
+    return self.0.is_string();
   }
 
   pub fn from_utf8_string(context: impl AllocationOnlyContext, str: &str) -> PropertyName {
@@ -45,12 +45,18 @@ impl PropertyName {
 
 impl PartialEq for PropertyName {
   fn eq(&self, other: &Self) -> bool {
-    debug_assert!(self.0.is_boxed() && other.0.is_boxed());
+    let is_boxed = self.0.is_boxed();
+    if is_boxed != other.0.is_boxed() {
+      return false;
+    }
+    if !is_boxed {
+      return self.0.to_number_unchecked() == other.0.to_number_unchecked();
+    }
     if Cell::from(self.0).shape().tag() != Cell::from(other.0).shape().tag() {
       return false;
     }
     if self.is_string() {
-      return FlatString::from(*self) == FlatString::from(*other);
+      return FlatString::from(self.0) == FlatString::from(other.0);
     }
     return false;
   }
@@ -251,10 +257,11 @@ impl PropertySearchHint {
 
 impl OwnProperties {
   const SIZE: usize = size_of::<FastOwnPropertiesLayout>();
-  const SLOW_PASS_THRESHOLD: u64 = 5;
+  const SLOW_PASS_THRESHOLD: u64 = 20;
   const SLOW_MODE_BIT_INDEX: usize = 1;
   pub fn new(context: impl AllocationOnlyContext) -> OwnProperties {
     let mut layout = HeapLayout::<FastOwnPropertiesLayout>::new(context, OwnProperties::SIZE, Shape::own_properties());
+    layout.properties = InternalArray::<Property>::new(context, OwnProperties::SLOW_PASS_THRESHOLD as usize);
     layout.flags.assign(0);
     return OwnProperties(layout);
   }
@@ -284,7 +291,7 @@ impl OwnProperties {
 
   pub fn get_property_descriptor(&self, hint: PropertySearchHint) -> Option<OwnPropertyDescriptorSearchResult> {
     if !self.flags.get(OwnProperties::SLOW_MODE_BIT_INDEX) {
-      if hint.index > 0 && !self.properties[hint.index as usize].is_null() {
+      if hint.index >= 0 && !self.properties[hint.index as usize].is_null() {
         return Some(OwnPropertyDescriptorSearchResult::new(
           self.properties[hint.index as usize].desc(),
           true,
@@ -347,8 +354,8 @@ impl OwnProperties {
   }
 
   fn add_len(&mut self) {
-    let mut range = self.flags.mask_lower(OwnProperties::SLOW_MODE_BIT_INDEX);
-    range.assign(self.len() + 1);
-    self.flags = range.into();
+    let len = self.len();
+    let mut range = self.flags.mask_lower_mut(OwnProperties::SLOW_MODE_BIT_INDEX + 1);
+    range.assign(len + 1);
   }
 }

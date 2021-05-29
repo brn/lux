@@ -109,9 +109,8 @@ impl JsString {
     let mut layout = HeapLayout::<JsStringLayout>::new_object(context, size_of::<JsStringLayout>(), Shape::string());
     layout.backend = JsString::select_backend(context, str).into();
     layout.flat_content = FixedU16CodePointArray::default();
-    layout
-      .class()
-      .define_own_property(context, new_property!(context, str: "length", Repr::from(str.length())));
+    //    let prop = new_property!(context, str: "length", Repr::from(str.length()));
+    //    layout.class().define_own_property(context, prop);
     return JsString(layout);
   }
 
@@ -193,9 +192,7 @@ impl PredefinedHash for FlatString {
 
 impl FlatString {
   pub fn new(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> FlatString {
-    let mut js_str = JsString::new_primitive(context, str);
-    js_str.flatten(context);
-    return FlatString(js_str.0);
+    return JsString::new_primitive(context, str).flatten(context);
   }
 
   pub fn from_utf8(context: impl AllocationOnlyContext, str: &str) -> FlatString {

@@ -77,20 +77,20 @@ impl SymbolRegistry {
     }
   }
 
-  pub fn init_well_known_symbols(context: impl Context, mut layout: HeapLayout<SymbolRegistryLayout>) {
-    layout.symbol_async_iterator = JsSymbol::new_wellknown(context, WellKnownSymbolType::AsyncIterator);
-    layout.symbol_has_instance = JsSymbol::new_wellknown(context, WellKnownSymbolType::HasInstance);
-    layout.symbol_is_concat_spreadable = JsSymbol::new_wellknown(context, WellKnownSymbolType::IsConcatSpreadable);
-    layout.symbol_iterator = JsSymbol::new_wellknown(context, WellKnownSymbolType::Iterator);
-    layout.symbol_match = JsSymbol::new_wellknown(context, WellKnownSymbolType::Match);
-    layout.symbol_match_all = JsSymbol::new_wellknown(context, WellKnownSymbolType::MatchAll);
-    layout.symbol_replace = JsSymbol::new_wellknown(context, WellKnownSymbolType::Replace);
-    layout.symbol_search = JsSymbol::new_wellknown(context, WellKnownSymbolType::Search);
-    layout.symbol_species = JsSymbol::new_wellknown(context, WellKnownSymbolType::Species);
-    layout.symbol_split = JsSymbol::new_wellknown(context, WellKnownSymbolType::Split);
-    layout.symbol_to_primitive = JsSymbol::new_wellknown(context, WellKnownSymbolType::ToPrimitive);
-    layout.symbol_to_string_tag = JsSymbol::new_wellknown(context, WellKnownSymbolType::ToStringTag);
-    layout.symbol_unscopables = JsSymbol::new_wellknown(context, WellKnownSymbolType::Unscopables);
+  pub fn init_well_known_symbols(&mut self, context: impl Context) {
+    self.symbol_async_iterator = JsSymbol::new_wellknown(context, WellKnownSymbolType::AsyncIterator);
+    self.symbol_has_instance = JsSymbol::new_wellknown(context, WellKnownSymbolType::HasInstance);
+    self.symbol_is_concat_spreadable = JsSymbol::new_wellknown(context, WellKnownSymbolType::IsConcatSpreadable);
+    self.symbol_iterator = JsSymbol::new_wellknown(context, WellKnownSymbolType::Iterator);
+    self.symbol_match = JsSymbol::new_wellknown(context, WellKnownSymbolType::Match);
+    self.symbol_match_all = JsSymbol::new_wellknown(context, WellKnownSymbolType::MatchAll);
+    self.symbol_replace = JsSymbol::new_wellknown(context, WellKnownSymbolType::Replace);
+    self.symbol_search = JsSymbol::new_wellknown(context, WellKnownSymbolType::Search);
+    self.symbol_species = JsSymbol::new_wellknown(context, WellKnownSymbolType::Species);
+    self.symbol_split = JsSymbol::new_wellknown(context, WellKnownSymbolType::Split);
+    self.symbol_to_primitive = JsSymbol::new_wellknown(context, WellKnownSymbolType::ToPrimitive);
+    self.symbol_to_string_tag = JsSymbol::new_wellknown(context, WellKnownSymbolType::ToStringTag);
+    self.symbol_unscopables = JsSymbol::new_wellknown(context, WellKnownSymbolType::Unscopables);
   }
 }
 
@@ -126,7 +126,8 @@ impl JsSymbol {
   const IS_WELLKNOWN_BIT: usize = 1;
   const IS_OBJECT_BIT: usize = 2;
 
-  pub fn new(context: impl Context, desc: FlatString) -> JsSymbol {
+  pub fn new(context: impl Context, mut desc: FlatString) -> JsSymbol {
+    desc.prepare_hash(context);
     let mut layout = HeapLayout::<JsSymbolLayout>::new_object(context, JsSymbol::SIZE, Shape::symbol());
     let result = layout.class().define_own_property(
       context,

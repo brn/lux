@@ -441,7 +441,7 @@ mod tests {
   fn bitset_mask_range_unset_test() {
     let mut bs = Bitset::<u16>::new();
     bs.assign(65535);
-    let mut range = bs.mask_range(5, 13);
+    let mut range = bs.mask_range_mut(5, 13);
     range.unset(1);
     range.unset(2);
     range.unset(3);
@@ -449,22 +449,10 @@ mod tests {
   }
 
   #[test]
-  fn masked_bitset_into_test() {
-    let mut bs = Bitset::<u16>::new();
-    bs.assign(65535);
-    let mut range = bs.mask_range(5, 13);
-    range.unset(1);
-    range.unset(2);
-    range.unset(3);
-    bs = range.into();
-    assert_eq!(bs.bits(), 65423);
-  }
-
-  #[test]
   fn bitset_mask_lower_test() {
     let mut bs = Bitset::<u16>::new();
     bs.assign(65535);
-    let mut range = bs.mask_lower(5);
+    let mut range = bs.mask_lower_mut(5);
     range.unset(1);
     range.unset(2);
     range.unset(3);
@@ -475,13 +463,12 @@ mod tests {
   fn lower_masked_bitset_into_test() {
     let mut bs = Bitset::<u16>::new();
     bs.assign(65535);
-    let mut range = bs.mask_lower(5);
+    let mut range = bs.mask_lower_mut(5);
     range.unset(1);
     range.unset(2);
     range.unset(3);
-    bs = range.into();
     assert_eq!(bs.bits(), 65423);
-    range = bs.mask_lower(5);
+    range = bs.mask_lower_mut(5);
     assert_eq!(range.bits(), 4088);
   }
 }

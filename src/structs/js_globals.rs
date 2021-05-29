@@ -26,7 +26,9 @@ impl JsBoolean {
   #[inline]
   fn init(mut layout: HeapLayout<VoidHeapBody>, val: bool) -> JsBoolean {
     let mut boolean = JsBoolean(layout);
-    HeapObject::get_data_field(&boolean).set(JsBoolean::VALUE_BIT);
+    if val {
+      HeapObject::get_data_field(&boolean).set(JsBoolean::VALUE_BIT);
+    }
     return boolean;
   }
 }

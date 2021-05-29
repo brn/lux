@@ -409,14 +409,14 @@ impl Header {
   #[inline]
   pub fn set_forwarded_pointer(&mut self, addr: *mut Byte) {
     self.field.unset(SIZE_TAG_START);
-    let mut mask = self.field.mask_lower(DATA_FIELD_START);
+    let mut mask = self.field.mask_lower_mut(SIZE_FIELD_START);
     mask.assign(addr as u64);
   }
 
   #[inline]
   pub fn forwarded_pointer(&self) -> *mut Byte {
     if !self.is_size_used_as_size() {
-      return self.field.mask_lower(DATA_FIELD_START).bits() as *mut Byte;
+      return self.field.mask_lower(SIZE_FIELD_START).bits() as *mut Byte;
     }
     return 0xdeadbeef as *mut Byte;
   }
@@ -606,6 +606,8 @@ pub struct Cell(BareHeapLayout<CellLayout>);
 
 impl Cell {
   pub const TYPE: Shape = Shape::cell();
+
+  pub const OBJECT_SIZE: usize = size_of::<CellWithShadowClassLayout>();
 
   #[inline(always)]
   pub fn init_heap(mut context: impl AllocationOnlyContext, size: usize, shape: Shape) -> Addr {

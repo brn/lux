@@ -51,6 +51,7 @@ impl PropertyDescriptor {
     );
     layout.value = value;
     layout.flags.assign(bit);
+    layout.flags.set(PropertyDescriptor::DATA_PD_INDEX);
     return PropertyDescriptor(layout);
   }
 
