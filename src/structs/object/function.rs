@@ -1,6 +1,6 @@
 use super::super::cell::*;
 use super::super::internal_array::InternalArray;
-use super::super::shadow_class::{ShadowClass, ShadowInstance};
+use super::super::shadow_class::ShadowInstance;
 use super::super::shape::Shape;
 use super::property::Property;
 use crate::context::Context;
@@ -18,8 +18,8 @@ impl_object!(JsFunction, HeapLayout<JsFunctionLayout>);
 impl JsFunction {
   const SIZE: usize = size_of::<JsFunctionLayout>();
   pub fn new(context: impl Context, properties: InternalArray<Property>) -> JsFunction {
-    let mut layout = HeapLayout::<JsFunctionLayout>::new_object(context, JsFunction::SIZE, Shape::function());
-    let mut func = JsFunction(layout);
+    let layout = HeapLayout::<JsFunctionLayout>::new_object(context, JsFunction::SIZE, Shape::function());
+    let func = JsFunction(layout);
     func.cell().class().define_own_properties(context, properties);
     return func;
   }

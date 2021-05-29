@@ -1,9 +1,6 @@
 use super::bitutil::*;
-use num::Unsigned;
-use num_traits::{NumAssign, PrimInt, ToPrimitive};
-use std::cell::Cell;
+use num_traits::{NumAssign, PrimInt};
 use std::mem::size_of;
-use std::ops::*;
 
 pub trait BitNum: PrimInt + NumAssign + std::fmt::Display + std::fmt::Binary + Default {}
 
@@ -62,7 +59,7 @@ macro_rules! impl_bit_operator_for_usize {
       _priv_impl_bit_operator_for_usize_body!($T, $mod);
 
       #[inline]
-      fn assign(&mut self, bit_value: $T) {
+      fn assign(&mut self, _: $T) {
         unimplemented!();
       }
     }

@@ -2,7 +2,6 @@ use super::cell::*;
 use super::shadow_class::{ShadowClass, ShadowInstance};
 use super::shape::ShapeTag;
 use crate::def::*;
-use static_assertions;
 
 const NAN_BIT: u64 = 0xfff8000000000000;
 const NAN_MASK: u64 = !NAN_BIT;
@@ -27,7 +26,7 @@ const TRUE_VALUE: f64 = unsafe { std::mem::transmute(TRUE) };
 const FALSE_VALUE: f64 = unsafe { std::mem::transmute(FALSE) };
 const BOOLEAN: u64 = (TRUE | FALSE) & LOWER_STRANGERS_MASK;
 
-const MAX_SAFE_INTEGER: u64 = 0x1fffffffffffff;
+const _MAX_SAFE_INTEGER: u64 = 0x1fffffffffffff;
 
 #[derive(Copy, Clone)]
 pub struct Repr(f64);

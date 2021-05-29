@@ -8,7 +8,6 @@ mod shadow_class;
 #[macro_use]
 mod internal_array;
 mod cmp;
-mod convs;
 //mod errors;
 mod hash_map;
 mod traits;

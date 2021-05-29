@@ -1,4 +1,4 @@
-use super::cell::{Cell, HeapLayout, HeapObject};
+use super::cell::{HeapLayout, HeapObject};
 use super::repr::*;
 use super::shape::Shape;
 use crate::context::AllocationOnlyContext;

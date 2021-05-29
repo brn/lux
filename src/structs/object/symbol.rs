@@ -37,7 +37,7 @@ impl_object!(SymbolRegistry, HeapLayout<SymbolRegistryLayout>);
 
 impl SymbolRegistry {
   const SIZE: usize = size_of::<SymbolRegistryLayout>();
-  const TABLE_DEFAULT_CAPACITY: usize = 10;
+
   pub fn persist(context: impl AllocationOnlyContext) -> SymbolRegistry {
     let mut layout =
       HeapLayout::<SymbolRegistryLayout>::persist(context, SymbolRegistry::SIZE, Shape::symbol_registry());
@@ -122,7 +122,7 @@ pub struct JsSymbol(HeapLayout<JsSymbolLayout>);
 impl_object!(JsSymbol, HeapLayout<JsSymbolLayout>);
 
 impl JsSymbol {
-  const SIZE: usize = 0;
+  const SIZE: usize = std::mem::size_of::<JsSymbolLayout>();
   const IS_WELLKNOWN_BIT: usize = 1;
   const IS_OBJECT_BIT: usize = 2;
 

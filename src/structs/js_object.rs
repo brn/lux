@@ -1,4 +1,3 @@
-use super::cell::*;
 use super::object::{JsFunction, Property, WellKnownSymbolType};
 use crate::context::*;
 

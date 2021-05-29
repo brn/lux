@@ -1,4 +1,3 @@
-use crate::def::*;
 use crate::structs::{HeapObject, Repr};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
@@ -36,7 +35,6 @@ impl<'a, T: Into<Repr> + HeapObject> Drop for GcHandle<T> {
 
 #[cfg(test)]
 mod gc_handle_test {
-  use super::*;
 
   #[test]
   fn gc_handle_new_test() {}

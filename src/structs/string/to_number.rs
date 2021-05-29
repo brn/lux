@@ -1,5 +1,4 @@
 use super::u16_str::FixedU16CodePointArray;
-use crate::context::Context;
 use crate::structs::Repr;
 use crate::unicode::chars;
 use crate::unicode::{is_surrogate_pair, is_white_space};
@@ -7,7 +6,7 @@ use crate::utility::{BitOperator, Bitset};
 
 #[derive(Copy, Clone)]
 enum ToIntegerState {
-  Start,
+  Start = 0,
   StrDecimalLiteral,
   NonDecimalIntegerLiteral,
 }

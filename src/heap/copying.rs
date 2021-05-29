@@ -1,7 +1,5 @@
-use super::allocator::*;
 use super::heap::*;
 use crate::def::*;
-use std::mem::size_of;
 
 pub struct CopyingHeap {
   from_space: Heap,

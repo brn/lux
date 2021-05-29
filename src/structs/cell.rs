@@ -1,7 +1,6 @@
 use super::repr::*;
 use super::shadow_class::{ShadowClass, ShadowInstance};
 use super::shape::Shape;
-use super::string::JsString;
 use crate::context::AllocationOnlyContext;
 use crate::def::*;
 use crate::utility::*;
@@ -376,7 +375,7 @@ const SHADOW_CLASS_BIT_SIZE: usize = 1;
 const SIZE_FIELD_START: usize = SHADOW_CLASS_BIT_START + SHADOW_CLASS_BIT_SIZE;
 const SIZE_FIELD_SIZE: usize = 32;
 const DATA_FIELD_START: usize = SIZE_FIELD_START + SIZE_FIELD_SIZE;
-const DATA_FIELD_SIZE: usize = 23;
+const _DATA_FIELD_SIZE: usize = 23;
 
 impl Header {
   #[inline]
@@ -553,7 +552,7 @@ pub struct CellWithShadowClassLayout {
 
 impl From<Addr> for CellLayout {
   #[inline(always)]
-  fn from(a: Addr) -> CellLayout {
+  fn from(_: Addr) -> CellLayout {
     unreachable!();
   }
 }
@@ -567,7 +566,7 @@ impl Into<Addr> for CellLayout {
 
 impl From<Addr> for CellWithShadowClassLayout {
   #[inline(always)]
-  fn from(a: Addr) -> CellWithShadowClassLayout {
+  fn from(_: Addr) -> CellWithShadowClassLayout {
     unreachable!();
   }
 }
@@ -713,7 +712,7 @@ impl ShadowInstance for Cell {
   #[inline(always)]
   fn class(&self) -> ShadowClass {
     assert!(self.get_header().has_shadow_class());
-    return unsafe { self.object_layout().shadow_class };
+    return self.object_layout().shadow_class;
   }
 }
 

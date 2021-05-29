@@ -7,7 +7,6 @@ use super::super::string::JsString;
 use super::property::{OwnPropertyDescriptorSearchResult, Property, PropertyName, PropertySearchHint};
 use super::symbol::WellKnownSymbolType;
 use crate::context::Context;
-use crate::utility::{BitOperator, Bitset};
 use std::mem::size_of;
 
 #[derive(Copy, Clone, Default)]
@@ -27,7 +26,7 @@ pub enum PreferredType {
 impl JsObject {
   const SIZE: usize = size_of::<JsObjectLayout>();
   pub fn new(context: impl Context) -> JsObject {
-    let mut layout = HeapLayout::<JsObjectLayout>::new_object(context, JsObject::SIZE, Shape::object());
+    let layout = HeapLayout::<JsObjectLayout>::new_object(context, JsObject::SIZE, Shape::object());
     return JsObject(layout);
   }
 
@@ -90,7 +89,7 @@ impl JsObject {
   }
 
   // https://262.ecma-international.org/11.0/#sec-toobject
-  pub fn to_object(context: impl Context, object: Repr) -> Repr {
+  pub fn to_object(_context: impl Context, object: Repr) -> Repr {
     if object.is_js_null() || object.is_js_undefined() {
       // TypeError
       unreachable!();
@@ -228,7 +227,7 @@ impl JsObject {
     return PropertyName::new(JsObject::to_string(context, key));
   }
 
-  pub fn has_own_property(context: impl Context, o: Repr, hint: PropertySearchHint) -> bool {
+  pub fn has_own_property(_context: impl Context, o: Repr, hint: PropertySearchHint) -> bool {
     return JsObject::get_own_property(o, hint).is_some();
   }
 }

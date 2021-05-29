@@ -1,6 +1,5 @@
 use super::super::cell::{Cell, HeapLayout, HeapObject};
-use super::super::cmp::*;
-use super::super::hash_map::{DefaultHasher, Hasher, PredefinedHash};
+use super::super::hash_map::PredefinedHash;
 use super::super::object::Property;
 use super::super::repr::Repr;
 use super::super::shadow_class::{ShadowClass, ShadowInstance};
@@ -114,19 +113,6 @@ impl JsString {
     return JsString(layout);
   }
 
-  fn to_string_internal(&self) -> JsString {
-    return *self;
-  }
-
-  fn backend(&self) -> Repr {
-    return self.backend;
-  }
-
-  fn char_at(context: impl Context, this: Repr, index: Repr) -> Result<u16, Repr> {
-    require_object_coercible(context, this, "String.prototype.charAt");
-    return Ok(0);
-  }
-
   fn select_backend(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> Repr {
     if str.length() > 10 {
       return StringRope::new(context, str).into();
@@ -157,7 +143,7 @@ impl PredefinedHash for JsString {
     if self.class().hash() > 0 {
       return;
     }
-    let mut flat_content = self.flatten(context);
+    let flat_content = self.flatten(context);
     ShadowClass::set_hash(*self, flat_content.predefined_hash());
   }
 
@@ -178,7 +164,7 @@ pub struct FlatString(HeapLayout<JsStringLayout>);
 impl_object!(FlatString, HeapLayout<JsStringLayout>);
 
 impl PredefinedHash for FlatString {
-  fn prepare_hash(&mut self, context: impl Context) {
+  fn prepare_hash(&mut self, _: impl Context) {
     if self.class().hash() > 0 {
       return;
     }
