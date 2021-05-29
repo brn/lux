@@ -18,11 +18,13 @@ pub enum ShapeTag {
   Number,
   Object,
   Array,
+  Function,
   _JsValueSepEnd,
   OwnProperties,
   HashMap,
   HashMapEntry,
   PropertyDescriptor,
+  Property,
   InternalArray,
   StringPiece,
   FixedU16Array,
@@ -33,6 +35,7 @@ pub enum ShapeTag {
   Error,
   TypeError,
   GlobalObjects,
+  StaticNames,
   __Sentinel,
 }
 assert_eq_size!(ShapeTag, u8);
@@ -62,6 +65,14 @@ impl Shape {
     return Shape {
       tag: ShapeTag::from_u8(tag).unwrap(),
     };
+  }
+
+  pub fn is_symbol(&self) -> bool {
+    return self.tag == ShapeTag::Symbol;
+  }
+
+  pub fn is_string(&self) -> bool {
+    return self.tag == ShapeTag::String;
   }
 
   pub const fn invalid() -> Shape {
@@ -126,9 +137,21 @@ impl Shape {
     return Shape { tag: ShapeTag::Array };
   }
 
+  pub const fn function() -> Shape {
+    return Shape {
+      tag: ShapeTag::Function,
+    };
+  }
+
   pub const fn property_descriptor() -> Shape {
     return Shape {
       tag: ShapeTag::PropertyDescriptor,
+    };
+  }
+
+  pub const fn property() -> Shape {
+    return Shape {
+      tag: ShapeTag::Property,
     };
   }
 
@@ -193,6 +216,12 @@ impl Shape {
   pub const fn global_objects() -> Shape {
     return Shape {
       tag: ShapeTag::GlobalObjects,
+    };
+  }
+
+  pub const fn static_names() -> Shape {
+    return Shape {
+      tag: ShapeTag::StaticNames,
     };
   }
 

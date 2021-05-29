@@ -1,4 +1,4 @@
-use super::super::cell::{BareHeapLayout, Cell, HeapLayout, HeapObject};
+use super::super::cell::{Cell, HeapLayout, HeapObject};
 use super::super::repr::Repr;
 use super::super::shape::{Shape, ShapeTag};
 use super::backend::StringBackend;
@@ -10,9 +10,9 @@ use crate::def::*;
 use std::mem::size_of;
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct SmallStringLayout {
-  str: BareHeapLayout<FixedU16CodePointArray>,
+  str: FixedU16CodePointArray,
 }
 
 #[repr(C)]
@@ -21,15 +21,15 @@ pub struct SmallString(HeapLayout<SmallStringLayout>);
 impl_object!(SmallString, HeapLayout<SmallStringLayout>);
 
 impl SmallString {
-  const SIZE: usize = Cell::SIZE + size_of::<SmallStringLayout>();
-  pub fn new(context: &mut impl AllocationOnlyContext, str: FixedU16CodePointArray) -> SmallString {
+  const SIZE: usize = size_of::<SmallStringLayout>();
+  pub fn new(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> SmallString {
     let mut layout = HeapLayout::<SmallStringLayout>::new(context, SmallString::SIZE, Shape::small_string());
-    layout.str.set(str);
+    layout.str = str;
     return SmallString(layout);
   }
 
   pub fn str(&self) -> FixedU16CodePointArray {
-    return self.str.handle();
+    return self.str;
   }
 }
 
@@ -41,7 +41,7 @@ impl StringBackend for SmallString {
     return None;
   }
 
-  fn concat(&self, context: &mut impl Context, repr: Repr) -> JsString {
+  fn concat(&self, context: impl Context, repr: Repr) -> JsString {
     match Cell::from(repr).shape().tag() {
       ShapeTag::SmallString => {
         let str = SmallString::from(repr);
@@ -72,11 +72,11 @@ impl StringBackend for SmallString {
     };
   }
 
-  fn slice(&self, context: &mut impl Context, start_index: usize, end_index: usize) -> FixedU16CodePointArray {
+  fn slice(&self, context: impl Context, start_index: usize, end_index: usize) -> FixedU16CodePointArray {
     return self.str().slice(context, start_index, end_index);
   }
 
-  fn flatten(&mut self, context: &mut impl Context) -> FixedU16CodePointArray {
+  fn flatten(&mut self, _: impl AllocationOnlyContext) -> FixedU16CodePointArray {
     return self.str();
   }
 
@@ -86,7 +86,7 @@ impl StringBackend for SmallString {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 struct OneByte(u16);
 
 impl From<Addr> for OneByte {
@@ -108,9 +108,9 @@ impl std::ops::Deref for OneByte {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct OneByteCharLayout {
-  ch: BareHeapLayout<OneByte>,
+  ch: OneByte,
 }
 
 #[repr(C)]
@@ -119,10 +119,10 @@ pub struct OneByteChar(HeapLayout<OneByteCharLayout>);
 impl_object!(OneByteChar, HeapLayout<OneByteCharLayout>);
 
 impl OneByteChar {
-  const SIZE: usize = Cell::SIZE + size_of::<OneByteCharLayout>();
-  pub fn new(context: &mut impl AllocationOnlyContext, ch: u16) -> OneByteChar {
+  const SIZE: usize = size_of::<OneByteCharLayout>();
+  pub fn new(context: impl AllocationOnlyContext, ch: u16) -> OneByteChar {
     let mut layout = HeapLayout::<OneByteCharLayout>::new(context, OneByteChar::SIZE, Shape::small_string());
-    layout.ch.set(OneByte(ch));
+    layout.ch = OneByte(ch);
     return OneByteChar(layout);
   }
 }
@@ -132,10 +132,10 @@ impl StringBackend for OneByteChar {
     if index > 0 {
       return None;
     }
-    return Some(*self.ch.handle());
+    return Some(*self.ch);
   }
 
-  fn concat(&self, context: &mut impl Context, repr: Repr) -> JsString {
+  fn concat(&self, context: impl Context, repr: Repr) -> JsString {
     match Cell::from(repr).shape().tag() {
       ShapeTag::SmallString => {
         let str = SmallString::from(repr);
@@ -147,7 +147,7 @@ impl StringBackend for OneByteChar {
       ShapeTag::OneByteChar => {
         let str = OneByteChar::from(repr);
         let mut array = FixedU16CodePointArray::new(context, 2);
-        array.push(*self.ch.handle());
+        array.push(*self.ch);
         array.push(str.at(0).unwrap());
         return JsString::new(context, array);
       }
@@ -167,14 +167,14 @@ impl StringBackend for OneByteChar {
     };
   }
 
-  fn slice(&self, context: &mut impl Context, start_index: usize, end_index: usize) -> FixedU16CodePointArray {
+  fn slice(&self, context: impl Context, start_index: usize, end_index: usize) -> FixedU16CodePointArray {
     if start_index == 0 && end_index == 1 {
       return fixed_array!(type: u16, context: context, capacity: 1, self.at(0).unwrap());
     }
     return context.empty_internal_array();
   }
 
-  fn flatten(&mut self, context: &mut impl Context) -> FixedU16CodePointArray {
+  fn flatten(&mut self, context: impl AllocationOnlyContext) -> FixedU16CodePointArray {
     return fixed_array!(type: u16, context: context, capacity: 1, self.at(0).unwrap());
   }
 

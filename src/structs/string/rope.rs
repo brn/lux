@@ -1,4 +1,4 @@
-use super::super::cell::{BareHeapLayout, Cell, HeapLayout, HeapObject};
+use super::super::cell::{Cell, HeapLayout, HeapObject};
 use super::super::repr::*;
 use super::super::shape::{Shape, ShapeTag};
 use super::backend::StringBackend;
@@ -25,14 +25,14 @@ impl std::fmt::Display for StringPieceIndexOutOfBoundsError {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct StringPieceLayout {
-  parent: BareHeapLayout<StringPiece>,
+  parent: StringPiece,
   length: usize,
   offset: usize,
-  data: BareHeapLayout<FixedU16CodePointArray>,
-  left: BareHeapLayout<StringPiece>,
-  right: BareHeapLayout<StringPiece>,
+  data: FixedU16CodePointArray,
+  left: StringPiece,
+  right: StringPiece,
 }
 
 #[repr(C)]
@@ -41,20 +41,20 @@ struct StringPiece(HeapLayout<StringPieceLayout>);
 impl_object!(StringPiece, HeapLayout<StringPieceLayout>);
 
 impl StringPiece {
-  const SIZE: usize = Cell::SIZE + size_of::<StringPieceLayout>();
+  const SIZE: usize = size_of::<StringPieceLayout>();
 
-  pub fn new(context: &mut impl AllocationOnlyContext, str: FixedU16CodePointArray) -> StringPiece {
+  pub fn new(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> StringPiece {
     let layout = StringPiece::init(context, str);
     return StringPiece(layout);
   }
 
-  pub fn new_branch(context: &mut impl Context) -> StringPiece {
+  pub fn new_branch(context: impl Context) -> StringPiece {
     let layout = StringPiece::init_branch(context);
     return StringPiece(layout);
   }
 
   pub fn new_with_offset(
-    context: &mut impl Context,
+    context: impl Context,
     str: FixedU16CodePointArray,
     offset: usize,
     length: usize,
@@ -93,25 +93,17 @@ impl StringPiece {
   pub fn at_unchecked(&self, index: usize) -> u16 {
     debug_assert!(!self.is_branch());
     debug_assert!(self.length() > index);
-    return self.data.handle()[index];
+    return self.data[index];
   }
 
   #[inline]
   pub fn left(&self) -> Option<StringPiece> {
-    return if self.left.is_null() {
-      None
-    } else {
-      Some(self.left.handle())
-    };
+    return if self.left.is_null() { None } else { Some(self.left) };
   }
 
   #[inline]
   pub fn right(&self) -> Option<StringPiece> {
-    return if self.right.is_null() {
-      None
-    } else {
-      Some(self.right.handle())
-    };
+    return if self.right.is_null() { None } else { Some(self.right) };
   }
 
   #[inline]
@@ -121,19 +113,19 @@ impl StringPiece {
 
   #[inline]
   pub fn str(&self) -> FixedU16CodePointArray {
-    return self.data.handle();
+    return self.data;
   }
 
   pub fn to_utf8(&self) -> String {
-    return decode_utf16(self.data.handle().into_iter())
+    return decode_utf16(self.data.into_iter())
       .map(|r| r.unwrap_or('#'))
       .collect::<String>();
   }
 
-  pub fn concat(&self, context: &mut impl Context, piece: StringPiece) -> StringPiece {
+  pub fn concat(&self, context: impl Context, piece: StringPiece) -> StringPiece {
     let mut branch = StringPiece::new_branch(context);
-    branch.left.set(*self);
-    branch.right.set(piece);
+    branch.left = *self;
+    branch.right = piece;
     branch.length = StringPiece::weight(self);
     return branch;
   }
@@ -195,17 +187,17 @@ impl StringPiece {
 
   #[inline]
   fn str_ptr(&self) -> *mut u16 {
-    return self.data.handle().data();
+    return self.data.data();
   }
 
   #[inline]
   fn set_parent(&mut self, parent: StringPiece) {
-    self.parent.set(parent);
+    self.parent = parent;
   }
 
   #[inline]
   fn parent(&self) -> StringPiece {
-    return self.parent.handle();
+    return self.parent;
   }
 
   #[inline]
@@ -216,8 +208,8 @@ impl StringPiece {
       while stack.len() > 0 {
         let next = stack.pop();
         match next {
-          Some(parent) => {
-            parent.handle().update_length(diff);
+          Some(mut parent) => {
+            parent.update_length(diff);
           }
           _ => {
             break;
@@ -279,23 +271,23 @@ impl StringPiece {
     });
   }
 
-  fn init(context: &mut impl AllocationOnlyContext, str: FixedU16CodePointArray) -> HeapLayout<StringPieceLayout> {
+  fn init(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> HeapLayout<StringPieceLayout> {
     let mut layout = HeapLayout::<StringPieceLayout>::new(context, StringPiece::SIZE, Shape::string_piece());
-    layout.parent.set_null();
+    layout.parent = StringPiece::default();
     layout.length = str.length();
-    layout.data.set(str);
-    layout.left.set_null();
-    layout.right.set_null();
+    layout.data = str;
+    layout.left = StringPiece::default();
+    layout.right = StringPiece::default();
     return layout;
   }
 
-  fn init_branch(context: &mut impl AllocationOnlyContext) -> HeapLayout<StringPieceLayout> {
+  fn init_branch(context: impl AllocationOnlyContext) -> HeapLayout<StringPieceLayout> {
     let mut layout = HeapLayout::<StringPieceLayout>::new(context, StringPiece::SIZE, Shape::string_piece());
-    layout.parent.set_null();
+    layout.parent = StringPiece::default();
     layout.length = 0;
-    layout.data.set_null();
-    layout.left.set_null();
-    layout.right.set_null();
+    layout.data = FixedU16CodePointArray::default();
+    layout.left = StringPiece::default();
+    layout.right = StringPiece::default();
     return layout;
   }
 
@@ -379,10 +371,10 @@ impl IntoIterator for StringPiece {
 mod string_piece_test {
   use super::*;
 
-  use crate::context::isolate;
   use crate::context::Context;
+  use crate::context::LuxContext;
 
-  fn new_string_piece(context: &mut impl Context, s: &str) -> (StringPiece, Vec<u16>) {
+  fn new_string_piece(context: impl Context, s: &str) -> (StringPiece, Vec<u16>) {
     let u16_vec = s.encode_utf16().collect::<Vec<_>>();
     let mut array = FixedU16CodePointArray::new(context, u16_vec.len() * 2);
     for w in &u16_vec {
@@ -393,19 +385,19 @@ mod string_piece_test {
 
   #[test]
   fn string_piece_concat_test() {
-    let mut mc = isolate::context();
+    let mut mc = LuxContext::new();
     let a = "test string value";
     let b = "テスト　文字列";
     let c = "lorem ipsum";
     let d = "quick brown fox";
-    let (piece_1, a_vec) = new_string_piece(&mut mc, a);
-    let (piece_2, b_vec) = new_string_piece(&mut mc, b);
-    let (piece_3, c_vec) = new_string_piece(&mut mc, c);
-    let (piece_4, _) = new_string_piece(&mut mc, d);
+    let (piece_1, a_vec) = new_string_piece(mc, a);
+    let (piece_2, b_vec) = new_string_piece(mc, b);
+    let (piece_3, c_vec) = new_string_piece(mc, c);
+    let (piece_4, _) = new_string_piece(mc, d);
 
-    let new_piece_1 = piece_1.concat(&mut mc, piece_2);
-    let new_piece_2 = new_piece_1.concat(&mut mc, piece_3);
-    let new_piece_3 = new_piece_2.concat(&mut mc, piece_4);
+    let new_piece_1 = piece_1.concat(mc, piece_2);
+    let new_piece_2 = new_piece_1.concat(mc, piece_3);
+    let new_piece_3 = new_piece_2.concat(mc, piece_4);
     assert_eq!(new_piece_1.is_branch(), true);
     assert_eq!(new_piece_1.length(), a_vec.len());
     assert_eq!(new_piece_2.is_branch(), true);
@@ -416,25 +408,22 @@ mod string_piece_test {
 
   #[test]
   fn string_piece_at_test() {
-    let mut mc = isolate::context();
+    let mut mc = LuxContext::new();
     let a = "test string value";
     let b = "テスト　文字列";
     let c = "lorem ipsum";
     let d = "quick brown fox";
-    let (piece_1, a_vec) = new_string_piece(&mut mc, a);
-    let (piece_2, b_vec) = new_string_piece(&mut mc, b);
-    let (piece_3, c_vec) = new_string_piece(&mut mc, c);
-    let (piece_4, d_vec) = new_string_piece(&mut mc, d);
+    let (piece_1, a_vec) = new_string_piece(mc, a);
+    let (piece_2, b_vec) = new_string_piece(mc, b);
+    let (piece_3, c_vec) = new_string_piece(mc, c);
+    let (piece_4, d_vec) = new_string_piece(mc, d);
 
     //                []
     //        []
     //   []       [c]     [d]
     //[a]  [b]
     //
-    let new_piece = piece_1
-      .concat(&mut mc, piece_2)
-      .concat(&mut mc, piece_3)
-      .concat(&mut mc, piece_4);
+    let new_piece = piece_1.concat(mc, piece_2).concat(mc, piece_3).concat(mc, piece_4);
     assert_eq!(new_piece.is_branch(), true);
     for i in 0..(a_vec.len()) {
       assert_eq!(new_piece.index(i).unwrap(), a_vec[i]);
@@ -455,15 +444,15 @@ mod string_piece_test {
 
   #[test]
   fn string_flatten_test() {
-    let mut mc = isolate::context();
+    let mut mc = LuxContext::new();
     let a = "test string value";
     let b = "テスト　文字列";
     let c = "lorem ipsum";
     let d = "quick brown fox";
-    let (piece_1, mut a_vec) = new_string_piece(&mut mc, a);
-    let (piece_2, mut b_vec) = new_string_piece(&mut mc, b);
-    let (piece_3, mut c_vec) = new_string_piece(&mut mc, c);
-    let (piece_4, mut d_vec) = new_string_piece(&mut mc, d);
+    let (piece_1, mut a_vec) = new_string_piece(mc, a);
+    let (piece_2, mut b_vec) = new_string_piece(mc, b);
+    let (piece_3, mut c_vec) = new_string_piece(mc, c);
+    let (piece_4, mut d_vec) = new_string_piece(mc, d);
     let size = a_vec.len() + b_vec.len() + c_vec.len() + d_vec.len();
     let mut u16_vec = Vec::with_capacity(size);
     u16_vec.append(&mut a_vec);
@@ -476,11 +465,8 @@ mod string_piece_test {
     //   []       [c]     [d]
     //[a]  [b]
     //
-    let new_piece = piece_1
-      .concat(&mut mc, piece_2)
-      .concat(&mut mc, piece_3)
-      .concat(&mut mc, piece_4);
-    let mut buffer = FixedU16CodePointArray::new(&mut mc, size);
+    let new_piece = piece_1.concat(mc, piece_2).concat(mc, piece_3).concat(mc, piece_4);
+    let mut buffer = FixedU16CodePointArray::new(mc, size);
     new_piece.flatten(&mut buffer, 0, size);
     for (i, w) in buffer.into_iter().enumerate() {
       assert_eq!(w, u16_vec[i]);
@@ -489,15 +475,15 @@ mod string_piece_test {
 
   #[test]
   fn string_flatten_slice_test() {
-    let mut mc = isolate::context();
+    let mut mc = LuxContext::new();
     let a = "test string value";
     let b = "テスト　文字列";
     let c = "lorem ipsum";
     let d = "quick brown fox";
-    let (piece_1, mut a_vec) = new_string_piece(&mut mc, a);
-    let (piece_2, mut b_vec) = new_string_piece(&mut mc, b);
-    let (piece_3, mut c_vec) = new_string_piece(&mut mc, c);
-    let (piece_4, mut d_vec) = new_string_piece(&mut mc, d);
+    let (piece_1, mut a_vec) = new_string_piece(mc, a);
+    let (piece_2, mut b_vec) = new_string_piece(mc, b);
+    let (piece_3, mut c_vec) = new_string_piece(mc, c);
+    let (piece_4, mut d_vec) = new_string_piece(mc, d);
     let size = a_vec.len() + b_vec.len() + c_vec.len() + d_vec.len();
     let mut u16_vec = Vec::with_capacity(size);
     u16_vec.append(&mut a_vec);
@@ -510,13 +496,10 @@ mod string_piece_test {
     //   []       [c]     [d]
     //[a]  [b]
     //
-    let new_piece = piece_1
-      .concat(&mut mc, piece_2)
-      .concat(&mut mc, piece_3)
-      .concat(&mut mc, piece_4);
+    let new_piece = piece_1.concat(mc, piece_2).concat(mc, piece_3).concat(mc, piece_4);
     let start = 18;
     let end = size - 14;
-    let mut buffer = FixedU16CodePointArray::new(&mut mc, end - start);
+    let mut buffer = FixedU16CodePointArray::new(mc, end - start);
     new_piece.flatten(&mut buffer, start, end);
     for (i, w) in buffer.into_iter().enumerate() {
       assert_eq!(w, u16_vec[i + start]);
@@ -525,9 +508,9 @@ mod string_piece_test {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct FlattenStringLayout {
-  str: BareHeapLayout<FixedU16CodePointArray>,
+  str: FixedU16CodePointArray,
 }
 
 #[repr(C)]
@@ -536,28 +519,28 @@ pub struct FlattenString(HeapLayout<FlattenStringLayout>);
 impl_object!(FlattenString, HeapLayout<FlattenStringLayout>);
 
 impl FlattenString {
-  const SIZE: usize = Cell::SIZE + size_of::<FlattenStringLayout>();
+  const SIZE: usize = size_of::<FlattenStringLayout>();
 
-  pub fn new(context: &mut impl AllocationOnlyContext, str: FixedU16CodePointArray) -> FlattenString {
+  pub fn new(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> FlattenString {
     let mut layout = HeapLayout::<FlattenStringLayout>::new(context, FlattenString::SIZE, Shape::flatten_string());
-    layout.str.set(str);
+    layout.str = str;
     return FlattenString(layout);
   }
 
   pub fn str(&self) -> FixedU16CodePointArray {
-    return self.str.handle();
+    return self.str;
   }
 }
 
 impl StringBackend for FlattenString {
   fn at(&self, index: usize) -> Option<u16> {
     if index < self.str().length() {
-      return Some(self.str.handle()[index]);
+      return Some(self.str[index]);
     }
     return None;
   }
 
-  fn concat(&self, context: &mut impl Context, repr: Repr) -> JsString {
+  fn concat(&self, context: impl Context, repr: Repr) -> JsString {
     let left = match Cell::from(repr).shape().tag() {
       ShapeTag::SmallString => StringPiece::new(context, SmallString::from(repr).str()),
       ShapeTag::OneByteChar => {
@@ -573,25 +556,24 @@ impl StringBackend for FlattenString {
     return JsString::from(StringRope::from_piece(context, new_piece));
   }
 
-  fn slice(&self, context: &mut impl Context, start_index: usize, end_index: usize) -> FixedU16CodePointArray {
-    return self.str.handle().slice(context, start_index, end_index);
+  fn slice(&self, context: impl Context, start_index: usize, end_index: usize) -> FixedU16CodePointArray {
+    return self.str.slice(context, start_index, end_index);
   }
 
-  fn flatten(&mut self, context: &mut impl Context) -> FixedU16CodePointArray {
-    return self.str.handle();
+  fn flatten(&mut self, context: impl AllocationOnlyContext) -> FixedU16CodePointArray {
+    return self.str;
   }
 
   fn len(&self) -> usize {
-    return self.str.handle().length();
+    return self.str.length();
   }
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct StringRopeLayout {
   len: usize,
-  flatten_cache: BareHeapLayout<FixedU16CodePointArray>,
-  piece: BareHeapLayout<StringPiece>,
+  piece: StringPiece,
 }
 
 #[repr(C)]
@@ -600,37 +582,36 @@ pub struct StringRope(HeapLayout<StringRopeLayout>);
 impl_object!(StringRope, HeapLayout<StringRopeLayout>);
 
 impl StringRope {
-  const SIZE: usize = Cell::SIZE + size_of::<StringRopeLayout>();
+  const SIZE: usize = size_of::<StringRopeLayout>();
 
-  pub fn new(context: &mut impl AllocationOnlyContext, str: FixedU16CodePointArray) -> StringRope {
+  pub fn new(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> StringRope {
     let mut layout = HeapLayout::<StringRopeLayout>::new(context, StringRope::SIZE, Shape::string_rope());
     let piece = StringPiece::new(context, str);
     layout.len = str.length();
-    layout.piece.set(piece);
-    layout.flatten_cache.set_null();
+    layout.piece = piece;
     return StringRope(layout);
   }
 
-  fn from_piece(context: &mut impl Context, str: StringPiece) -> StringRope {
+  fn from_piece(context: impl Context, str: StringPiece) -> StringRope {
     let mut layout = HeapLayout::<StringRopeLayout>::new(context, StringRope::SIZE, Shape::string_rope());
-    layout.piece.set(str);
+    layout.piece = str;
     return StringRope(layout);
   }
 
   fn piece(&self) -> StringPiece {
-    return self.piece.handle();
+    return self.piece;
   }
 }
 
 impl StringBackend for StringRope {
   fn at(&self, index: usize) -> Option<u16> {
-    return match self.piece.handle().index(index) {
+    return match self.piece.index(index) {
       Ok(w) => Some(w),
       _ => None,
     };
   }
 
-  fn concat(&self, context: &mut impl Context, repr: Repr) -> JsString {
+  fn concat(&self, context: impl Context, repr: Repr) -> JsString {
     let new_piece = match Cell::from(repr).shape().tag() {
       ShapeTag::SmallString => StringPiece::new(context, SmallString::from(repr).str()),
       ShapeTag::OneByteChar => {
@@ -644,23 +625,16 @@ impl StringBackend for StringRope {
     return JsString::from(StringRope::from_piece(context, new_piece));
   }
 
-  fn slice(&self, context: &mut impl Context, start_index: usize, end_index: usize) -> FixedU16CodePointArray {
-    if !self.flatten_cache.is_null() {
-      return self.flatten_cache.handle().slice(context, start_index, end_index);
-    }
+  fn slice(&self, context: impl Context, start_index: usize, end_index: usize) -> FixedU16CodePointArray {
     let len = end_index - start_index;
     let mut fixed_array = FixedU16CodePointArray::new(context, if self.len > len { len } else { self.len });
-    self.piece.handle().flatten(&mut fixed_array, start_index, end_index);
+    self.piece.flatten(&mut fixed_array, start_index, end_index);
     return fixed_array;
   }
 
-  fn flatten(&mut self, context: &mut impl Context) -> FixedU16CodePointArray {
-    if !self.flatten_cache.is_null() {
-      return self.flatten_cache.handle();
-    }
+  fn flatten(&mut self, context: impl AllocationOnlyContext) -> FixedU16CodePointArray {
     let mut fixed_array = FixedU16CodePointArray::new(context, self.len);
-    self.piece.handle().flatten(&mut fixed_array, 0, self.len);
-    self.flatten_cache.set(fixed_array);
+    self.piece.flatten(&mut fixed_array, 0, self.len);
     return fixed_array;
   }
 

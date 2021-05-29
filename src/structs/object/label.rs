@@ -1,7 +1,7 @@
 use super::super::cell::*;
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct JsLabelLayout {
   label_id: u64,
 }

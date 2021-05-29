@@ -1,23 +1,23 @@
 use super::super::cell::*;
-use super::super::js_object::JsVal;
+use super::super::repr::Repr;
 use super::super::shape::Shape;
 use crate::context::{AllocationOnlyContext, Context};
 use crate::utility::{BitOperator, Bitset};
 use std::mem::size_of;
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct DataPropertyDescriptorLayout {
   flags: Bitset<u8>,
-  value: BareHeapLayout<JsVal>,
+  value: Repr,
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct AccessorPropertyDescriptorLayout {
   flags: Bitset<u8>,
-  get: BareHeapLayout<JsVal>,
-  set: BareHeapLayout<JsVal>,
+  get: Repr,
+  set: Repr,
 }
 
 impl From<HeapLayout<DataPropertyDescriptorLayout>> for HeapLayout<AccessorPropertyDescriptorLayout> {
@@ -32,7 +32,7 @@ pub struct PropertyDescriptor(HeapLayout<DataPropertyDescriptorLayout>);
 impl_object!(PropertyDescriptor, HeapLayout<DataPropertyDescriptorLayout>);
 
 impl PropertyDescriptor {
-  const SIZE: usize = Cell::SIZE;
+  const SIZE: usize = 0;
   pub const DEFAULT: u8 = 0;
   pub const WRITABLE: u8 = 0x1;
   pub const ENUMERABLE: u8 = 0x2;
@@ -43,22 +43,22 @@ impl PropertyDescriptor {
   const CONFIGURABLE_INDEX: usize = 3;
   const DATA_PD_INDEX: usize = 4;
 
-  pub fn new_data_descriptor(context: &mut impl AllocationOnlyContext, bit: u8, value: JsVal) -> PropertyDescriptor {
+  pub fn new_data_descriptor(context: impl AllocationOnlyContext, bit: u8, value: Repr) -> PropertyDescriptor {
     let mut layout = HeapLayout::<DataPropertyDescriptorLayout>::new(
       context,
       PropertyDescriptor::SIZE + size_of::<DataPropertyDescriptorLayout>(),
       Shape::property_descriptor(),
     );
-    layout.value.set(value);
+    layout.value = value;
     layout.flags.assign(bit);
     return PropertyDescriptor(layout);
   }
 
   pub fn new_accessor_descriptor(
-    context: &mut impl Context,
+    context: impl Context,
     bit: u8,
-    get: Option<JsVal>,
-    set: Option<JsVal>,
+    get: Option<Repr>,
+    set: Option<Repr>,
   ) -> PropertyDescriptor {
     let layout = HeapLayout::<DataPropertyDescriptorLayout>::new(
       context,
@@ -69,14 +69,14 @@ impl PropertyDescriptor {
     a_layout.flags.assign(bit);
     a_layout.flags.set(PropertyDescriptor::DATA_PD_INDEX);
     if get.is_some() {
-      a_layout.get.set(get.unwrap());
+      a_layout.get = get.unwrap();
     } else {
-      a_layout.get.set(JsVal::from(context.js_undefined()));
+      a_layout.get = context.js_undefined();
     }
     if set.is_some() {
-      a_layout.set.set(set.unwrap());
+      a_layout.set = set.unwrap();
     } else {
-      a_layout.get.set(JsVal::from(context.js_undefined()));
+      a_layout.get = context.js_undefined();
     }
     return PropertyDescriptor(layout);
   }
@@ -93,21 +93,21 @@ impl PropertyDescriptor {
     return self.flags.get(PropertyDescriptor::CONFIGURABLE_INDEX);
   }
 
-  pub fn value(&self) -> JsVal {
+  pub fn value(&self) -> Repr {
     assert!(self.is_data_descriptor());
-    return self.value.handle();
+    return self.value;
   }
 
-  pub fn getter(&self) -> JsVal {
+  pub fn getter(&self) -> Repr {
     assert!(self.is_accessor_descriptor());
     let accessor_property_descriptor = HeapLayout::<AccessorPropertyDescriptorLayout>::from(self.0);
-    return accessor_property_descriptor.get.handle();
+    return accessor_property_descriptor.get;
   }
 
-  pub fn setter(&self) -> JsVal {
+  pub fn setter(&self) -> Repr {
     assert!(self.is_accessor_descriptor());
     let accessor_property_descriptor = HeapLayout::<AccessorPropertyDescriptorLayout>::from(self.0);
-    return accessor_property_descriptor.set.handle();
+    return accessor_property_descriptor.set;
   }
 
   pub fn is_data_descriptor(&self) -> bool {

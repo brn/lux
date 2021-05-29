@@ -1,10 +1,11 @@
 use super::bitutil::*;
 use num::Unsigned;
 use num_traits::{NumAssign, PrimInt, ToPrimitive};
+use std::cell::Cell;
 use std::mem::size_of;
 use std::ops::*;
 
-pub trait BitNum: PrimInt + NumAssign + std::fmt::Display + std::fmt::Binary {}
+pub trait BitNum: PrimInt + NumAssign + std::fmt::Display + std::fmt::Binary + Default {}
 
 impl BitNum for u8 {}
 impl BitNum for u16 {}
@@ -40,7 +41,7 @@ pub trait BitOperator<BitNum> {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct Bitset<BitType: BitNum> {
   bit_field: BitType,
 }
@@ -48,105 +49,159 @@ pub struct Bitset<BitType: BitNum> {
 macro_rules! impl_bit_operator_for_usize {
   ($T:ty, $mod:ident) => {
     impl BitOperator<$T> for $mod<$T> {
-      #[inline]
-      fn bits_ref(&self) -> &$T {
-        return &self.bit_field;
-      }
-
-      fn bits_ref_mut(&mut self) -> &mut $T {
-        return &mut self.bit_field;
-      }
-
-      #[inline]
-      fn bits(&self) -> $T {
-        return self.bit_field;
-      }
+      _priv_impl_bit_operator_for_usize_body!($T, $mod);
 
       #[inline]
       fn assign(&mut self, bit_value: $T) {
         self.bit_field = bit_value;
       }
+    }
+  };
+  (mask; $T:ty, $mod:ident) => {
+    impl<'a> BitOperator<$T> for $mod<'a, $T> {
+      _priv_impl_bit_operator_for_usize_body!($T, $mod);
 
       #[inline]
-      fn set(&mut self, index: usize) {
-        debug_assert!(
-          index - 1 <= size_of::<$T>() * 8,
-          "Bitset::set index must be lower than BitType size"
-        );
-        self.assign(self.bits() | (1 << (index - 1)));
+      fn assign(&mut self, bit_value: $T) {
+        unimplemented!();
       }
+    }
+  };
+  (mask_mut; $T:ty, $mod:ident) => {
+    impl<'a> BitOperator<$T> for $mod<'a, $T> {
+      _priv_impl_bit_operator_for_usize_body!($T, $mod);
 
       #[inline]
-      fn set_raw(&mut self, value: $T) {
-        self.assign(self.bits() | value);
-      }
-
-      #[inline]
-      fn unset(&mut self, index: usize) {
-        debug_assert!(
-          index - 1 <= size_of::<$T>() * 8,
-          "Bitset::set index must be lower than BitType size"
-        );
-        self.assign(self.bits() & !(1 << (index - 1)));
-      }
-
-      #[inline]
-      fn assign_and(&mut self, value: $T) {
-        self.assign(self.bits() & value);
-      }
-
-      #[inline]
-      fn assign_or(&mut self, value: $T) {
-        self.assign(self.bits() | value);
-      }
-
-      #[inline]
-      fn get(&self, index: usize) -> bool {
-        debug_assert!(
-          index - 1 <= size_of::<$T>() * 8,
-          "Bitset::set index must be lower than BitType size"
-        );
-        let i = 1 << (index - 1);
-        return self.bits() & i == i;
-      }
-
-      #[inline]
-      fn is_full(&self) -> bool {
-        return self.bits() == !0;
-      }
-
-      #[inline]
-      fn mask(&self, mask: $T) -> $T {
-        return self.bits() & mask;
-      }
-
-      #[inline]
-      fn right_most_empty_slot(&self) -> u32 {
-        return Bitutil::msb(self.bit_field ^ (self.bit_field + 1));
+      fn assign(&mut self, bit_value: $T) {
+        self.bit_field = bit_value;
+        *self.base = (self.bit_field << self.shift) | self.masked_bits;
       }
     }
   };
 }
 
+macro_rules! _priv_impl_bit_operator_for_usize_body {
+  ($T:ty, $mod:ident) => {
+    #[inline]
+    fn bits_ref(&self) -> &$T {
+      return &self.bit_field;
+    }
+
+    fn bits_ref_mut(&mut self) -> &mut $T {
+      return &mut self.bit_field;
+    }
+
+    #[inline]
+    fn bits(&self) -> $T {
+      return self.bit_field;
+    }
+
+    #[inline]
+    fn set(&mut self, index: usize) {
+      debug_assert!(
+        index - 1 <= size_of::<$T>() * 8,
+        "Bitset::set index must be lower than BitType size"
+      );
+      self.assign(self.bits() | (1 << (index - 1)));
+    }
+
+    #[inline]
+    fn set_raw(&mut self, value: $T) {
+      self.assign(self.bits() | value);
+    }
+
+    #[inline]
+    fn unset(&mut self, index: usize) {
+      debug_assert!(
+        index - 1 <= size_of::<$T>() * 8,
+        "Bitset::set index must be lower than BitType size"
+      );
+      self.assign(self.bits() & !(1 << (index - 1)));
+    }
+
+    #[inline]
+    fn assign_and(&mut self, value: $T) {
+      self.assign(self.bits() & value);
+    }
+
+    #[inline]
+    fn assign_or(&mut self, value: $T) {
+      self.assign(self.bits() | value);
+    }
+
+    #[inline]
+    fn get(&self, index: usize) -> bool {
+      debug_assert!(
+        index - 1 <= size_of::<$T>() * 8,
+        "Bitset::set index must be lower than BitType size"
+      );
+      let i = 1 << (index - 1);
+      return self.bits() & i == i;
+    }
+
+    #[inline]
+    fn is_full(&self) -> bool {
+      return self.bits() == !0;
+    }
+
+    #[inline]
+    fn mask(&self, mask: $T) -> $T {
+      return self.bits() & mask;
+    }
+
+    #[inline]
+    fn right_most_empty_slot(&self) -> u32 {
+      return Bitutil::msb(self.bit_field ^ (self.bit_field + 1));
+    }
+  };
+}
+
 #[repr(C)]
-pub struct MaskedBitset<BitType: BitNum> {
+pub struct MaskedBitset<'a, BitType: BitNum> {
   bit_field: BitType,
   shift: usize,
   masked_bits: BitType,
+  base: &'a BitType,
 }
 
-impl<BitType: BitNum> MaskedBitset<BitType> {
+#[repr(C)]
+pub struct MaskedBitsetMut<'a, BitType: BitNum> {
+  bit_field: BitType,
+  shift: usize,
+  masked_bits: BitType,
+  base: &'a mut BitType,
+}
+
+impl<'a, BitType: BitNum> MaskedBitset<'a, BitType> {
   #[inline]
-  pub fn new(shift: usize, masked_bits: BitType, bit_field: BitType) -> MaskedBitset<BitType> {
+  pub fn new(shift: usize, masked_bits: BitType, bit_field: BitType, base: &'a BitType) -> MaskedBitset<BitType> {
     return MaskedBitset {
       shift,
       masked_bits,
       bit_field,
+      base,
     };
   }
 }
 
-impl<BitType: BitNum> Into<Bitset<BitType>> for MaskedBitset<BitType> {
+impl<'a, BitType: BitNum> MaskedBitsetMut<'a, BitType> {
+  #[inline]
+  pub fn new(
+    shift: usize,
+    masked_bits: BitType,
+    bit_field: BitType,
+    base: &'a mut BitType,
+  ) -> MaskedBitsetMut<BitType> {
+    return MaskedBitsetMut {
+      shift,
+      masked_bits,
+      bit_field,
+      base,
+    };
+  }
+}
+
+impl<'a, BitType: BitNum> Into<Bitset<BitType>> for MaskedBitset<'a, BitType> {
   #[inline]
   fn into(self) -> Bitset<BitType> {
     return Bitset {
@@ -168,7 +223,25 @@ impl<BitType: BitNum> Bitset<BitType> {
     debug_assert!(lower_index > 0, "lower_index must be greater than 1");
     let lower_mask = (BitType::one() << lower_index - 1) - BitType::one();
     let shift = lower_index - 1;
-    return MaskedBitset::new(shift, self.bit_field & lower_mask, self.bit_field >> shift);
+    return MaskedBitset::new(
+      shift,
+      self.bit_field & lower_mask,
+      self.bit_field >> shift,
+      &self.bit_field,
+    );
+  }
+
+  #[inline]
+  pub fn mask_lower_mut(&mut self, lower_index: usize) -> MaskedBitsetMut<BitType> {
+    debug_assert!(lower_index > 0, "lower_index must be greater than 1");
+    let lower_mask = (BitType::one() << lower_index - 1) - BitType::one();
+    let shift = lower_index - 1;
+    return MaskedBitsetMut::new(
+      shift,
+      self.bit_field & lower_mask,
+      self.bit_field >> shift,
+      &mut self.bit_field,
+    );
   }
 
   #[inline]
@@ -191,6 +264,31 @@ impl<BitType: BitNum> Bitset<BitType> {
       shift,
       self.bit_field & (lower_mask | upper_mask),
       (self.bit_field & !(upper_mask)) >> shift,
+      &self.bit_field,
+    );
+  }
+
+  #[inline]
+  pub fn mask_range_mut(&mut self, lower_index: usize, upper_index: usize) -> MaskedBitsetMut<BitType> {
+    debug_assert!(lower_index > 0, "lower_index must be greater than 1");
+    debug_assert!(lower_index < upper_index, "Range must be lower_index < upper_index");
+    debug_assert!(upper_index - lower_index > 1, "Range size must be at least 1");
+    let lower_mask = if lower_index > 0 {
+      (BitType::one() << lower_index - 1) - BitType::one()
+    } else {
+      BitType::zero()
+    };
+    let upper_mask = if upper_index > 0 {
+      !((BitType::one() << upper_index - 1) - BitType::one())
+    } else {
+      BitType::zero()
+    };
+    let shift = lower_index - 1;
+    return MaskedBitsetMut::new(
+      shift,
+      self.bit_field & (lower_mask | upper_mask),
+      (self.bit_field & !(upper_mask)) >> shift,
+      &mut self.bit_field,
     );
   }
 }
@@ -217,10 +315,15 @@ impl_bit_operator_for_usize!(u16, Bitset);
 impl_bit_operator_for_usize!(u32, Bitset);
 impl_bit_operator_for_usize!(u64, Bitset);
 
-impl_bit_operator_for_usize!(u8, MaskedBitset);
-impl_bit_operator_for_usize!(u16, MaskedBitset);
-impl_bit_operator_for_usize!(u32, MaskedBitset);
-impl_bit_operator_for_usize!(u64, MaskedBitset);
+impl_bit_operator_for_usize!(mask; u8, MaskedBitset);
+impl_bit_operator_for_usize!(mask; u16, MaskedBitset);
+impl_bit_operator_for_usize!(mask; u32, MaskedBitset);
+impl_bit_operator_for_usize!(mask; u64, MaskedBitset);
+
+impl_bit_operator_for_usize!(mask_mut; u8, MaskedBitsetMut);
+impl_bit_operator_for_usize!(mask_mut; u16, MaskedBitsetMut);
+impl_bit_operator_for_usize!(mask_mut; u32, MaskedBitsetMut);
+impl_bit_operator_for_usize!(mask_mut; u64, MaskedBitsetMut);
 
 #[cfg(test)]
 mod tests {

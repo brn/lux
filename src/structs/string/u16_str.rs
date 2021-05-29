@@ -1,12 +1,11 @@
-use super::super::hash_map::{ContextHash, ContextHashMut};
+use super::super::hash_map::{DefaultHasher, Hasher, PredefinedHash};
 use super::super::internal_array::InternalArray;
 use crate::context::{AllocationOnlyContext, Context};
 use std::hash::Hash;
-use std::hash::Hasher;
 
 pub type FixedU16CodePointArray = InternalArray<u16>;
 
-pub fn from_utf8(context: &mut impl AllocationOnlyContext, str: &str) -> FixedU16CodePointArray {
+pub fn from_utf8(context: impl AllocationOnlyContext, str: &str) -> FixedU16CodePointArray {
   let u16_vec = str.encode_utf16().collect::<Vec<_>>();
   let mut array = FixedU16CodePointArray::new(context, u16_vec.len());
   for c in u16_vec {
@@ -16,7 +15,7 @@ pub fn from_utf8(context: &mut impl AllocationOnlyContext, str: &str) -> FixedU1
 }
 
 impl FixedU16CodePointArray {
-  pub fn from_utf8(context: &mut impl AllocationOnlyContext, str: &str) -> FixedU16CodePointArray {
+  pub fn from_utf8(context: impl AllocationOnlyContext, str: &str) -> FixedU16CodePointArray {
     return from_utf8(context, str);
   }
 }
@@ -44,20 +43,14 @@ impl Hash for FixedU16CodePointArray {
   }
 }
 
-impl ContextHash for FixedU16CodePointArray {
-  fn context_hash<H: Hasher>(&self, _: &mut impl Context, state: &mut H) -> u64 {
-    for u in *self {
-      u.hash(state);
-    }
-    return state.finish();
-  }
-}
+impl PredefinedHash for FixedU16CodePointArray {
+  fn prepare_hash(&mut self, _: impl Context) {}
 
-impl ContextHashMut for FixedU16CodePointArray {
-  fn context_hash_mut<H: Hasher>(&mut self, _: &mut impl Context, state: &mut H) -> u64 {
+  fn predefined_hash(&self) -> u64 {
+    let mut h = DefaultHasher::default();
     for u in *self {
-      u.hash(state);
+      h.write_u16(u);
     }
-    return state.finish();
+    return h.finish();
   }
 }

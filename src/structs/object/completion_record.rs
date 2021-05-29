@@ -22,9 +22,8 @@ pub struct CompletionRecord {
 }
 
 impl CompletionRecord {
-  const BASE_SIZE: usize = Cell::SIZE;
   pub fn new(
-    context: &mut impl AllocationOnlyContext,
+    context: impl AllocationOnlyContext,
     completion_type: CompletionType,
     value: Repr,
     target: Option<JsLabel>,

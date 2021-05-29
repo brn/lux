@@ -1,29 +1,33 @@
 use super::super::cell::*;
-use super::super::hash_map::HashMap;
-use super::super::js_object::Name;
+use super::super::hash_map::{HashMap, PredefinedHash};
+use super::super::repr::Repr;
+use super::super::shadow_class::{ShadowClass, ShadowInstance};
 use super::super::shape::Shape;
+use super::super::string::FlatString;
+use super::property::{PropertyName, PropertySearchHint};
 use crate::context::{AllocationOnlyContext, Context};
+use crate::utility::*;
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use std::mem::size_of;
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct SymbolRegistryLayout {
-  map: BareHeapLayout<HashMap<Name, JsSymbol>>,
-  symbol_async_iterator: BareHeapLayout<JsSymbol>,
-  symbol_has_instance: BareHeapLayout<JsSymbol>,
-  symbol_is_concat_spreadable: BareHeapLayout<JsSymbol>,
-  symbol_iterator: BareHeapLayout<JsSymbol>,
-  symbol_match: BareHeapLayout<JsSymbol>,
-  symbol_match_all: BareHeapLayout<JsSymbol>,
-  symbol_replace: BareHeapLayout<JsSymbol>,
-  symbol_search: BareHeapLayout<JsSymbol>,
-  symbol_species: BareHeapLayout<JsSymbol>,
-  symbol_split: BareHeapLayout<JsSymbol>,
-  symbol_to_primitive: BareHeapLayout<JsSymbol>,
-  symbol_to_string_tag: BareHeapLayout<JsSymbol>,
-  symbol_unscopables: BareHeapLayout<JsSymbol>,
+  map: HashMap<PropertyName, JsSymbol>,
+  symbol_async_iterator: JsSymbol,
+  symbol_has_instance: JsSymbol,
+  symbol_is_concat_spreadable: JsSymbol,
+  symbol_iterator: JsSymbol,
+  symbol_match: JsSymbol,
+  symbol_match_all: JsSymbol,
+  symbol_replace: JsSymbol,
+  symbol_search: JsSymbol,
+  symbol_species: JsSymbol,
+  symbol_split: JsSymbol,
+  symbol_to_primitive: JsSymbol,
+  symbol_to_string_tag: JsSymbol,
+  symbol_unscopables: JsSymbol,
 }
 
 #[repr(C)]
@@ -32,91 +36,61 @@ pub struct SymbolRegistry(HeapLayout<SymbolRegistryLayout>);
 impl_object!(SymbolRegistry, HeapLayout<SymbolRegistryLayout>);
 
 impl SymbolRegistry {
-  const SIZE: usize = Cell::SIZE + size_of::<SymbolRegistryLayout>();
+  const SIZE: usize = size_of::<SymbolRegistryLayout>();
   const TABLE_DEFAULT_CAPACITY: usize = 10;
-  pub fn persist(context: &mut impl AllocationOnlyContext) -> SymbolRegistry {
+  pub fn persist(context: impl AllocationOnlyContext) -> SymbolRegistry {
     let mut layout =
       HeapLayout::<SymbolRegistryLayout>::persist(context, SymbolRegistry::SIZE, Shape::symbol_registry());
-    layout.map.set(HashMap::<Name, JsSymbol>::new(context));
-
-    SymbolRegistry::init_well_known_symbols(context, layout);
-
+    layout.map = HashMap::<PropertyName, JsSymbol>::new(context);
     return SymbolRegistry(layout);
   }
 
-  pub fn register(&self, context: &mut impl Context, symbol: JsSymbol) {
-    let desc = symbol.description(context);
-    match self.map.handle().find(context, desc) {
+  pub fn register(&mut self, context: impl Context, symbol: JsSymbol) {
+    let desc = PropertyName::from(symbol.description(context));
+    match self.map.find(desc) {
       None => {
-        self.map.handle().insert(context, desc, symbol);
+        self.map.insert(context, desc, symbol);
       }
       _ => {}
     }
   }
 
-  pub fn find(&self, context: &mut impl Context, name: Name) -> Option<JsSymbol> {
-    return self.map.handle().find(context, name);
+  pub fn find(&self, desc: FlatString) -> Option<JsSymbol> {
+    return self.map.find(PropertyName::from(desc));
   }
 
   pub fn get_wellknown_symbol(&self, symbol_type: WellKnownSymbolType) -> JsSymbol {
     match symbol_type {
-      WellKnownSymbolType::AsyncIterator => return self.symbol_async_iterator.handle(),
-      WellKnownSymbolType::HasInstance => return self.symbol_has_instance.handle(),
-      WellKnownSymbolType::IsConcatSpreadable => return self.symbol_is_concat_spreadable.handle(),
-      WellKnownSymbolType::Iterator => return self.symbol_iterator.handle(),
-      WellKnownSymbolType::Match => return self.symbol_match.handle(),
-      WellKnownSymbolType::MatchAll => return self.symbol_match_all.handle(),
-      WellKnownSymbolType::Replace => return self.symbol_replace.handle(),
-      WellKnownSymbolType::Search => return self.symbol_search.handle(),
-      WellKnownSymbolType::Species => return self.symbol_species.handle(),
-      WellKnownSymbolType::Split => return self.symbol_split.handle(),
-      WellKnownSymbolType::ToPrimitive => return self.symbol_to_primitive.handle(),
-      WellKnownSymbolType::ToStringTag => return self.symbol_to_string_tag.handle(),
-      WellKnownSymbolType::Unscopables => return self.symbol_unscopables.handle(),
+      WellKnownSymbolType::AsyncIterator => return self.symbol_async_iterator,
+      WellKnownSymbolType::HasInstance => return self.symbol_has_instance,
+      WellKnownSymbolType::IsConcatSpreadable => return self.symbol_is_concat_spreadable,
+      WellKnownSymbolType::Iterator => return self.symbol_iterator,
+      WellKnownSymbolType::Match => return self.symbol_match,
+      WellKnownSymbolType::MatchAll => return self.symbol_match_all,
+      WellKnownSymbolType::Replace => return self.symbol_replace,
+      WellKnownSymbolType::Search => return self.symbol_search,
+      WellKnownSymbolType::Species => return self.symbol_species,
+      WellKnownSymbolType::Split => return self.symbol_split,
+      WellKnownSymbolType::ToPrimitive => return self.symbol_to_primitive,
+      WellKnownSymbolType::ToStringTag => return self.symbol_to_string_tag,
+      WellKnownSymbolType::Unscopables => return self.symbol_unscopables,
     }
   }
 
-  fn init_well_known_symbols(context: &mut impl AllocationOnlyContext, mut layout: HeapLayout<SymbolRegistryLayout>) {
-    layout
-      .symbol_async_iterator
-      .set(JsSymbol::new_wellknown(context, WellKnownSymbolType::AsyncIterator));
-    layout
-      .symbol_has_instance
-      .set(JsSymbol::new_wellknown(context, WellKnownSymbolType::HasInstance));
-    layout.symbol_is_concat_spreadable.set(JsSymbol::new_wellknown(
-      context,
-      WellKnownSymbolType::IsConcatSpreadable,
-    ));
-    layout
-      .symbol_iterator
-      .set(JsSymbol::new_wellknown(context, WellKnownSymbolType::Iterator));
-    layout
-      .symbol_match
-      .set(JsSymbol::new_wellknown(context, WellKnownSymbolType::Match));
-    layout
-      .symbol_match_all
-      .set(JsSymbol::new_wellknown(context, WellKnownSymbolType::MatchAll));
-    layout
-      .symbol_replace
-      .set(JsSymbol::new_wellknown(context, WellKnownSymbolType::Replace));
-    layout
-      .symbol_search
-      .set(JsSymbol::new_wellknown(context, WellKnownSymbolType::Search));
-    layout
-      .symbol_species
-      .set(JsSymbol::new_wellknown(context, WellKnownSymbolType::Species));
-    layout
-      .symbol_split
-      .set(JsSymbol::new_wellknown(context, WellKnownSymbolType::Split));
-    layout
-      .symbol_to_primitive
-      .set(JsSymbol::new_wellknown(context, WellKnownSymbolType::ToPrimitive));
-    layout
-      .symbol_to_string_tag
-      .set(JsSymbol::new_wellknown(context, WellKnownSymbolType::ToStringTag));
-    layout
-      .symbol_unscopables
-      .set(JsSymbol::new_wellknown(context, WellKnownSymbolType::Unscopables));
+  pub fn init_well_known_symbols(context: impl Context, mut layout: HeapLayout<SymbolRegistryLayout>) {
+    layout.symbol_async_iterator = JsSymbol::new_wellknown(context, WellKnownSymbolType::AsyncIterator);
+    layout.symbol_has_instance = JsSymbol::new_wellknown(context, WellKnownSymbolType::HasInstance);
+    layout.symbol_is_concat_spreadable = JsSymbol::new_wellknown(context, WellKnownSymbolType::IsConcatSpreadable);
+    layout.symbol_iterator = JsSymbol::new_wellknown(context, WellKnownSymbolType::Iterator);
+    layout.symbol_match = JsSymbol::new_wellknown(context, WellKnownSymbolType::Match);
+    layout.symbol_match_all = JsSymbol::new_wellknown(context, WellKnownSymbolType::MatchAll);
+    layout.symbol_replace = JsSymbol::new_wellknown(context, WellKnownSymbolType::Replace);
+    layout.symbol_search = JsSymbol::new_wellknown(context, WellKnownSymbolType::Search);
+    layout.symbol_species = JsSymbol::new_wellknown(context, WellKnownSymbolType::Species);
+    layout.symbol_split = JsSymbol::new_wellknown(context, WellKnownSymbolType::Split);
+    layout.symbol_to_primitive = JsSymbol::new_wellknown(context, WellKnownSymbolType::ToPrimitive);
+    layout.symbol_to_string_tag = JsSymbol::new_wellknown(context, WellKnownSymbolType::ToStringTag);
+    layout.symbol_unscopables = JsSymbol::new_wellknown(context, WellKnownSymbolType::Unscopables);
   }
 }
 
@@ -137,10 +111,9 @@ pub enum WellKnownSymbolType {
   Unscopables = 16382,
 }
 
-#[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct JsSymbolLayout {
-  description: BareHeapLayout<Name>,
+  description_index: isize,
 }
 
 #[repr(C)]
@@ -149,70 +122,168 @@ pub struct JsSymbol(HeapLayout<JsSymbolLayout>);
 impl_object!(JsSymbol, HeapLayout<JsSymbolLayout>);
 
 impl JsSymbol {
-  const SIZE: usize = Cell::SIZE + size_of::<JsSymbolLayout>();
+  const SIZE: usize = 0;
+  const IS_WELLKNOWN_BIT: usize = 1;
+  const IS_OBJECT_BIT: usize = 2;
 
-  pub fn new(context: &mut impl Context, desc: Name) -> JsSymbol {
-    let mut layout = HeapLayout::<JsSymbolLayout>::new(context, JsSymbol::SIZE, Shape::symbol());
-    layout.description.set(desc);
-    let symbol = JsSymbol(layout);
-    return symbol;
-  }
-
-  pub fn description(&self, context: &mut impl Context) -> Name {
-    if self.is_well_known_symbol() {
-      match WellKnownSymbolType::from_u64(self.description.as_value()) {
-        Some(WellKnownSymbolType::AsyncIterator) => return context.async_iterator_symbol_str(),
-        Some(WellKnownSymbolType::HasInstance) => return context.has_instance_symbol_str(),
-        Some(WellKnownSymbolType::IsConcatSpreadable) => return context.is_concat_spreadable_symbol_str(),
-        Some(WellKnownSymbolType::Iterator) => return context.iterator_symbol_str(),
-        Some(WellKnownSymbolType::Match) => return context.match_symbol_str(),
-        Some(WellKnownSymbolType::MatchAll) => return context.match_all_symbol_str(),
-        Some(WellKnownSymbolType::Replace) => return context.replace_symbol_str(),
-        Some(WellKnownSymbolType::Search) => return context.search_symbol_str(),
-        Some(WellKnownSymbolType::Species) => return context.species_symbol_str(),
-        Some(WellKnownSymbolType::Split) => return context.split_symbol_str(),
-        Some(WellKnownSymbolType::ToPrimitive) => return context.to_primitive_symbol_str(),
-        Some(WellKnownSymbolType::ToStringTag) => return context.to_string_tag_symbol_str(),
-        Some(WellKnownSymbolType::Unscopables) => return context.unscopables_symbol_str(),
-        _ => unreachable!(),
-      }
+  pub fn new(context: impl Context, desc: FlatString) -> JsSymbol {
+    let mut layout = HeapLayout::<JsSymbolLayout>::new_object(context, JsSymbol::SIZE, Shape::symbol());
+    let result = layout.class().define_own_property(
+      context,
+      new_property!(context, value: context.static_names().description(), desc.into()),
+    );
+    if result.usable_as_cache() {
+      layout.description_index = result.index();
+    } else {
+      layout.description_index = -1;
     }
-    return self.description.handle();
+    return JsSymbol(layout);
   }
 
-  pub fn wellknown_symbol_type(&self) -> Option<WellKnownSymbolType> {
+  pub fn new_primitive(context: impl Context, desc: FlatString) -> JsSymbol {
+    let mut layout = HeapLayout::<JsSymbolLayout>::new_object(context, JsSymbol::SIZE, Shape::symbol());
+    let result = layout.class().define_own_property(
+      context,
+      new_property!(context, value: context.static_names().description(), desc.into()),
+    );
+    if result.usable_as_cache() {
+      layout.description_index = result.index();
+    } else {
+      layout.description_index = -1;
+    }
+    return JsSymbol(layout);
+  }
+
+  pub fn description(&self, context: impl Context) -> FlatString {
+    match self.class().get_own_property(PropertySearchHint::new_with_index(
+      context.static_names().description(),
+      self.description_index,
+    )) {
+      Some(result) => {
+        if !result.descriptor().value().is_boxed() {
+          match WellKnownSymbolType::from_u64(u64::from(result.descriptor().value())) {
+            Some(WellKnownSymbolType::AsyncIterator) => return context.async_iterator_symbol_str(),
+            Some(WellKnownSymbolType::HasInstance) => return context.has_instance_symbol_str(),
+            Some(WellKnownSymbolType::IsConcatSpreadable) => return context.is_concat_spreadable_symbol_str(),
+            Some(WellKnownSymbolType::Iterator) => return context.iterator_symbol_str(),
+            Some(WellKnownSymbolType::Match) => return context.match_symbol_str(),
+            Some(WellKnownSymbolType::MatchAll) => return context.match_all_symbol_str(),
+            Some(WellKnownSymbolType::Replace) => return context.replace_symbol_str(),
+            Some(WellKnownSymbolType::Search) => return context.search_symbol_str(),
+            Some(WellKnownSymbolType::Species) => return context.species_symbol_str(),
+            Some(WellKnownSymbolType::Split) => return context.split_symbol_str(),
+            Some(WellKnownSymbolType::ToPrimitive) => return context.to_primitive_symbol_str(),
+            Some(WellKnownSymbolType::ToStringTag) => return context.to_string_tag_symbol_str(),
+            Some(WellKnownSymbolType::Unscopables) => return context.unscopables_symbol_str(),
+            _ => unreachable!(),
+          }
+        }
+        return FlatString::from(result.descriptor().value());
+      }
+      None => unreachable!(),
+    };
+    unreachable!();
+  }
+
+  pub fn wellknown_symbol_type(&self, context: impl Context) -> Option<WellKnownSymbolType> {
     if self.is_well_known_symbol() {
-      return WellKnownSymbolType::from_u64(self.description.as_value());
+      match self.class().get_own_property(PropertySearchHint::new_with_index(
+        context.static_names().description(),
+        self.description_index,
+      )) {
+        Some(result) => {
+          if !result.descriptor().value().is_boxed() {
+            return WellKnownSymbolType::from_u64(u64::from(result.descriptor().value()));
+          }
+        }
+        None => unreachable!(),
+      };
     }
     return None;
   }
 
   pub fn is_well_known_symbol(&self) -> bool {
-    return self.description.get_flag();
+    return HeapObject::get_data_field(self).get(JsSymbol::IS_WELLKNOWN_BIT);
   }
 
-  fn new_wellknown(context: &mut impl AllocationOnlyContext, symbol_type: WellKnownSymbolType) -> JsSymbol {
-    let mut layout = HeapLayout::<JsSymbolLayout>::persist(context, JsSymbol::SIZE, Shape::symbol());
-    layout.description.set_value(symbol_type as u64);
-    layout.description.set_flag();
+  pub fn is_object(this: Repr) -> bool {
+    debug_assert!(Cell::from(this).shape().is_symbol());
+    let s = JsSymbol::from(this);
+    let data_field = HeapObject::get_data_field(&s);
+    return data_field.get(JsSymbol::IS_OBJECT_BIT);
+  }
+
+  pub fn to_object(this: Repr) -> JsSymbol {
+    debug_assert!(Cell::from(this).shape().is_symbol());
+    let s = JsSymbol::from(this);
+    let mut data_field = HeapObject::get_data_field(&s);
+    data_field.set(JsSymbol::IS_OBJECT_BIT);
+    return JsSymbol::from(this);
+  }
+
+  pub fn to_primitive(this: Repr) -> PrimitiveSymbol {
+    debug_assert!(Cell::from(this).shape().is_symbol());
+    let s = JsSymbol::from(this);
+    let mut data_field = HeapObject::get_data_field(&s);
+    data_field.unset(JsSymbol::IS_OBJECT_BIT);
+    return PrimitiveSymbol::from(this);
+  }
+
+  fn new_wellknown(context: impl Context, symbol_type: WellKnownSymbolType) -> JsSymbol {
+    let layout = HeapLayout::<JsSymbolLayout>::persist_object(context, JsSymbol::SIZE, Shape::symbol());
+    layout.class().define_own_property(
+      context,
+      new_property!(
+        context,
+        value: context.static_names().description(),
+        Repr::from(symbol_type as u64)
+      ),
+    );
     let symbol = JsSymbol(layout);
+    HeapObject::get_data_field(&symbol).set(JsSymbol::IS_OBJECT_BIT);
     return symbol;
+  }
+}
+
+impl_shadow_instance!(JsSymbol);
+
+impl PredefinedHash for JsSymbol {
+  fn prepare_hash(&mut self, context: impl Context) {
+    let mut desc = self.description(context);
+    desc.prepare_hash(context);
+    ShadowClass::set_hash(*self, desc.predefined_hash());
+  }
+
+  fn predefined_hash(&self) -> u64 {
+    return self.class().hash();
+  }
+}
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct PrimitiveSymbol(HeapLayout<JsSymbolLayout>);
+impl_object!(PrimitiveSymbol, HeapLayout<JsSymbolLayout>);
+
+impl PrimitiveSymbol {
+  pub fn new(context: impl Context, desc: FlatString) -> PrimitiveSymbol {
+    let symbol = JsSymbol::new_primitive(context, desc);
+    return PrimitiveSymbol(symbol.0);
   }
 }
 
 #[cfg(test)]
 mod symbol_test {
   use super::*;
-  use crate::context::isolate;
+  use crate::context::LuxContext;
 
   #[test]
   fn wellknown_symbols_test() {
     let compare = |symbol_type: WellKnownSymbolType| {
-      let mut c = isolate::context();
+      let c = LuxContext::new();
       let symbol = c.symbol_registry().get_wellknown_symbol(symbol_type);
       let b = c.symbol_registry().get_wellknown_symbol(symbol_type);
-      let desc = b.description(&mut c);
-      assert!(symbol.description(&mut c).equals(&mut c, desc));
+      let desc = b.description(c);
+      assert!(symbol.description(c) == desc);
       assert!(symbol.is_same_heap_object(b));
     };
     compare(WellKnownSymbolType::AsyncIterator);
@@ -231,15 +302,15 @@ mod symbol_test {
   #[test]
   fn custom_symbols_test() {
     let compare = |name| {
-      let mut c = isolate::context();
-      let name = Name::from_utf8(&mut c, name);
-      let symbol = JsSymbol::new(&mut c, name);
-      c.symbol_registry().register(&mut c, symbol);
-      let desc = symbol.description(&mut c);
-      let b = c.symbol_registry().find(&mut c, desc);
+      let c = LuxContext::new();
+      let name = FlatString::from_utf8(c, name);
+      let symbol = JsSymbol::new(c, name);
+      c.symbol_registry().register(c, symbol);
+      let desc = symbol.description(c);
+      let b = c.symbol_registry().find(desc);
       assert!(b.is_some());
-      let s = b.unwrap().description(&mut c);
-      assert!(symbol.description(&mut c).equals(&mut c, s));
+      let s = b.unwrap().description(c);
+      assert!(symbol.description(c) == s);
       assert!(symbol.is_same_heap_object(b.unwrap()));
     };
     compare("@@test");

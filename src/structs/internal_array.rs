@@ -13,7 +13,7 @@ macro_rules! fixed_array {
   (type: $t:ty, context: $context:expr, capacity: $capacity:expr, $($exp:expr),*) => {{
     let mut array = crate::structs::InternalArray::<$t>::new($context, $capacity);
     $(
-      array.push($exp);
+      {array.push($exp)};
     )*
     array
   }}
@@ -23,7 +23,7 @@ pub trait InternalArrayElement: Copy {}
 impl<T: Copy> InternalArrayElement for T {}
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct InternalArrayLayout {
   capacity: usize,
   length: usize,
@@ -59,7 +59,7 @@ impl<T: Copy> Len for InternalArray<T> {
 
 impl<T: Copy> InternalArray<T> {
   pub const TYPE: Shape = Shape::internal_array();
-  pub fn new(context: &mut impl AllocationOnlyContext, capacity: usize) -> InternalArray<T> {
+  pub fn new(context: impl AllocationOnlyContext, capacity: usize) -> InternalArray<T> {
     return InternalArray::<T>::init(
       HeapLayout::<InternalArrayLayout>::new(
         context,
@@ -71,7 +71,7 @@ impl<T: Copy> InternalArray<T> {
   }
 
   pub fn construct(
-    context: &mut impl AllocationOnlyContext,
+    context: impl AllocationOnlyContext,
     capacity: usize,
     length: usize,
     data: *mut T,
@@ -89,32 +89,15 @@ impl<T: Copy> InternalArray<T> {
     return array;
   }
 
-  #[cfg(test)]
-  pub fn alloc_for_test(capacity: usize) -> InternalArray<T> {
-    use std::alloc::{alloc, Layout};
-    let layout = Layout::from_size_align(InternalArray::<T>::calc_size(capacity), ALIGNMENT).unwrap();
-    return InternalArray::<T>::init(
-      HeapLayout::<InternalArrayLayout>::new_into_heap(
-        unsafe { alloc(layout) },
-        InternalArray::<T>::calc_size(capacity),
-        Shape::internal_array(),
-      ),
-      capacity,
-    );
-  }
-
   pub fn wrap(heap: Addr) -> InternalArray<T> {
     return InternalArray::<T>(HeapLayout::<InternalArrayLayout>::wrap(heap), PhantomData);
   }
 
   pub fn calc_size(capacity: usize) -> usize {
-    return align(
-      Cell::SIZE + size_of::<InternalArrayLayout>() + capacity * size_of::<T>(),
-      ALIGNMENT,
-    );
+    return align(size_of::<InternalArrayLayout>() + capacity * size_of::<T>(), ALIGNMENT);
   }
 
-  pub fn slice(&self, context: &mut impl AllocationOnlyContext, start: usize, end: usize) -> InternalArray<T> {
+  pub fn slice(&self, context: impl AllocationOnlyContext, start: usize, end: usize) -> InternalArray<T> {
     assert!(end > start);
     assert!(end - start > 0);
     let mut a = InternalArray::<T>::new(context, end - start);
@@ -125,7 +108,7 @@ impl<T: Copy> InternalArray<T> {
     return a;
   }
 
-  pub fn split(&self, context: &mut impl AllocationOnlyContext, index: usize) -> (InternalArray<T>, InternalArray<T>) {
+  pub fn split(&self, context: impl AllocationOnlyContext, index: usize) -> (InternalArray<T>, InternalArray<T>) {
     assert!(index < self.capacity);
     let left_cap = self.capacity - index;
     let mut left = InternalArray::<T>::new(context, left_cap);
@@ -139,7 +122,7 @@ impl<T: Copy> InternalArray<T> {
     return (left, right);
   }
 
-  pub fn concat(&self, context: &mut impl AllocationOnlyContext, array: InternalArray<T>) -> InternalArray<T> {
+  pub fn concat(&self, context: impl AllocationOnlyContext, array: InternalArray<T>) -> InternalArray<T> {
     let ret = InternalArray::<T>::new(context, self.length() + array.length());
     unsafe {
       std::ptr::copy_nonoverlapping(self.data(), ret.data(), self.length());
@@ -203,18 +186,18 @@ impl<T: Copy> InternalArray<T> {
   pub fn data(&self) -> *mut T {
     return unsafe {
       self
-        .0
-        .as_addr()
-        .offset((Cell::SIZE + size_of::<InternalArrayLayout>()) as isize) as *mut T
+        .cell()
+        .get_body()
+        .offset((size_of::<InternalArrayLayout>()) as isize) as *mut T
     };
   }
 
   fn set_data(&self, data: *mut T) {
     unsafe {
       let d = self
-        .0
-        .as_addr()
-        .offset((Cell::SIZE + size_of::<InternalArrayLayout>()) as isize) as *mut T;
+        .cell()
+        .get_body()
+        .offset((size_of::<InternalArrayLayout>()) as isize) as *mut T;
       *d = *data;
     };
   }
@@ -263,10 +246,12 @@ impl<T: Copy> std::fmt::Debug for InternalArray<T> {
 mod internal_array_test {
   use super::super::js_object::testing::*;
   use super::*;
+  use crate::context::LuxContext;
 
   #[test]
   fn push_test() {
-    let mut array = InternalArray::<TestObject>::alloc_for_test(10);
+    let context = LuxContext::new();
+    let mut array = InternalArray::<TestObject>::new(context, 10);
     assert_eq!(array.length(), 0);
     assert_eq!(array.capacity(), 10);
     for i in 0..10 {
@@ -283,7 +268,8 @@ mod internal_array_test {
 
   #[test]
   fn write_test() {
-    let mut array = InternalArray::<TestObject>::alloc_for_test(10);
+    let context = LuxContext::new();
+    let mut array = InternalArray::<TestObject>::new(context, 10);
     assert_eq!(array.length(), 0);
     assert_eq!(array.capacity(), 10);
     for i in 0..10 {
@@ -303,7 +289,8 @@ mod internal_array_test {
 
   #[test]
   fn iterator_test() {
-    let mut array = InternalArray::<TestObject>::alloc_for_test(10);
+    let context = LuxContext::new();
+    let mut array = InternalArray::<TestObject>::new(context, 10);
     assert_eq!(array.length(), 0);
     assert_eq!(array.capacity(), 10);
     for i in 0..10 {
