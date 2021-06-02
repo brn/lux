@@ -15,7 +15,7 @@ num-derive = "0.2"
 num = "0.4"
 static_assertions = "1.1.0"
 once_cell = "1.7.2"
-xxhash-rust = {version = "0.8.2", features = ["xxh3"]}
+property = "0.3.3"
 
 [dev-dependencies]
 criterion = {varsion = "0.3", features = ["html_reports"]}

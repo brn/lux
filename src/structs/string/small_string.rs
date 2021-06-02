@@ -21,9 +21,9 @@ pub struct SmallString(HeapLayout<SmallStringLayout>);
 impl_object!(SmallString, HeapLayout<SmallStringLayout>);
 
 impl SmallString {
-  const SIZE: usize = size_of::<SmallStringLayout>();
+  pub const SIZE: usize = size_of::<SmallStringLayout>();
   pub fn new(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> SmallString {
-    let mut layout = HeapLayout::<SmallStringLayout>::new(context, SmallString::SIZE, Shape::small_string());
+    let mut layout = HeapLayout::<SmallStringLayout>::new(context, context.object_records().small_string_record());
     layout.str = str;
     return SmallString(layout);
   }
@@ -119,9 +119,9 @@ pub struct OneByteChar(HeapLayout<OneByteCharLayout>);
 impl_object!(OneByteChar, HeapLayout<OneByteCharLayout>);
 
 impl OneByteChar {
-  const SIZE: usize = size_of::<OneByteCharLayout>();
+  pub const SIZE: usize = size_of::<OneByteCharLayout>();
   pub fn new(context: impl AllocationOnlyContext, ch: u16) -> OneByteChar {
-    let mut layout = HeapLayout::<OneByteCharLayout>::new(context, OneByteChar::SIZE, Shape::small_string());
+    let mut layout = HeapLayout::<OneByteCharLayout>::new(context, context.object_records().one_byte_char_record());
     layout.ch = OneByte(ch);
     return OneByteChar(layout);
   }

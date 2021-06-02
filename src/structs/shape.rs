@@ -5,10 +5,17 @@ use num_traits::FromPrimitive;
 pub enum ShapeTag {
   Invalid = 0,
   Context,
+  Builtins,
   Cell,
   Name,
-  ShadowClass,
+  RootObjectRecord,
+  ObjectRecords,
+  ObjectRecord,
+  TransitionRecord,
   SymbolRegistry,
+  NativeFunction,
+  Receiver,
+  Factory,
   _JsValueSepBeg,
   Undefined,
   Null,
@@ -19,6 +26,7 @@ pub enum ShapeTag {
   Object,
   Array,
   Function,
+  FunctionPrototype,
   _JsValueSepEnd,
   OwnProperties,
   HashMap,
@@ -75,6 +83,24 @@ impl Shape {
     return self.tag == ShapeTag::String;
   }
 
+  pub const fn object_records() -> Shape {
+    return Shape {
+      tag: ShapeTag::ObjectRecords,
+    };
+  }
+
+  pub const fn root_object_record() -> Shape {
+    return Shape {
+      tag: ShapeTag::RootObjectRecord,
+    };
+  }
+
+  pub const fn transition_record() -> Shape {
+    return Shape {
+      tag: ShapeTag::TransitionRecord,
+    };
+  }
+
   pub const fn invalid() -> Shape {
     return Shape { tag: ShapeTag::Invalid };
   }
@@ -83,9 +109,31 @@ impl Shape {
     return Shape { tag: ShapeTag::Context };
   }
 
-  pub const fn shadow_class() -> Shape {
+  pub const fn factory() -> Shape {
+    return Shape { tag: ShapeTag::Factory };
+  }
+
+  pub const fn builtins() -> Shape {
     return Shape {
-      tag: ShapeTag::ShadowClass,
+      tag: ShapeTag::Builtins,
+    };
+  }
+
+  pub const fn native_function() -> Shape {
+    return Shape {
+      tag: ShapeTag::NativeFunction,
+    };
+  }
+
+  pub const fn receiver() -> Shape {
+    return Shape {
+      tag: ShapeTag::Receiver,
+    };
+  }
+
+  pub const fn object_record() -> Shape {
+    return Shape {
+      tag: ShapeTag::ObjectRecord,
     };
   }
 
@@ -140,6 +188,12 @@ impl Shape {
   pub const fn function() -> Shape {
     return Shape {
       tag: ShapeTag::Function,
+    };
+  }
+
+  pub const fn function_prototype() -> Shape {
+    return Shape {
+      tag: ShapeTag::FunctionPrototype,
     };
   }
 

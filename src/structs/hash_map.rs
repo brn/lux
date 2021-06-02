@@ -3,6 +3,7 @@ use super::internal_array::*;
 use super::repr::Repr;
 use super::shape::Shape;
 use crate::context::{AllocationOnlyContext, Context};
+use crate::def::*;
 use crate::utility::Len;
 use std::cmp::PartialEq;
 use std::mem::size_of;
@@ -38,8 +39,13 @@ impl_object!(HashMapEntry<K: HashMapKey, V: HashMapValue>, HeapLayout<HashMapEnt
 impl<K: HashMapKey, V: HashMapValue> HashMapEntry<K, V> {
   const SIZE: usize = size_of::<HashMapEntryLayout<K, V>>();
   pub fn new(context: impl AllocationOnlyContext, key: K, value: V, hash: u64, position: usize) -> HashMapEntry<K, V> {
-    let mut layout =
-      HeapLayout::<HashMapEntryLayout<K, V>>::new(context, HashMapEntry::<K, V>::SIZE, Shape::hash_map_entry());
+    let mut layout = HeapLayout::<HashMapEntryLayout<K, V>>::new(
+      context,
+      context
+        .object_records()
+        .hash_map_entry_record()
+        .copy_with_size(context, HashMapEntry::<K, V>::SIZE),
+    );
     layout.key = key;
     layout.value = value;
     layout.hash = hash;
@@ -55,7 +61,8 @@ impl<K: HashMapKey, V: HashMapValue> HashMapEntry<K, V> {
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct HashMapLayout<K: HashMapKey, V: HashMapValue> {
-  storage: InternalArray<HashMapEntry<K, V>>,
+  storage: InternalArray<usize>,
+  ordered_storage: InternalArray<HashMapEntry<K, V>>,
 }
 
 #[repr(C)]
@@ -78,28 +85,36 @@ impl<K: HashMapKey, V: HashMapValue> HashMap<K, V> {
 
   #[inline]
   pub fn new(context: impl AllocationOnlyContext) -> HashMap<K, V> {
-    let mut layout = HeapLayout::<HashMapLayout<K, V>>::new(context, HashMap::<K, V>::SIZE, Shape::hash_map());
-    layout.storage = InternalArray::<HashMapEntry<K, V>>::new(context, HashMap::<K, V>::DEFAULT_CAPACITY);
+    let mut layout = HeapLayout::<HashMapLayout<K, V>>::new(
+      context,
+      context
+        .object_records()
+        .hash_map_record()
+        .copy_with_size(context, HashMap::<K, V>::SIZE),
+    );
+    layout.ordered_storage = InternalArray::<HashMapEntry<K, V>>::new(context, HashMap::<K, V>::DEFAULT_CAPACITY);
+    layout.storage = InternalArray::<usize>::new(context, HashMap::<K, V>::DEFAULT_CAPACITY);
     layout
-      .storage
+      .ordered_storage
       .fill(HashMapEntry::<K, V>(HeapLayout::<HashMapEntryLayout<K, V>>::null()));
     return HashMap(layout);
   }
 
   #[inline]
-  pub fn insert(&mut self, context: impl AllocationOnlyContext, key: K, value: V) {
+  pub fn insert(&mut self, context: impl AllocationOnlyContext, key: K, value: V) -> usize {
     let hash = self.hash(key);
     if self.load() > 0.8 {
       self.grow(context);
     }
     self.insert_to(context, key, value, hash);
+    return self.ordered_storage.len() - 1;
   }
 
   #[inline]
   pub fn find(&self, key: K) -> Option<V> {
     match self.find_index(key) {
       Some(index) => {
-        return Some(self.storage[index].value);
+        return Some(HashMapEntry::<K, V>::from(self.storage[index] as Addr).value);
       }
       _ => return None,
     }
@@ -109,10 +124,8 @@ impl<K: HashMapKey, V: HashMapValue> HashMap<K, V> {
   pub fn delete(&mut self, key: K) -> bool {
     match self.find_index(key) {
       Some(index) => {
-        self.storage.write(
-          index,
-          HashMapEntry::<K, V>(HeapLayout::<HashMapEntryLayout<K, V>>::null()),
-        );
+        HashMapEntry::<K, V>::from(self.storage[index] as Addr).hash = 0;
+        self.storage.write(index, 0);
         let len = self.storage.length() - 1;
         self.storage.set_length(len);
         return true;
@@ -143,19 +156,33 @@ impl<K: HashMapKey, V: HashMapValue> HashMap<K, V> {
     let storage = self.storage;
     let cap = storage.capacity();
     let position = (hash % (cap as u64)) as usize;
-    if !storage[position].is_null() && storage[position].key == key {
+    if !(storage[position] as Addr).is_null() && HashMapEntry::<K, V>::from(storage[position] as Addr).key == key {
       return Some(position);
     } else {
       for i in position..cap {
-        if !storage[i].is_null() && storage[i].key == key {
+        let ep = storage[i] as Addr;
+        if !ep.is_null() && HashMapEntry::<K, V>::from(ep).key == key {
           return Some(i);
         }
       }
       for i in (0..position).rev() {
-        if !storage[i].is_null() && storage[i].key == key {
+        let ep = storage[i] as Addr;
+        if !ep.is_null() && HashMapEntry::<K, V>::from(ep).key == key {
           return Some(i);
         }
       }
+    }
+    return None;
+  }
+
+  pub fn entry_from_index(&self, index: usize) -> Option<(K, V)> {
+    let mut i = index;
+    while i < self.ordered_storage.len() && self.ordered_storage[i].is_null() {
+      i += 1;
+    }
+    if i < self.ordered_storage.len() {
+      let e = self.ordered_storage[i];
+      return Some((e.key, e.value));
     }
     return None;
   }
@@ -166,33 +193,34 @@ impl<K: HashMapKey, V: HashMapValue> HashMap<K, V> {
     let cap = storage.capacity();
     let position = (hash % (cap as u64)) as usize;
     let mut cur_entry = HashMapEntry::<K, V>::new(context, key, value, hash, position);
+    self.ordered_storage.push_safe(context, cur_entry);
     storage.set_length(storage.len() + 1);
-    if storage[position].is_null() {
-      storage[position] = cur_entry;
+    if (storage[position] as Addr).is_null() {
+      storage[position] = cur_entry.raw_address();
     } else {
       let mut cur_position = self.get_next_position(cap, position);
       'outer: loop {
         for i in cur_position..cap {
-          let entry = storage[i];
+          let entry = HashMapEntry::<K, V>::from(storage[i] as Addr);
           if entry.is_null() {
-            storage[i] = cur_entry;
+            storage[i] = cur_entry.raw_address();
             return;
           }
           if udiff(i, entry.position) < udiff(cur_entry.position, i) {
-            storage[i] = cur_entry;
+            storage[i] = cur_entry.raw_address();
             cur_entry = entry;
             cur_position = self.get_next_position(cap, i);
             continue 'outer;
           }
         }
         for i in (0..cur_position).rev() {
-          let entry = storage[i];
+          let entry = HashMapEntry::<K, V>::from(storage[i] as Addr);
           if entry.is_null() {
-            storage[i] = cur_entry;
+            storage[i] = cur_entry.raw_address();
             return;
           }
           if udiff(i, entry.position) < udiff(cur_entry.position, i) {
-            storage[i] = cur_entry;
+            storage[i] = cur_entry.raw_address();
             cur_entry = entry;
             cur_position = self.get_next_position(cap, i);
             break;
@@ -210,11 +238,11 @@ impl<K: HashMapKey, V: HashMapValue> HashMap<K, V> {
   #[inline]
   fn grow(&mut self, context: impl AllocationOnlyContext) {
     let old_storage = self.storage;
-    let mut new_storage = InternalArray::<HashMapEntry<K, V>>::new(context, old_storage.capacity() * 2);
-    new_storage.fill(HashMapEntry::<K, V>(HeapLayout::<HashMapEntryLayout<K, V>>::null()));
+    let mut new_storage = InternalArray::<usize>::new(context, old_storage.capacity() * 2);
+    new_storage.fill(0);
     self.storage = new_storage;
     for i in 0..old_storage.capacity() {
-      let entry = old_storage[i];
+      let entry = HashMapEntry::<K, V>::from(old_storage[i] as Addr);
       if !entry.0.is_null() {
         self.insert_to(context, entry.key, entry.value, entry.hash);
       }
@@ -223,38 +251,35 @@ impl<K: HashMapKey, V: HashMapValue> HashMap<K, V> {
 }
 
 pub struct HashMapIterator<K: HashMapKey, V: HashMapValue> {
-  map: HashMap<K, V>,
+  ordered_storage: InternalArray<HashMapEntry<K, V>>,
   index: usize,
 }
 
 impl<K: HashMapKey, V: HashMapValue> Iterator for HashMapIterator<K, V> {
-  type Item = (K, V);
+  type Item = (usize, K, V);
   fn next(&mut self) -> Option<Self::Item> {
-    let storage = self.map.storage;
-    if storage.length() == 0 {
-      return None;
-    }
-    if self.index >= storage.capacity() {
-      return None;
-    }
-    while storage[self.index].is_null() {
+    while self.ordered_storage[self.index].is_null() {
       self.index += 1;
-      if self.index >= storage.capacity() {
+      if self.index >= self.ordered_storage.len() {
         return None;
       }
     }
-    let result = storage[self.index];
+    let e = self.ordered_storage[self.index];
+    let ret = Some((self.index, e.key, e.value));
     self.index += 1;
-    return Some((result.key, result.value));
+    return ret;
   }
 }
 
 impl<K: HashMapKey, V: HashMapValue> IntoIterator for HashMap<K, V> {
-  type Item = (K, V);
+  type Item = (usize, K, V);
   type IntoIter = HashMapIterator<K, V>;
 
   fn into_iter(self) -> Self::IntoIter {
-    return HashMapIterator::<K, V> { map: self, index: 0 };
+    return HashMapIterator::<K, V> {
+      ordered_storage: self.ordered_storage,
+      index: 0,
+    };
   }
 }
 

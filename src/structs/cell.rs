@@ -1,5 +1,5 @@
+use super::object_record::{FullObjectRecord, ObjectRecord, ObjectSkin};
 use super::repr::*;
-use super::shadow_class::{ShadowClass, ShadowInstance};
 use super::shape::Shape;
 use crate::context::AllocationOnlyContext;
 use crate::def::*;
@@ -14,14 +14,26 @@ impl<T: Copy + Default> HeapBody for T {}
 #[derive(Copy, Clone)]
 #[repr(C)]
 pub struct HeapLayout<T: HeapBody>(usize, PhantomData<T>);
+pub const HEAP_LAYOUT_SIZE: u32 = size_of::<usize>() as u32;
 
 #[derive(Copy, Clone, Default)]
 pub struct VoidHeapBody;
 
 impl<T: HeapBody> HeapLayout<T> {
   #[inline(always)]
-  pub fn new(context: impl AllocationOnlyContext, size: usize, shape: Shape) -> HeapLayout<T> {
-    let heap = Cell::init_heap(context, size, shape);
+  pub fn new_raw(context: impl AllocationOnlyContext, size: u32) -> HeapLayout<T> {
+    let heap = context.allocate(size as usize);
+    return HeapLayout::<T>(heap as usize, PhantomData);
+  }
+
+  #[inline(always)]
+  pub fn new_into_raw_heap(heap: Addr) -> HeapLayout<T> {
+    return HeapLayout::<T>(heap as usize, PhantomData);
+  }
+
+  #[inline(always)]
+  pub fn new(context: impl AllocationOnlyContext, object_record: ObjectRecord) -> HeapLayout<T> {
+    let heap = Cell::init_heap(context, object_record);
     let cell = Cell::from(heap);
     unsafe {
       *(cell.get_body() as *mut T) = T::default();
@@ -30,8 +42,8 @@ impl<T: HeapBody> HeapLayout<T> {
   }
 
   #[inline(always)]
-  pub fn new_into_heap(heap: Addr, size: usize, shape: Shape) -> HeapLayout<T> {
-    let heap = Cell::init_into_heap(heap, size, shape);
+  pub fn new_into_heap(heap: Addr, object_record: ObjectRecord) -> HeapLayout<T> {
+    let heap = Cell::init_into_heap(heap, object_record);
     let cell = Cell::from(heap);
     unsafe {
       *(cell.get_body() as *mut T) = T::default();
@@ -40,8 +52,8 @@ impl<T: HeapBody> HeapLayout<T> {
   }
 
   #[inline(always)]
-  pub fn persist(context: impl AllocationOnlyContext, size: usize, shape: Shape) -> HeapLayout<T> {
-    let heap = Cell::init_persistent_heap(context, size, shape);
+  pub fn persist(context: impl AllocationOnlyContext, object_record: ObjectRecord) -> HeapLayout<T> {
+    let heap = Cell::init_persistent_heap(context, object_record);
     let cell = Cell::from(heap);
     unsafe {
       *(cell.get_body() as *mut T) = T::default();
@@ -50,8 +62,8 @@ impl<T: HeapBody> HeapLayout<T> {
   }
 
   #[inline(always)]
-  pub fn new_object(context: impl AllocationOnlyContext, size: usize, shape: Shape) -> HeapLayout<T> {
-    let heap = Cell::init_object(context, size, shape);
+  pub fn new_object(context: impl AllocationOnlyContext, object_record: FullObjectRecord) -> HeapLayout<T> {
+    let heap = Cell::init_object(context, object_record);
     let cell = Cell::from(heap);
     unsafe {
       *(cell.get_body() as *mut T) = T::default();
@@ -63,10 +75,9 @@ impl<T: HeapBody> HeapLayout<T> {
   pub fn new_object_into_heap(
     context: impl AllocationOnlyContext,
     heap: Addr,
-    size: usize,
-    shape: Shape,
+    object_record: FullObjectRecord,
   ) -> HeapLayout<T> {
-    let heap = Cell::init_object_into_heap(context, heap, size, shape);
+    let heap = Cell::init_object_into_heap(context, heap, object_record);
     let cell = Cell::from(heap);
     unsafe {
       *(cell.get_body() as *mut T) = T::default();
@@ -75,8 +86,8 @@ impl<T: HeapBody> HeapLayout<T> {
   }
 
   #[inline(always)]
-  pub fn persist_object(context: impl AllocationOnlyContext, size: usize, shape: Shape) -> HeapLayout<T> {
-    let heap = Cell::init_persistent_object(context, size, shape);
+  pub fn persist_object(context: impl AllocationOnlyContext, object_record: FullObjectRecord) -> HeapLayout<T> {
+    let heap = Cell::init_persistent_object(context, object_record);
     let cell = Cell::from(heap);
     unsafe {
       *(cell.get_body() as *mut T) = T::default();
@@ -128,7 +139,7 @@ impl<T: HeapBody> HeapLayout<T> {
 
   #[inline(always)]
   pub fn size(this: &HeapLayout<T>) -> usize {
-    return this.cell().get_header().size() as usize;
+    return this.cell().size() as usize;
   }
 
   #[inline(always)]
@@ -138,7 +149,7 @@ impl<T: HeapBody> HeapLayout<T> {
 
   #[inline(always)]
   pub fn shape(&self) -> Shape {
-    return self.cell().get_header().shape();
+    return self.cell().shape();
   }
 
   #[inline(always)]
@@ -162,11 +173,15 @@ impl<T: HeapBody> HeapLayout<T> {
   }
 }
 
-impl<T: HeapBody> ShadowInstance for HeapLayout<T> {
+impl<T: HeapBody> ObjectSkin for HeapLayout<T> {
   #[inline(always)]
-  fn class(&self) -> ShadowClass {
-    assert!(self.cell().has_shadow_class());
-    return self.cell().class();
+  fn set_record(&self, r: ObjectRecord) {
+    return self.cell().set_record(r);
+  }
+
+  #[inline(always)]
+  fn record(&self) -> ObjectRecord {
+    return self.cell().record();
   }
 }
 
@@ -194,7 +209,7 @@ impl<T: HeapBody> std::fmt::Debug for HeapLayout<T> {
   header_addr: {:p},
   body_addr: {:p}
 }}",
-      self.cell().get_header(),
+      1, //      self.cell().get_header(),
       std::any::type_name::<HeapLayout<T>>(),
       self.0 as Addr,
       self.cell().get_body()
@@ -211,14 +226,18 @@ impl<T: HeapBody> std::fmt::Display for HeapLayout<T> {
 pub trait HeapObject: Into<Repr> + Copy + From<Addr> {
   fn raw_heap(&self) -> Addr;
 
+  fn raw_address(&self) -> usize {
+    return self.raw_heap() as usize;
+  }
+
   #[inline(always)]
   fn size(&self) -> usize {
-    return self.cell().get_header().size() as usize;
+    return self.cell().size() as usize;
   }
 
   #[inline(always)]
   fn shape(&self) -> Shape {
-    return self.cell().get_header().shape();
+    return self.cell().shape();
   }
 
   #[inline(always)]
@@ -238,7 +257,7 @@ pub trait HeapObject: Into<Repr> + Copy + From<Addr> {
 
   #[inline(always)]
   fn get_data_field(this: &Self) -> MaskedBitsetMut<u64> {
-    return unsafe { (*(this.raw_heap() as *mut Header)).data() };
+    return this.cell().get_data_field();
   }
 }
 
@@ -353,232 +372,6 @@ macro_rules! impl_deref_heap {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Default)]
-pub struct Header {
-  ///
-  /// Use as object size information and used as forwarded pointer and mark bit.
-  ///
-  /// |---data----|--size---|--shadow_class bit--|--size tag--|--type tag--|--mark bit--|
-  /// |---23bit---|--32bit--|--------1bit--------|----1bit----|----6bit----|----1bit----|
-  ///
-  field: Bitset<u64>,
-}
-
-const MARK_BIT_START: usize = 1;
-const MARK_BIT_SIZE: usize = 1;
-const TYPE_TAG_START: usize = MARK_BIT_START + MARK_BIT_SIZE;
-const TYPE_TAG_SIZE: usize = 6;
-const SIZE_TAG_START: usize = TYPE_TAG_START + TYPE_TAG_SIZE;
-const SIZE_TAG_SIZE: usize = 1;
-const SHADOW_CLASS_BIT_START: usize = SIZE_TAG_START + SIZE_TAG_SIZE;
-const SHADOW_CLASS_BIT_SIZE: usize = 1;
-const SIZE_FIELD_START: usize = SHADOW_CLASS_BIT_START + SHADOW_CLASS_BIT_SIZE;
-const SIZE_FIELD_SIZE: usize = 32;
-const DATA_FIELD_START: usize = SIZE_FIELD_START + SIZE_FIELD_SIZE;
-const _DATA_FIELD_SIZE: usize = 23;
-
-impl Header {
-  #[inline]
-  fn init(&mut self) {
-    self.field.assign(0);
-  }
-
-  #[inline]
-  pub fn set_size(&mut self, size: u64) {
-    debug_assert!(size <= 0x7fffffffffffff_u64, "Size must be less than 55bit integer");
-    self.field.set(SIZE_TAG_START);
-    let mut range = self.field.mask_lower_mut(SIZE_FIELD_START);
-    range.assign(size as u64);
-  }
-
-  #[inline]
-  pub fn size(&self) -> u32 {
-    if self.is_size_used_as_size() {
-      let mask = self.field.mask_lower(SIZE_FIELD_START);
-      return mask.bits() as u32;
-    }
-    return 0;
-  }
-
-  #[inline]
-  pub fn data(&mut self) -> MaskedBitsetMut<u64> {
-    return self.field.mask_lower_mut(DATA_FIELD_START);
-  }
-
-  #[inline]
-  pub fn set_forwarded_pointer(&mut self, addr: *mut Byte) {
-    self.field.unset(SIZE_TAG_START);
-    let mut mask = self.field.mask_lower_mut(SIZE_FIELD_START);
-    mask.assign(addr as u64);
-  }
-
-  #[inline]
-  pub fn forwarded_pointer(&self) -> *mut Byte {
-    if !self.is_size_used_as_size() {
-      return self.field.mask_lower(SIZE_FIELD_START).bits() as *mut Byte;
-    }
-    return 0xdeadbeef as *mut Byte;
-  }
-
-  #[inline]
-  pub fn set_shadow_class(&mut self) {
-    self.field.set(SHADOW_CLASS_BIT_START);
-  }
-
-  #[inline]
-  pub fn has_shadow_class(&self) -> bool {
-    return self.field.get(SHADOW_CLASS_BIT_START);
-  }
-
-  #[inline]
-  pub fn mark(&mut self) {
-    self.field.set(MARK_BIT_START);
-  }
-
-  #[inline]
-  pub fn unmark(&mut self) {
-    self.field.unset(MARK_BIT_START);
-  }
-
-  #[inline]
-  pub fn is_marked(&self) -> bool {
-    return self.field.get(MARK_BIT_START);
-  }
-
-  #[inline]
-  pub fn set_shape(&mut self, shape: Shape) {
-    let mut mask = self.field.mask_range_mut(TYPE_TAG_START, SIZE_TAG_START);
-    mask.assign(shape.into());
-  }
-
-  #[inline]
-  pub fn shape(&self) -> Shape {
-    let mask = self.field.mask_range(TYPE_TAG_START, SIZE_TAG_START);
-    return Shape::from_tag(mask.bits() as u8);
-  }
-
-  #[inline]
-  fn is_size_used_as_size(&self) -> bool {
-    return self.field.get(SIZE_TAG_START);
-  }
-}
-
-impl std::fmt::Debug for Header {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    return write!(
-      f,
-      "
-{:?} {{
-  size: {:?},
-  shape: {:?},
-  mark: {:?},
-  is_size_used_as_size: {:?},
-  has_shadow_class: {:?}
-}}",
-      std::any::type_name::<Header>(),
-      self.size(),
-      self.shape(),
-      self.is_marked(),
-      self.is_size_used_as_size(),
-      self.has_shadow_class()
-    );
-  }
-}
-
-#[cfg(test)]
-mod header_tests {
-  use super::*;
-  #[test]
-  fn header_set_size_test() {
-    let mut h = Header {
-      field: Bitset::<u64>::new(),
-    };
-    h.set_size(4294967295);
-    assert_eq!(h.size(), 4294967295);
-  }
-
-  #[test]
-  fn header_set_forwarded_pointer() {
-    let p = 0xdeadbeef as *mut Byte;
-    let mut h = Header {
-      field: Bitset::<u64>::new(),
-    };
-    h.set_forwarded_pointer(p);
-    assert_eq!(h.forwarded_pointer() as usize, p as usize);
-  }
-
-  #[test]
-  fn header_mark() {
-    let mut h = Header {
-      field: Bitset::<u64>::new(),
-    };
-    h.mark();
-    assert_eq!(h.is_marked(), true);
-  }
-
-  #[test]
-  fn header_unmark() {
-    let mut h = Header {
-      field: Bitset::<u64>::new(),
-    };
-    h.mark();
-    assert_eq!(h.is_marked(), true);
-    h.unmark();
-    assert_eq!(h.is_marked(), false);
-  }
-
-  #[test]
-  fn header_set_shape() {
-    let mut h = Header {
-      field: Bitset::<u64>::new(),
-    };
-    h.set_shape(Shape::undefined());
-    assert_eq!(h.shape(), Shape::undefined());
-  }
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Debug, Default)]
-pub struct CellLayout {
-  header: Header,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Default)]
-pub struct CellWithShadowClassLayout {
-  header: Header,
-  shadow_class: ShadowClass,
-}
-
-impl From<Addr> for CellLayout {
-  #[inline(always)]
-  fn from(_: Addr) -> CellLayout {
-    unreachable!();
-  }
-}
-
-impl Into<Addr> for CellLayout {
-  #[inline(always)]
-  fn into(self) -> Addr {
-    unreachable!();
-  }
-}
-
-impl From<Addr> for CellWithShadowClassLayout {
-  #[inline(always)]
-  fn from(_: Addr) -> CellWithShadowClassLayout {
-    unreachable!();
-  }
-}
-
-impl Into<Addr> for CellWithShadowClassLayout {
-  #[inline(always)]
-  fn into(self) -> Addr {
-    unreachable!();
-  }
-}
-
-#[repr(C)]
 #[derive(Copy, Clone)]
 struct BareHeapLayout<T: Copy>(Addr, PhantomData<T>);
 impl<T: Copy> BareHeapLayout<T> {
@@ -590,77 +383,71 @@ impl<T: Copy> BareHeapLayout<T> {
     return BareHeapLayout::<T>(heap, PhantomData);
   }
 
-  fn as_ref(&self) -> &T {
-    return unsafe { &*(self.0 as *mut T) };
+  fn heap(&self) -> Addr {
+    return self.0;
   }
 
-  fn as_ref_mut(&mut self) -> &mut T {
-    return unsafe { &mut *(self.0 as *mut T) };
+  fn set(&self, value: Addr) {
+    self.0 = value;
   }
 }
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct Cell(BareHeapLayout<CellLayout>);
+pub struct Cell(BareHeapLayout<ObjectRecord>);
 
 impl Cell {
   pub const TYPE: Shape = Shape::cell();
 
-  pub const OBJECT_SIZE: usize = size_of::<CellWithShadowClassLayout>();
-
   #[inline(always)]
-  pub fn init_heap(mut context: impl AllocationOnlyContext, size: usize, shape: Shape) -> Addr {
-    let heap = context.allocate(size + size_of::<CellLayout>());
-    return Cell::init_into_heap(heap, size, shape);
+  pub fn init_heap(mut context: impl AllocationOnlyContext, object_record: ObjectRecord) -> Addr {
+    let heap = context.allocate((object_record.size() + HEAP_LAYOUT_SIZE) as usize);
+    return Cell::init_into_heap(heap, object_record);
   }
 
   #[inline(always)]
-  pub fn init_persistent_heap(mut context: impl AllocationOnlyContext, size: usize, shape: Shape) -> Addr {
-    let heap = context.allocate_persist(size + size_of::<CellLayout>());
-    return Cell::init_into_heap(heap, size, shape);
+  pub fn init_persistent_heap(mut context: impl AllocationOnlyContext, object_record: ObjectRecord) -> Addr {
+    let heap = context.allocate_persist((object_record.size() + HEAP_LAYOUT_SIZE) as usize);
+    return Cell::init_into_heap(heap, object_record);
   }
 
   #[inline(always)]
-  pub fn init_into_heap(heap: Addr, size: usize, shape: Shape) -> Addr {
-    let mut layout = BareHeapLayout::<CellLayout>::wrap(heap);
-    let cell_layout = layout.as_ref_mut();
-    cell_layout.header.init();
-    cell_layout.header.set_size(size as u64);
-    cell_layout.header.set_shape(shape);
+  pub fn init_into_heap(heap: Addr, object_record: ObjectRecord) -> Addr {
+    let mut layout = BareHeapLayout::<ObjectRecord>::wrap(heap);
+    layout.set(object_record.raw_heap());
     return heap;
   }
 
   #[inline(always)]
-  pub fn init_object(mut context: impl AllocationOnlyContext, size: usize, shape: Shape) -> Addr {
-    let heap = context.allocate(size + size_of::<CellWithShadowClassLayout>());
-    return Cell::init_object_into_heap(context, heap, size, shape);
+  pub fn init_object(mut context: impl AllocationOnlyContext, object_record: FullObjectRecord) -> Addr {
+    let heap = context.allocate(object_record.size());
+    return Cell::init_object_into_heap(context, heap, object_record);
   }
 
   #[inline(always)]
-  pub fn init_persistent_object(mut context: impl AllocationOnlyContext, size: usize, shape: Shape) -> Addr {
-    let heap = context.allocate_persist(size + size_of::<CellWithShadowClassLayout>());
-    return Cell::init_object_into_heap(context, heap, size, shape);
+  pub fn init_persistent_object(mut context: impl AllocationOnlyContext, object_record: FullObjectRecord) -> Addr {
+    let heap = context.allocate_persist(object_record.size());
+    return Cell::init_object_into_heap(context, heap, object_record);
   }
 
-  pub fn init_object_into_heap(context: impl AllocationOnlyContext, heap: Addr, size: usize, shape: Shape) -> Addr {
-    let mut layout = BareHeapLayout::<CellWithShadowClassLayout>::wrap(heap);
-    let mut cell_layout = layout.as_ref_mut();
-    cell_layout.header.init();
-    cell_layout.header.set_size(size as u64);
-    cell_layout.header.set_shadow_class();
-    cell_layout.header.set_shape(shape);
-    cell_layout.shadow_class = ShadowClass::empty(context);
+  pub fn init_object_into_heap(
+    context: impl AllocationOnlyContext,
+    heap: Addr,
+    object_record: FullObjectRecord,
+  ) -> Addr {
+    let mut layout = BareHeapLayout::<ObjectRecord>::wrap(heap);
+    layout.set(object_record.raw_heap());
     return heap;
   }
 
   #[inline(always)]
-  pub fn get_header(&self) -> &Header {
-    return &self.layout().header;
+  pub fn size(&self) -> u32 {
+    return self.record().size();
   }
 
   #[inline(always)]
-  pub fn get_header_mut(&mut self) -> &mut Header {
-    return &mut self.layout_mut().header;
+  pub fn shape(&mut self) -> Shape {
+    return self.record().shape();
   }
 
   #[inline(always)]
@@ -670,49 +457,19 @@ impl Cell {
 
   #[inline(always)]
   pub fn get_data_field(&mut self) -> MaskedBitsetMut<u64> {
-    return self.get_header_mut().data();
-  }
-
-  #[inline(always)]
-  pub fn size(&self) -> usize {
-    return if self.has_shadow_class() {
-      size_of::<CellWithShadowClassLayout>()
-    } else {
-      size_of::<CellLayout>()
-    };
-  }
-
-  #[inline(always)]
-  pub fn has_shadow_class(&self) -> bool {
-    return self.get_header().has_shadow_class();
-  }
-
-  #[inline(always)]
-  fn layout_mut(&mut self) -> &mut CellLayout {
-    return self.0.as_ref_mut();
-  }
-
-  #[inline(always)]
-  fn layout(&self) -> &CellLayout {
-    return self.0.as_ref();
-  }
-
-  #[inline(always)]
-  fn object_layout_mut(&mut self) -> &mut CellWithShadowClassLayout {
-    return unsafe { &mut *(self.0.as_addr() as *mut CellWithShadowClassLayout) };
-  }
-
-  #[inline(always)]
-  fn object_layout(&self) -> &CellWithShadowClassLayout {
-    return unsafe { &*(self.0.as_addr() as *mut CellWithShadowClassLayout) };
+    return self.record().data_field();
   }
 }
 
-impl ShadowInstance for Cell {
+impl ObjectSkin for Cell {
   #[inline(always)]
-  fn class(&self) -> ShadowClass {
-    assert!(self.get_header().has_shadow_class());
-    return self.object_layout().shadow_class;
+  fn set_record(&self, r: ObjectRecord) {
+    return self.0.set(r.raw_heap());
+  }
+
+  #[inline(always)]
+  fn record(&self) -> ObjectRecord {
+    return ObjectRecord::from(self.0.heap());
   }
 }
 

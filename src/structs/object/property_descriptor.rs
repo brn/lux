@@ -32,7 +32,8 @@ pub struct PropertyDescriptor(HeapLayout<DataPropertyDescriptorLayout>);
 impl_object!(PropertyDescriptor, HeapLayout<DataPropertyDescriptorLayout>);
 
 impl PropertyDescriptor {
-  const SIZE: usize = 0;
+  pub const DATA_DESCRIPTOR_SIZE: usize = size_of::<DataPropertyDescriptorLayout>();
+  pub const ACCESSOR_DESCRIPTOR_SIZE: usize = size_of::<AccessorPropertyDescriptorLayout>();
   pub const DEFAULT: u8 = 0;
   pub const WRITABLE: u8 = 0x1;
   pub const ENUMERABLE: u8 = 0x2;
@@ -44,11 +45,8 @@ impl PropertyDescriptor {
   const DATA_PD_INDEX: usize = 4;
 
   pub fn new_data_descriptor(context: impl AllocationOnlyContext, bit: u8, value: Repr) -> PropertyDescriptor {
-    let mut layout = HeapLayout::<DataPropertyDescriptorLayout>::new(
-      context,
-      PropertyDescriptor::SIZE + size_of::<DataPropertyDescriptorLayout>(),
-      Shape::property_descriptor(),
-    );
+    let mut layout =
+      HeapLayout::<DataPropertyDescriptorLayout>::new(context, context.object_records().data_descriptor_record());
     layout.value = value;
     layout.flags.assign(bit);
     layout.flags.set(PropertyDescriptor::DATA_PD_INDEX);
@@ -61,11 +59,8 @@ impl PropertyDescriptor {
     get: Option<Repr>,
     set: Option<Repr>,
   ) -> PropertyDescriptor {
-    let layout = HeapLayout::<DataPropertyDescriptorLayout>::new(
-      context,
-      PropertyDescriptor::SIZE + size_of::<AccessorPropertyDescriptorLayout>(),
-      Shape::property_descriptor(),
-    );
+    let layout =
+      HeapLayout::<DataPropertyDescriptorLayout>::new(context, context.object_records().accessor_descriptor_record());
     let mut a_layout = HeapLayout::<AccessorPropertyDescriptorLayout>::from(layout);
     a_layout.flags.assign(bit);
     a_layout.flags.set(PropertyDescriptor::DATA_PD_INDEX);

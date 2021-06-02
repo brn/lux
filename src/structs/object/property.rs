@@ -1,8 +1,9 @@
 use super::super::cell::*;
 use super::super::hash_map::{HashMap, PredefinedHash};
 use super::super::internal_array::InternalArray;
+use super::super::object_record::ObjectRecordLayout;
+use super::super::object_record::ObjectSkin;
 use super::super::repr::Repr;
-use super::super::shadow_class::ShadowInstance;
 use super::super::shape::Shape;
 use super::super::string::{FlatString, JsString};
 use super::property_descriptor::PropertyDescriptor;
@@ -10,7 +11,9 @@ use super::symbol::JsSymbol;
 use crate::context::{AllocationOnlyContext, Context};
 use crate::def::*;
 use crate::utility::{BitOperator, Bitset};
+use property::Property;
 use std::cmp::PartialEq;
+use std::marker::PhantomData;
 use std::mem::size_of;
 
 #[repr(C)]
@@ -19,8 +22,20 @@ pub struct PropertyName(Repr);
 
 impl PropertyName {
   pub fn new(a: Repr) -> PropertyName {
-    assert!((a.is_string() && JsString::from(a).has_flat_content()) || a.is_symbol());
+    assert!(a.is_number() || (a.is_string() && JsString::from(a).has_flat_content()) || a.is_symbol());
     return PropertyName(a);
+  }
+
+  pub fn to_number(&self) -> Option<f64> {
+    return self.0.to_number();
+  }
+
+  pub fn to_number_unchecked(&self) -> f64 {
+    return self.0.to_number_unchecked();
+  }
+
+  pub fn is_number(&self) -> bool {
+    return !self.0.is_number();
   }
 
   pub fn is_symbol(&self) -> bool {
@@ -64,6 +79,9 @@ impl PartialEq for PropertyName {
 
 impl PredefinedHash for PropertyName {
   fn prepare_hash(&mut self, context: impl Context) {
+    if self.predefined_hash() != 0 {
+      return;
+    }
     if self.is_symbol() {
       JsSymbol::from(self.0).prepare_hash(context);
     } else {
@@ -71,7 +89,7 @@ impl PredefinedHash for PropertyName {
     }
   }
   fn predefined_hash(&self) -> u64 {
-    return Cell::from(self.0).class().hash();
+    return Cell::from(self.0).full_record_unchecked().hash();
   }
 }
 
@@ -146,9 +164,9 @@ pub struct Property(HeapLayout<PropertyLayout>);
 impl_object!(Property, HeapLayout<PropertyLayout>);
 
 impl Property {
-  const SIZE: usize = size_of::<PropertyLayout>();
+  pub const SIZE: usize = size_of::<PropertyLayout>();
   pub fn new(context: impl AllocationOnlyContext, name: PropertyName, desc: PropertyDescriptor) -> Property {
-    let mut layout = HeapLayout::<PropertyLayout>::new(context, Property::SIZE, Shape::property());
+    let mut layout = HeapLayout::<PropertyLayout>::new(context, context.object_records().property_record());
     layout.name = name;
     layout.desc = desc;
     return Property(layout);
@@ -163,199 +181,46 @@ impl Property {
   }
 }
 
-macro_rules! new_property {
-  ($context:expr, value: $name:expr, $value:expr) => {{
-    let a = crate::structs::object::PropertyDescriptor::new_data_descriptor(
-      $context,
-      crate::structs::object::PropertyDescriptor::DEFAULT,
-      $value,
-    );
-    crate::structs::object::Property::new($context, $name, a)
-  }};
-  ($context:expr, str: $name:expr, $value:expr) => {{
-    let a = crate::structs::object::PropertyDescriptor::new_data_descriptor(
-      $context,
-      crate::structs::object::PropertyDescriptor::DEFAULT,
-      $value,
-    );
-    crate::structs::object::Property::new(
-      $context,
-      crate::structs::object::PropertyName::from_utf8_string($context, $name),
-      a,
-    )
-  }};
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Default)]
-pub struct FastOwnPropertiesLayout {
-  flags: Bitset<u64>,
-  own_property_keys: InternalArray<PropertyName>,
-  properties: InternalArray<Property>,
-}
-
-#[repr(C)]
-#[derive(Copy, Clone, Default)]
-pub struct SlowOwnPropertiesLayout {
-  flags: Bitset<u64>,
-  own_property_keys: InternalArray<PropertyName>,
-  properties: HashMap<PropertyName, Property>,
-}
-
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct OwnProperties(HeapLayout<FastOwnPropertiesLayout>);
-impl_object!(OwnProperties, HeapLayout<FastOwnPropertiesLayout>);
+pub struct FastOwnProperties(*mut Property);
 
-#[derive(Copy, Clone)]
-pub struct OwnPropertyDescriptorSearchResult {
-  descriptor: PropertyDescriptor,
-  is_fast: bool,
-  index: isize,
-}
-
-impl OwnPropertyDescriptorSearchResult {
-  pub fn new(descriptor: PropertyDescriptor, is_fast: bool, index: isize) -> OwnPropertyDescriptorSearchResult {
-    return OwnPropertyDescriptorSearchResult {
-      descriptor,
-      is_fast,
-      index,
-    };
-  }
-
-  pub fn descriptor(&self) -> PropertyDescriptor {
-    return self.descriptor;
-  }
-
-  pub fn is_fast(&self) -> bool {
-    return self.is_fast;
-  }
-
-  pub fn index(&self) -> isize {
-    return self.index;
-  }
-
-  pub fn usable_as_cache(&self) -> bool {
-    return self.is_fast() && self.index >= 0;
-  }
-}
-
-#[derive(Copy, Clone)]
-pub struct PropertySearchHint {
-  key: PropertyName,
-  index: isize,
-}
-
-impl PropertySearchHint {
-  pub fn new(key: PropertyName) -> PropertySearchHint {
-    return PropertySearchHint { key, index: -1 };
-  }
-  pub fn new_with_index(key: PropertyName, index: isize) -> PropertySearchHint {
-    return PropertySearchHint { key, index };
-  }
-}
-
-impl OwnProperties {
-  const SIZE: usize = size_of::<FastOwnPropertiesLayout>();
-  const SLOW_PASS_THRESHOLD: u64 = 20;
-  const SLOW_MODE_BIT_INDEX: usize = 1;
-  pub fn new(context: impl AllocationOnlyContext) -> OwnProperties {
-    let mut layout = HeapLayout::<FastOwnPropertiesLayout>::new(context, OwnProperties::SIZE, Shape::own_properties());
-    layout.properties = InternalArray::<Property>::new(context, OwnProperties::SLOW_PASS_THRESHOLD as usize);
-    layout.flags.assign(0);
-    return OwnProperties(layout);
-  }
-
-  pub fn define_property(
-    &mut self,
-    context: impl AllocationOnlyContext,
-    property: Property,
-  ) -> OwnPropertyDescriptorSearchResult {
-    self.add_len();
-    if !self.flags.get(OwnProperties::SLOW_MODE_BIT_INDEX) {
-      self.own_property_keys = InternalArray::<PropertyName>::default();
-      self.properties.push(property);
-      if self.len() == OwnProperties::SLOW_PASS_THRESHOLD {
-        self.flags.set(OwnProperties::SLOW_MODE_BIT_INDEX);
-        self.copy_properties(context);
-        return OwnPropertyDescriptorSearchResult::new(property.desc(), false, 0);
-      }
-      return OwnPropertyDescriptorSearchResult::new(property.desc(), true, (self.properties.length() - 1) as isize);
-    } else {
-      let mut slow = HeapLayout::<SlowOwnPropertiesLayout>::wrap(self.raw_heap());
-      slow.own_property_keys = InternalArray::<PropertyName>::default();
-      slow.properties.insert(context, property.name, property);
-      return OwnPropertyDescriptorSearchResult::new(property.desc(), false, 0);
+impl FastOwnProperties {
+  pub fn add_property(&mut self, offset: u8, property: Property) {
+    unsafe {
+      *(self.properties().offset(offset.into())) = property;
     }
   }
 
-  pub fn get_property_descriptor(&self, hint: PropertySearchHint) -> Option<OwnPropertyDescriptorSearchResult> {
-    if !self.flags.get(OwnProperties::SLOW_MODE_BIT_INDEX) {
-      if hint.index >= 0 && !self.properties[hint.index as usize].is_null() {
-        return Some(OwnPropertyDescriptorSearchResult::new(
-          self.properties[hint.index as usize].desc(),
-          true,
-          hint.index,
-        ));
+  pub fn get_property_descriptor(&self, len: u8, property: Property) -> Option<(isize, PropertyDescriptor)> {
+    for index in 0..len {
+      let p = self.offset(index as isize);
+      if !p.is_null() && property.name() == self.offset_ref(index as isize).name() {
+        return Some((index as isize, self.offset_ref(index as isize).desc()));
       }
-      for (index, p) in self.properties.into_iter().enumerate() {
-        if hint.key == p.name() {
-          return Some(OwnPropertyDescriptorSearchResult::new(p.desc, true, index as isize));
-        }
-      }
-      return None;
-    } else {
-      let slow = HeapLayout::<SlowOwnPropertiesLayout>::wrap(self.raw_heap());
-      match slow.properties.find(hint.key) {
-        Some(p) => return Some(OwnPropertyDescriptorSearchResult::new(p.desc, false, 0)),
-        _ => return None,
-      };
+    }
+    return None;
+  }
+
+  pub fn collect_own_property_keys(&mut self, len: usize, keys: InternalArray<PropertyName>) {
+    for index in 0..len {
+      keys.push(self.offset_ref(index as isize).name());
     }
   }
 
-  pub fn own_property_keys(&mut self, context: impl Context) -> InternalArray<PropertyName> {
-    if !self.flags.get(OwnProperties::SLOW_MODE_BIT_INDEX) {
-      if !self.own_property_keys.is_null() {
-        return self.own_property_keys;
-      }
-      let properties = self.properties;
-      let mut keys = InternalArray::<PropertyName>::new(context, properties.length());
-      for p in properties {
-        keys.push(p.name);
-      }
-      self.own_property_keys = keys;
-      return keys;
-    } else {
-      let slow = HeapLayout::<SlowOwnPropertiesLayout>::wrap(self.raw_heap());
-      if !slow.own_property_keys.is_null() {
-        return slow.own_property_keys;
-      }
-      let properties = slow.properties;
-      let mut keys = InternalArray::<PropertyName>::new(context, properties.len());
-      for (_, p) in properties {
-        keys.push(p.name);
-      }
-      self.own_property_keys = keys;
-      return keys;
-    }
+  pub fn wrap(ptr: *mut Property) -> FastOwnProperties {
+    return FastOwnProperties(ptr);
   }
 
-  fn copy_properties(&self, context: impl AllocationOnlyContext) {
-    let mut slow = HeapLayout::<SlowOwnPropertiesLayout>::wrap(self.raw_heap());
-    let mut hm = HashMap::<PropertyName, Property>::new(context);
-    slow.properties = hm;
-    for prop in self.properties {
-      hm.insert(context, prop.name, prop);
-    }
+  pub fn properties(&self) -> *mut Property {
+    return self.0;
   }
 
-  pub fn len(&self) -> u64 {
-    return self.flags.mask_lower(OwnProperties::SLOW_MODE_BIT_INDEX).bits();
+  pub fn offset(&self, offset: isize) -> *mut Property {
+    return unsafe { self.0.offset(offset) };
   }
 
-  fn add_len(&mut self) {
-    let len = self.len();
-    let mut range = self.flags.mask_lower_mut(OwnProperties::SLOW_MODE_BIT_INDEX + 1);
-    range.assign(len + 1);
+  pub fn offset_ref(&self, offset: isize) -> &Property {
+    return unsafe { &*self.offset(offset) };
   }
 }

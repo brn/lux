@@ -1,8 +1,8 @@
 use super::heap::*;
-use super::structs::Cell;
 use crate::def::*;
 use crate::structs::{
-  FlatString, HeapLayout, HeapObject, InternalArray, PropertyName, Repr, ShadowClass, Shape, SymbolRegistry,
+  Builtins, FlatString, HeapLayout, HeapObject, InternalArray, ObjectRecord, ObjectRecords, PropertyName, Repr, Shape,
+  SymbolRegistry,
 };
 use once_cell::sync::Lazy as SyncLazy;
 use std::alloc::{alloc, dealloc, Layout};
@@ -34,7 +34,10 @@ pub struct GlobalObjectsLayout {
   to_primitive_symbol_str: FlatString,
   to_string_tag_symbol_str: FlatString,
   unscopables_symbol_str: FlatString,
-  empty_shadow_class: ShadowClass,
+
+  to_string_to_string_str: FlatString,
+  symbol_to_string_str: FlatString,
+
   symbol_registry: SymbolRegistry,
 }
 
@@ -46,7 +49,8 @@ impl GlobalObjects {
   const SIZE: usize = size_of::<GlobalObjectsLayout>();
 
   pub fn new(context: impl AllocationOnlyContext) -> GlobalObjects {
-    let mut layout = HeapLayout::<GlobalObjectsLayout>::persist(context, GlobalObjects::SIZE, Shape::global_objects());
+    let global_objects_record = ObjectRecord::new(context, GlobalObjects::SIZE as u32, Shape::global_objects());
+    let mut layout = HeapLayout::<GlobalObjectsLayout>::persist(context, global_objects_record);
     layout.js_true = Repr::js_true();
     layout.js_false = Repr::js_false();
     layout.js_undefined = Repr::js_undefined();
@@ -60,7 +64,6 @@ impl GlobalObjects {
     layout.false_str = FlatString::from_utf8(context, "false");
     layout.undefined_str = FlatString::from_utf8(context, "undefined");
     layout.null_str = FlatString::from_utf8(context, "null");
-    layout.empty_shadow_class = ShadowClass::empty(context);
     layout.async_iterator_symbol_str = FlatString::from_utf8(context, "Symbol.asyncIterator");
     layout.has_instance_symbol_str = FlatString::from_utf8(context, "Symbol.hasInstance");
     layout.is_concat_spreadable_symbol_str = FlatString::from_utf8(context, "Symbol.isConcatSpreadable");
@@ -74,6 +77,8 @@ impl GlobalObjects {
     layout.to_primitive_symbol_str = FlatString::from_utf8(context, "Symbol.toPrimitive");
     layout.to_string_tag_symbol_str = FlatString::from_utf8(context, "Symbol.toStringTag");
     layout.unscopables_symbol_str = FlatString::from_utf8(context, "Symbol.unscopables");
+    layout.to_string_to_string_str = FlatString::from_utf8(context, "function toString () { [native code] }");
+    layout.symbol_to_string_str = FlatString::from_utf8(context, "function Symbol () { [native code] }");
     layout.symbol_registry = SymbolRegistry::persist(context);
     return GlobalObjects(layout);
   }
@@ -91,7 +96,8 @@ impl_object!(StaticNames, HeapLayout<StaticNamesLayout>);
 impl StaticNames {
   const SIZE: usize = size_of::<StaticNamesLayout>();
   pub fn new(context: impl AllocationOnlyContext) -> StaticNames {
-    let mut layout = HeapLayout::<StaticNamesLayout>::persist(context, StaticNames::SIZE, Shape::static_names());
+    let static_names_record = ObjectRecord::new(context, StaticNames::SIZE as u32, Shape::static_names());
+    let mut layout = HeapLayout::<StaticNamesLayout>::persist(context, static_names_record);
     layout.description = PropertyName::from_utf8_string(context, "description");
     return StaticNames(layout);
   }
@@ -110,6 +116,8 @@ static mut HEAP: SyncLazy<Heap> = SyncLazy::new(|| {
 pub struct LuxContextLayout {
   globals: GlobalObjects,
   static_names: StaticNames,
+  builtins: Builtins,
+  object_records: ObjectRecords,
 }
 
 #[repr(C)]
@@ -118,16 +126,19 @@ pub struct LuxContext(HeapLayout<LuxContextLayout>);
 impl_object!(LuxContext, HeapLayout<LuxContextLayout>);
 
 impl LuxContext {
-  const SIZE: usize = size_of::<LuxContextLayout>() + Cell::OBJECT_SIZE;
+  const SIZE: usize = size_of::<LuxContextLayout>();
   #[cfg(feature = "nogc")]
   pub fn new() -> LuxContext {
-    let l = Layout::from_size_align(LuxContext::SIZE, ALIGNMENT).unwrap();
+    let l = Layout::from_size_align(LuxContext::SIZE + PTR_SIZE, ALIGNMENT).unwrap();
     let heap = unsafe { alloc(l) };
-    let mut layout = HeapLayout::<LuxContextLayout>::new_into_heap(heap, LuxContext::SIZE, Shape::context());
+    let object_record = ObjectRecord::new_into_heap(heap, LuxContext::SIZE as u32, Shape::context());
+    let mut layout = HeapLayout::<LuxContextLayout>::new_into_heap(heap, object_record);
     let c = LuxContext(layout);
+    layout.object_records = ObjectRecords::new(c);
     layout.static_names = StaticNames::new(c);
     layout.globals = GlobalObjects::new(c);
     layout.globals.symbol_registry.init_well_known_symbols(c);
+    layout.builtins = Builtins::new(c);
     return c;
   }
 
@@ -137,7 +148,8 @@ impl LuxContext {
   }
 }
 
-pub trait AllocationOnlyContext: Copy {
+pub trait AllocationOnlyContext: HeapObject + Copy {
+  fn object_records(&self) -> ObjectRecords;
   fn allocate(&mut self, size: usize) -> Addr;
   fn allocate_persist(&mut self, size: usize) -> Addr;
 }
@@ -192,10 +204,6 @@ pub trait Context: AllocationOnlyContext {
     return self.globals().undefined_str;
   }
 
-  fn empty_shadow_class(&self) -> ShadowClass {
-    return self.globals().empty_shadow_class;
-  }
-
   fn symbol_registry(&self) -> SymbolRegistry {
     return self.globals().symbol_registry;
   }
@@ -239,10 +247,21 @@ pub trait Context: AllocationOnlyContext {
   fn unscopables_symbol_str(&self) -> FlatString {
     return self.globals().unscopables_symbol_str;
   }
+
+  fn symbol_to_string_str(&self) -> FlatString {
+    return self.globals().symbol_to_string_str;
+  }
+
+  fn to_string_to_string_str(&self) -> FlatString {
+    return self.globals().to_string_to_string_str;
+  }
 }
 
 #[cfg(not(feature = "nogc"))]
 impl AllocationOnlyContext for LuxContext {
+  fn object_records(&self) -> ObjectRecords {
+    return self.object_records;
+  }
   fn allocate(&mut self, size: usize) -> Addr {
     return unsafe { HEAP.allocate(size) };
   }
@@ -254,6 +273,9 @@ impl AllocationOnlyContext for LuxContext {
 
 #[cfg(feature = "nogc")]
 impl AllocationOnlyContext for LuxContext {
+  fn object_records(&self) -> ObjectRecords {
+    return self.object_records;
+  }
   fn allocate(&mut self, size: usize) -> Addr {
     return unsafe { alloc(Layout::from_size_align(size, ALIGNMENT).unwrap()) };
   }

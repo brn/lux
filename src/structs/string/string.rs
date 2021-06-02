@@ -1,8 +1,8 @@
 use super::super::cell::{Cell, HeapLayout, HeapObject};
 use super::super::hash_map::PredefinedHash;
 use super::super::object::Property;
+use super::super::object_record::{FullObjectRecord, ObjectRecord, ObjectSkin};
 use super::super::repr::Repr;
-use super::super::shadow_class::{ShadowClass, ShadowInstance};
 use super::super::shape::{Shape, ShapeTag};
 use super::backend::StringBackend;
 use super::rope::{FlattenString, StringRope};
@@ -10,6 +10,7 @@ use super::small_string::{OneByteChar, SmallString};
 use super::u16_str::FixedU16CodePointArray;
 use crate::context::{AllocationOnlyContext, Context};
 use crate::utility::*;
+use std::convert::TryFrom;
 use std::mem::size_of;
 
 macro_rules! dispatch {
@@ -47,12 +48,11 @@ impl_object!(JsString, HeapLayout<JsStringLayout>);
 
 impl JsString {
   const IS_OBJECT_BIT: usize = 1;
+  pub const SIZE: usize = size_of::<JsStringLayout>();
+
   pub fn new(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> JsString {
-    let mut layout = HeapLayout::<JsStringLayout>::new_object(context, size_of::<JsStringLayout>(), Shape::string());
+    let mut layout = HeapLayout::<JsStringLayout>::new_object(context, context.object_records().string_record());
     layout.backend = JsString::select_backend(context, str);
-    layout
-      .class()
-      .define_own_property(context, new_property!(context, str: "length", Repr::from(str.length())));
     let string = JsString(layout);
     JsString::to_object(string.into());
     return string;
@@ -104,12 +104,32 @@ impl JsString {
     return JsString::from(this);
   }
 
+  pub fn string_piece_record(context: impl AllocationOnlyContext) -> ObjectRecord {
+    return ObjectRecord::new(context, StringRope::PIECE_SIZE as u32, Shape::string_piece());
+  }
+
+  pub fn string_rope_record(context: impl AllocationOnlyContext) -> ObjectRecord {
+    return ObjectRecord::new(context, StringRope::SIZE as u32, Shape::string_rope());
+  }
+
+  pub fn flatten_string_record(context: impl AllocationOnlyContext) -> ObjectRecord {
+    return ObjectRecord::new(context, FlattenString::SIZE as u32, Shape::flatten_string());
+  }
+
+  pub fn small_string_record(context: impl AllocationOnlyContext) -> ObjectRecord {
+    return ObjectRecord::new(context, SmallString::SIZE as u32, Shape::small_string());
+  }
+
+  pub fn one_byte_char_record(context: impl AllocationOnlyContext) -> ObjectRecord {
+    return ObjectRecord::new(context, OneByteChar::SIZE as u32, Shape::one_byte_char());
+  }
+
   fn new_primitive(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> JsString {
-    let mut layout = HeapLayout::<JsStringLayout>::new_object(context, size_of::<JsStringLayout>(), Shape::string());
+    let mut layout = HeapLayout::<JsStringLayout>::new_object(context, context.object_records().string_record());
     layout.backend = JsString::select_backend(context, str).into();
     layout.flat_content = FixedU16CodePointArray::default();
     //    let prop = new_property!(context, str: "length", Repr::from(str.length()));
-    //    layout.class().define_own_property(context, prop);
+    //    layout.record().define_own_property(context, prop);
     return JsString(layout);
   }
 
@@ -132,23 +152,27 @@ impl JsString {
   }
 }
 
-impl ShadowInstance for JsString {
-  fn class(&self) -> ShadowClass {
-    return self.0.class();
+impl ObjectSkin for JsString {
+  fn set_record(&self, r: ObjectRecord) {
+    self.0.set_record(r);
+  }
+  fn record(&self) -> ObjectRecord {
+    return self.0.record();
   }
 }
 
 impl PredefinedHash for JsString {
   fn prepare_hash(&mut self, context: impl Context) {
-    if self.class().hash() > 0 {
+    let r = FullObjectRecord::try_from(self.record()).unwrap();
+    if r.hash() > 0 {
       return;
     }
     let flat_content = self.flatten(context);
-    ShadowClass::set_hash(*self, flat_content.predefined_hash());
+    r.set_hash(flat_content.predefined_hash());
   }
 
   fn predefined_hash(&self) -> u64 {
-    return self.class().hash();
+    return FullObjectRecord::try_from(self.record()).unwrap().hash();
   }
 }
 
@@ -165,14 +189,15 @@ impl_object!(FlatString, HeapLayout<JsStringLayout>);
 
 impl PredefinedHash for FlatString {
   fn prepare_hash(&mut self, _: impl Context) {
-    if self.class().hash() > 0 {
+    let r = FullObjectRecord::try_from(self.record()).unwrap();
+    if r.hash() > 0 {
       return;
     }
-    ShadowClass::set_hash(*self, self.flat_content.predefined_hash());
+    r.set_hash(self.flat_content.predefined_hash());
   }
 
   fn predefined_hash(&self) -> u64 {
-    return self.class().hash();
+    return FullObjectRecord::try_from(self.record()).unwrap().hash();
   }
 }
 
@@ -191,9 +216,12 @@ impl FlatString {
   }
 }
 
-impl ShadowInstance for FlatString {
-  fn class(&self) -> ShadowClass {
-    return self.0.class();
+impl ObjectSkin for FlatString {
+  fn set_record(&self, r: ObjectRecord) {
+    self.0.set_record(r);
+  }
+  fn record(&self) -> ObjectRecord {
+    return self.0.record();
   }
 }
 

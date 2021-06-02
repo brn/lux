@@ -1,10 +1,12 @@
 use super::super::cell::*;
 use super::super::internal_array::InternalArray;
+use super::super::object_record::{
+  FullObjectRecord, ObjectSkin, OwnPropertyDescriptorSearchResult, OwnPropertySearchHint, PropertySearchHint,
+};
 use super::super::repr::Repr;
-use super::super::shadow_class::{ShadowClass, ShadowInstance};
 use super::super::shape::{Shape, ShapeTag};
 use super::super::string::JsString;
-use super::property::{OwnPropertyDescriptorSearchResult, Property, PropertyName, PropertySearchHint};
+use super::property::{Property, PropertyName};
 use super::symbol::WellKnownSymbolType;
 use crate::context::Context;
 use std::mem::size_of;
@@ -24,47 +26,52 @@ pub enum PreferredType {
 }
 
 impl JsObject {
-  const SIZE: usize = size_of::<JsObjectLayout>();
-  pub fn new(context: impl Context) -> JsObject {
-    let layout = HeapLayout::<JsObjectLayout>::new_object(context, JsObject::SIZE, Shape::object());
+  pub const SIZE: usize = size_of::<JsObjectLayout>();
+  pub fn new(context: impl Context, object_record: FullObjectRecord) -> JsObject {
+    let layout = HeapLayout::<JsObjectLayout>::new_object(context, object_record);
     return JsObject(layout);
   }
 
-  pub fn get_prototype_of(object: impl ShadowInstance) -> Option<JsObject> {
-    return object.class().prototype();
+  pub fn new_with_initial_record(context: impl Context) -> JsObject {
+    let layout = HeapLayout::<JsObjectLayout>::new_object(context, context.object_records().js_object_record());
+    return JsObject(layout);
   }
 
-  pub fn set_prototype_of(object: impl ShadowInstance, prototype: JsObject) -> bool {
-    return object.class().set_prototype(prototype);
+  pub fn get_prototype_of(object: impl ObjectSkin) -> Option<JsObject> {
+    return object.full_record_unchecked().prototype();
   }
 
-  pub fn is_extensible(object: impl ShadowInstance) -> bool {
-    return object.class().is_extensible();
+  pub fn set_prototype_of(object: impl ObjectSkin, prototype: JsObject) -> bool {
+    return object.full_record_unchecked().set_prototype(prototype);
   }
 
-  pub fn prevent_extensions(object: impl ShadowInstance) -> bool {
-    return object.class().prevent_extensions();
+  pub fn is_extensible(object: impl ObjectSkin) -> bool {
+    return object.full_record_unchecked().is_extensible();
   }
 
-  pub fn get_own_property(object: Repr, hint: PropertySearchHint) -> Option<OwnPropertyDescriptorSearchResult> {
+  pub fn prevent_extensions(object: impl ObjectSkin) -> bool {
+    return object.full_record_unchecked().prevent_extensions();
+  }
+
+  pub fn get_own_property(object: Repr, hint: OwnPropertySearchHint) -> Option<OwnPropertyDescriptorSearchResult> {
     debug_assert!(object.is_object());
-    return object.class().get_own_property(hint);
+    return object.full_record_unchecked().get_own_property(hint);
   }
 
   pub fn define_own_property(
     context: impl Context,
-    object: impl ShadowInstance,
+    object: impl ObjectSkin,
     property: Property,
   ) -> OwnPropertyDescriptorSearchResult {
-    return object.class().define_own_property(context, property);
+    return object.full_record_unchecked().define_own_property(context, property);
   }
 
-  pub fn has_property(object: impl ShadowInstance, hint: PropertySearchHint) -> bool {
-    return object.class().has_property(hint).is_some();
+  pub fn has_property(object: impl ObjectSkin, hint: PropertySearchHint) -> bool {
+    return object.full_record_unchecked().has_property(hint).is_some();
   }
 
-  pub fn own_property_keys(context: impl Context, object: impl ShadowInstance) -> InternalArray<PropertyName> {
-    return object.class().own_property_keys(context);
+  pub fn own_property_keys(context: impl Context, object: impl ObjectSkin) -> InternalArray<PropertyName> {
+    return object.full_record_unchecked().own_property_keys(context);
   }
 
   // https://262.ecma-international.org/11.0/#sec-ordinary-object-internal-methods-and-internal-slots-get-p-receiver
@@ -227,23 +234,7 @@ impl JsObject {
     return PropertyName::new(JsObject::to_string(context, key));
   }
 
-  pub fn has_own_property(_context: impl Context, o: Repr, hint: PropertySearchHint) -> bool {
+  pub fn has_own_property(_context: impl Context, o: Repr, hint: OwnPropertySearchHint) -> bool {
     return JsObject::get_own_property(o, hint).is_some();
-  }
-}
-
-#[derive(Copy, Clone, Default)]
-pub struct JsObjectPrototypeLayout {
-  shadow_class: ShadowClass,
-}
-
-#[derive(Copy, Clone)]
-pub struct JsObjectPrototype(HeapLayout<JsObjectPrototypeLayout>);
-impl_object!(JsObjectPrototype, HeapLayout<JsObjectPrototypeLayout>);
-
-impl JsObjectPrototype {
-  pub fn has_own_property(&self, context: impl Context, receiver: Repr, v: Repr) {
-    let p = JsObject::to_property_key(context, v);
-    let o = JsObject::to_object(context, receiver);
   }
 }

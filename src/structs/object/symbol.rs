@@ -1,10 +1,10 @@
 use super::super::cell::*;
 use super::super::hash_map::{HashMap, PredefinedHash};
+use super::super::object_record::{ObjectRecord, ObjectSkin, OwnPropertySearchHint, PropertyMode};
 use super::super::repr::Repr;
-use super::super::shadow_class::{ShadowClass, ShadowInstance};
 use super::super::shape::Shape;
 use super::super::string::FlatString;
-use super::property::{PropertyName, PropertySearchHint};
+use super::property::PropertyName;
 use crate::context::{AllocationOnlyContext, Context};
 use crate::utility::*;
 use num_derive::FromPrimitive;
@@ -36,11 +36,11 @@ pub struct SymbolRegistry(HeapLayout<SymbolRegistryLayout>);
 impl_object!(SymbolRegistry, HeapLayout<SymbolRegistryLayout>);
 
 impl SymbolRegistry {
-  const SIZE: usize = size_of::<SymbolRegistryLayout>();
+  pub const SIZE: usize = size_of::<SymbolRegistryLayout>();
 
   pub fn persist(context: impl AllocationOnlyContext) -> SymbolRegistry {
     let mut layout =
-      HeapLayout::<SymbolRegistryLayout>::persist(context, SymbolRegistry::SIZE, Shape::symbol_registry());
+      HeapLayout::<SymbolRegistryLayout>::persist(context, context.object_records().symbol_registry_record());
     layout.map = HashMap::<PropertyName, JsSymbol>::new(context);
     return SymbolRegistry(layout);
   }
@@ -122,14 +122,14 @@ pub struct JsSymbol(HeapLayout<JsSymbolLayout>);
 impl_object!(JsSymbol, HeapLayout<JsSymbolLayout>);
 
 impl JsSymbol {
-  const SIZE: usize = std::mem::size_of::<JsSymbolLayout>();
+  pub const SIZE: usize = std::mem::size_of::<JsSymbolLayout>();
   const IS_WELLKNOWN_BIT: usize = 1;
   const IS_OBJECT_BIT: usize = 2;
 
   pub fn new(context: impl Context, mut desc: FlatString) -> JsSymbol {
     desc.prepare_hash(context);
-    let mut layout = HeapLayout::<JsSymbolLayout>::new_object(context, JsSymbol::SIZE, Shape::symbol());
-    let result = layout.class().define_own_property(
+    let mut layout = HeapLayout::<JsSymbolLayout>::new_object(context, context.object_records().symbol_record());
+    let result = layout.full_record_unchecked().define_own_property(
       context,
       new_property!(context, value: context.static_names().description(), desc.into()),
     );
@@ -142,8 +142,8 @@ impl JsSymbol {
   }
 
   pub fn new_primitive(context: impl Context, desc: FlatString) -> JsSymbol {
-    let mut layout = HeapLayout::<JsSymbolLayout>::new_object(context, JsSymbol::SIZE, Shape::symbol());
-    let result = layout.class().define_own_property(
+    let mut layout = HeapLayout::<JsSymbolLayout>::new_object(context, context.object_records().symbol_record());
+    let result = layout.full_record_unchecked().define_own_property(
       context,
       new_property!(context, value: context.static_names().description(), desc.into()),
     );
@@ -156,10 +156,13 @@ impl JsSymbol {
   }
 
   pub fn description(&self, context: impl Context) -> FlatString {
-    match self.class().get_own_property(PropertySearchHint::new_with_index(
-      context.static_names().description(),
-      self.description_index,
-    )) {
+    match self
+      .full_record_unchecked()
+      .get_own_property(OwnPropertySearchHint::new_with(
+        context.static_names().description(),
+        self.description_index,
+        PropertyMode::FAST,
+      )) {
       Some(result) => {
         if !result.descriptor().value().is_boxed() {
           match WellKnownSymbolType::from_u64(u64::from(result.descriptor().value())) {
@@ -188,10 +191,13 @@ impl JsSymbol {
 
   pub fn wellknown_symbol_type(&self, context: impl Context) -> Option<WellKnownSymbolType> {
     if self.is_well_known_symbol() {
-      match self.class().get_own_property(PropertySearchHint::new_with_index(
-        context.static_names().description(),
-        self.description_index,
-      )) {
+      match self
+        .full_record_unchecked()
+        .get_own_property(OwnPropertySearchHint::new_with(
+          context.static_names().description(),
+          self.description_index,
+          PropertyMode::FAST,
+        )) {
         Some(result) => {
           if !result.descriptor().value().is_boxed() {
             return WellKnownSymbolType::from_u64(u64::from(result.descriptor().value()));
@@ -231,8 +237,8 @@ impl JsSymbol {
   }
 
   fn new_wellknown(context: impl Context, symbol_type: WellKnownSymbolType) -> JsSymbol {
-    let layout = HeapLayout::<JsSymbolLayout>::persist_object(context, JsSymbol::SIZE, Shape::symbol());
-    layout.class().define_own_property(
+    let layout = HeapLayout::<JsSymbolLayout>::persist_object(context, context.object_records().symbol_record());
+    layout.full_record_unchecked().define_own_property(
       context,
       new_property!(
         context,
@@ -246,17 +252,17 @@ impl JsSymbol {
   }
 }
 
-impl_shadow_instance!(JsSymbol);
+impl_object_record!(JsSymbol);
 
 impl PredefinedHash for JsSymbol {
   fn prepare_hash(&mut self, context: impl Context) {
     let mut desc = self.description(context);
     desc.prepare_hash(context);
-    ShadowClass::set_hash(*self, desc.predefined_hash());
+    self.full_record_unchecked().set_hash(desc.predefined_hash());
   }
 
   fn predefined_hash(&self) -> u64 {
-    return self.class().hash();
+    return self.full_record_unchecked().hash();
   }
 }
 

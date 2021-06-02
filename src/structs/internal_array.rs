@@ -4,7 +4,6 @@ use super::shape::Shape;
 use crate::context::AllocationOnlyContext;
 use crate::def::*;
 use crate::utility::align;
-use crate::utility::Len;
 use std::marker::PhantomData;
 use std::mem::size_of;
 use std::ops::{Index, IndexMut};
@@ -51,20 +50,16 @@ impl<T: Copy> IndexMut<usize> for InternalArray<T> {
   }
 }
 
-impl<T: Copy> Len for InternalArray<T> {
-  fn len(&self) -> usize {
-    return self.length;
-  }
-}
-
 impl<T: Copy> InternalArray<T> {
   pub const TYPE: Shape = Shape::internal_array();
   pub fn new(context: impl AllocationOnlyContext, capacity: usize) -> InternalArray<T> {
     return InternalArray::<T>::init(
       HeapLayout::<InternalArrayLayout>::new(
         context,
-        InternalArray::<T>::calc_size(capacity),
-        Shape::internal_array(),
+        context
+          .object_records()
+          .internal_array_record()
+          .copy_with_size(context, InternalArray::<T>::calc_size(capacity)),
       ),
       capacity,
     );
@@ -79,14 +74,37 @@ impl<T: Copy> InternalArray<T> {
     let mut array = InternalArray::<T>::init(
       HeapLayout::<InternalArrayLayout>::new(
         context,
-        InternalArray::<T>::calc_size(PTR_SIZE),
-        Shape::internal_array(),
+        context
+          .object_records()
+          .internal_array_record()
+          .copy_with_size(context, InternalArray::<T>::calc_size(capacity)),
       ),
       capacity,
     );
     array.set_data(data);
     array.length = length;
     return array;
+  }
+
+  pub fn expand_and_copy(context: impl AllocationOnlyContext, base: InternalArray<T>) -> InternalArray<T> {
+    return InternalArray::<T>::construct(context, base.capacity() * 2, base.len(), base.data());
+  }
+
+  pub fn expand_and_copy_with_size(
+    context: impl AllocationOnlyContext,
+    base: InternalArray<T>,
+    size: usize,
+  ) -> InternalArray<T> {
+    assert!(base.capacity() < size);
+    return InternalArray::<T>::construct(context, size, base.len(), base.data());
+  }
+
+  pub fn is_full(&self) -> bool {
+    return self.length() == self.capacity();
+  }
+
+  pub fn len(&self) -> usize {
+    return self.length();
   }
 
   pub fn wrap(heap: Addr) -> InternalArray<T> {
@@ -122,6 +140,18 @@ impl<T: Copy> InternalArray<T> {
     return (left, right);
   }
 
+  pub fn delete(&mut self, index: usize) -> T {
+    assert!(index < self.len());
+    let item = self[index];
+    for i in index..self.len() {
+      if i + 1 < self.len() {
+        *self.offset(i) = *self.offset(i + 1);
+      }
+    }
+    self.set_length(self.len() - 1);
+    return item;
+  }
+
   pub fn concat(&self, context: impl AllocationOnlyContext, array: InternalArray<T>) -> InternalArray<T> {
     let ret = InternalArray::<T>::new(context, self.length() + array.length());
     unsafe {
@@ -144,6 +174,17 @@ impl<T: Copy> InternalArray<T> {
   pub fn push(&mut self, data: T) {
     self.write(self.length(), data);
     self.length = self.length + 1;
+  }
+
+  pub fn push_safe(&mut self, context: impl AllocationOnlyContext, data: T) -> Self {
+    if self.length == self.capacity() {
+      let arr = InternalArray::<T>::expand_and_copy(context, *self);
+      arr.write(arr.len(), data);
+      return arr;
+    }
+    self.write(self.length(), data);
+    self.length = self.length + 1;
+    return *self;
   }
 
   pub fn at(&self, index: usize) -> &T {
@@ -190,6 +231,10 @@ impl<T: Copy> InternalArray<T> {
         .get_body()
         .offset((size_of::<InternalArrayLayout>()) as isize) as *mut T
     };
+  }
+
+  fn offset(&self, offset: usize) -> *mut T {
+    return self.data().offset(offset as isize);
   }
 
   fn set_data(&self, data: *mut T) {
@@ -244,23 +289,21 @@ impl<T: Copy> std::fmt::Debug for InternalArray<T> {
 
 #[cfg(test)]
 mod internal_array_test {
-  use super::super::js_object::testing::*;
   use super::*;
   use crate::context::LuxContext;
 
   #[test]
   fn push_test() {
     let context = LuxContext::new();
-    let mut array = InternalArray::<TestObject>::new(context, 10);
+    let mut array = InternalArray::<u32>::new(context, 10);
     assert_eq!(array.length(), 0);
     assert_eq!(array.capacity(), 10);
     for i in 0..10 {
-      let p = TestObject::new(i);
-      array.push(p);
+      array.push(i);
     }
     for i in 0..10 {
       let t = array[i];
-      assert_eq!(t.value(), i as u32);
+      assert_eq!(t, i as u32);
     }
     assert_eq!(array.length(), 10);
     assert_eq!(array.capacity(), 10);
@@ -269,19 +312,18 @@ mod internal_array_test {
   #[test]
   fn write_test() {
     let context = LuxContext::new();
-    let mut array = InternalArray::<TestObject>::new(context, 10);
+    let mut array = InternalArray::<u32>::new(context, 10);
     assert_eq!(array.length(), 0);
     assert_eq!(array.capacity(), 10);
     for i in 0..10 {
-      let p = TestObject::new(i);
-      array.push(p);
+      array.push(i);
     }
     for i in 0..10 {
-      array.write(i, TestObject::new((i as u32) * 2));
+      array.write(i, (i * 2) as u32);
     }
     for i in 0..10 {
       let t = array[i];
-      assert_eq!(t.value(), (i * 2) as u32);
+      assert_eq!(t, (i * 2) as u32);
     }
     assert_eq!(array.length(), 10);
     assert_eq!(array.capacity(), 10);
@@ -290,16 +332,15 @@ mod internal_array_test {
   #[test]
   fn iterator_test() {
     let context = LuxContext::new();
-    let mut array = InternalArray::<TestObject>::new(context, 10);
+    let mut array = InternalArray::<u32>::new(context, 10);
     assert_eq!(array.length(), 0);
     assert_eq!(array.capacity(), 10);
     for i in 0..10 {
-      let p = TestObject::new(i);
-      array.push(p);
+      array.push(i);
     }
     let mut i = 0;
     for v in array {
-      assert_eq!(v.value(), i as u32);
+      assert_eq!(v, i as u32);
       i += 1;
     }
     assert_eq!(array.length(), 10);

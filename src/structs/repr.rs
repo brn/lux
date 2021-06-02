@@ -1,5 +1,5 @@
 use super::cell::*;
-use super::shadow_class::{ShadowClass, ShadowInstance};
+use super::object_record::{ObjectRecord, ObjectSkin};
 use super::shape::ShapeTag;
 use crate::def::*;
 
@@ -10,6 +10,7 @@ const UPPER_STRANGERS_MASK_RESULT: u64 = 0x7ff0000000000000;
 const LOWER_STRANGERS_MASK: u64 = !0xfff8000000000000;
 const INFINITY: u64 = 0x7ff0000000000002;
 const HEAP_OBJECT_MASK: u64 = 0xfff8000000000000;
+const NAN: f64 = unsafe { std::mem::transmute(!0_u64) };
 
 const INVALID_VALUE: f64 = unsafe { std::mem::transmute(NAN_BIT) };
 const INFINITY_VALUE: f64 = unsafe { std::mem::transmute(INFINITY) };
@@ -38,13 +39,13 @@ impl Repr {
   }
 
   #[inline(always)]
-  pub fn from_nan() -> Repr {
-    return Repr(f64::NAN);
+  pub fn invalid() -> Repr {
+    return Repr(INVALID_VALUE);
   }
 
   #[inline(always)]
-  pub fn invalid() -> Repr {
-    return Repr(INVALID_VALUE);
+  pub fn nan() -> Repr {
+    return Repr(NAN);
   }
 
   #[inline(always)]
@@ -106,6 +107,12 @@ impl Repr {
   }
 
   #[inline(always)]
+  pub fn is_number(&self) -> bool {
+    let bits = self.0.to_bits();
+    return !self.is_js_strangers() && !self.is_boxed();
+  }
+
+  #[inline(always)]
   pub fn is_invalid(&self) -> bool {
     return self.0.to_bits() == NAN_BIT;
   }
@@ -145,7 +152,7 @@ impl Repr {
 
   #[inline(always)]
   pub fn is_boxed(&self) -> bool {
-    return self.0.is_nan();
+    return self.0 != NAN && self.0 != INFINITY_VALUE && self.0.is_nan();
   }
 
   #[inline(always)]
@@ -169,11 +176,6 @@ impl Repr {
   #[inline(always)]
   pub fn is_infinity(&self) -> bool {
     return self.0.to_bits() == INFINITY;
-  }
-
-  #[inline(always)]
-  pub fn nan() -> Repr {
-    return Repr(f64::NAN);
   }
 
   #[inline]
@@ -203,8 +205,13 @@ impl Repr {
   }
 
   #[inline(always)]
+  pub fn is_function(&self) -> bool {
+    return self.is_type_of(ShapeTag::Function);
+  }
+
+  #[inline(always)]
   pub fn is_object(&self) -> bool {
-    return self.is_heap_object() && Cell::from(*self).has_shadow_class();
+    return self.is_heap_object() && Cell::from(*self).full_record().is_ok();
   }
 
   #[inline(always)]
@@ -225,10 +232,14 @@ impl Default for Repr {
   }
 }
 
-impl ShadowInstance for Repr {
-  fn class(&self) -> ShadowClass {
+impl ObjectSkin for Repr {
+  fn set_record(&self, record: ObjectRecord) {
     assert!(self.is_object());
-    return Cell::from(*self).class();
+    return Cell::from(*self).set_record(record);
+  }
+  fn record(&self) -> ObjectRecord {
+    assert!(self.is_object());
+    return Cell::from(*self).record();
   }
 }
 

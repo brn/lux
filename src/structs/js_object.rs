@@ -1,56 +1,57 @@
-use super::object::{JsFunction, Property, WellKnownSymbolType};
+use super::cell::*;
+use super::natives::{FunctionProtoToString, NativeFunction, NativeFunctionCall};
+use super::object::{BuiltinJsFunctionType, JsFunction, JsObject, Property, WellKnownSymbolType};
+use super::object_record::ObjectSkin;
+use super::shape::Shape;
 use crate::context::*;
 
-#[cfg(test)]
-pub mod testing {
-  use super::super::cell::*;
-  use super::super::repr::Repr;
-  use super::super::shape::Shape;
-  use crate::def::*;
-  use std::alloc::{alloc, Layout};
-  use std::mem::size_of;
-
-  #[repr(C)]
-  #[derive(Copy, Clone, Default)]
-  pub struct TestObjectBody {
-    value: u32,
-  }
-
-  #[repr(C)]
-  #[derive(Copy, Clone)]
-  pub struct TestObject(HeapLayout<TestObjectBody>);
-  impl_object!(TestObject, HeapLayout<TestObjectBody>);
-
-  impl TestObject {
-    pub const TYPE: Shape = Shape::boolean();
-    pub fn new(value: u32) -> TestObject {
-      let heap = unsafe { alloc(Layout::from_size_align(size_of::<u8>(), ALIGNMENT).unwrap()) };
-      let mut layout = HeapLayout::<TestObjectBody>::new_into_heap(heap, size_of::<u8>(), Shape::undefined());
-      layout.value = value;
-      return TestObject(layout);
-    }
-    pub fn value(&self) -> u32 {
-      return self.0.value;
-    }
-    pub fn set_value(&mut self, value: u32) {
-      self.value = value;
-    }
-    fn byte_length(&self) -> usize {
-      return size_of::<u8>();
-    }
-
-    fn wrap(heap: Addr) -> TestObject {
-      return TestObject(HeapLayout::<TestObjectBody>::wrap(heap));
-    }
-  }
-}
-
-pub struct Builtins {
+#[repr(C)]
+#[derive(Copy, Clone, Default)]
+pub struct BuiltinsLayout {
   symbol_constructor: JsFunction,
+  function_prototype: JsObject,
 }
+
+#[repr(C)]
+#[derive(Copy, Clone)]
+pub struct Builtins(HeapLayout<BuiltinsLayout>);
+impl_object!(Builtins, HeapLayout<BuiltinsLayout>);
 
 impl Builtins {
-  pub fn new(context: impl Context) {}
+  pub const SIZE: usize = std::mem::size_of::<BuiltinsLayout>();
+  pub fn new(context: impl Context) -> Builtins {
+    let mut layout = HeapLayout::<BuiltinsLayout>::new(context, context.object_records().builtins_record());
+    let builtins = Builtins(layout);
+    layout.function_prototype = Builtins::init_function_prototype(context);
+    layout.symbol_constructor = Builtins::init_symbol_constructor(context);
+    return builtins;
+  }
+
+  pub fn symbol_constructor(&self) -> JsFunction {
+    return self.symbol_constructor;
+  }
+
+  fn init_function_prototype(context: impl Context) -> JsObject {
+    // let function_proto_to_string = JsFunction::new_builtin(
+    //   context,
+    //   context.empty_internal_array::<Property>(),
+    //   NativeFunction::new(context, FunctionProtoToString::default()).into(),
+    //   BuiltinJsFunctionType::FunctionProtoToString,
+    //   context.to_string_tag_symbol_str(),
+    // );
+    // let props = fixed_array!(
+    //   type: Property,
+    //   context: context,
+    //   capacity: 13,
+    //   new_property!(
+    //     context,
+    //     str: "toString",
+    //     function_proto_to_string.into()
+    //   )
+    // );
+    let object = JsObject::new(context, context.object_records().function_prototype_record());
+    return object;
+  }
 
   //  fn init_object_prototype(context: impl Context) -> JsObject {}
 
@@ -165,5 +166,20 @@ impl Builtins {
       )
     );
     return JsFunction::new(context, symbol_constructor_props);
+  }
+}
+
+#[cfg(test)]
+mod builtins_test {
+  use super::super::shape::ShapeTag;
+  use super::*;
+  use crate::context::LuxContext;
+
+  #[test]
+  fn builtins_symbol_constructor_test() {
+    let context = LuxContext::new();
+    let builtins = Builtins::new(context);
+    let symbol_constructor = builtins.symbol_constructor();
+    assert_eq!(symbol_constructor.shape().tag(), ShapeTag::Function);
   }
 }

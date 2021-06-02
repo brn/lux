@@ -272,7 +272,7 @@ impl StringPiece {
   }
 
   fn init(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> HeapLayout<StringPieceLayout> {
-    let mut layout = HeapLayout::<StringPieceLayout>::new(context, StringPiece::SIZE, Shape::string_piece());
+    let mut layout = HeapLayout::<StringPieceLayout>::new(context, context.object_records().string_piece_record());
     layout.parent = StringPiece::default();
     layout.length = str.length();
     layout.data = str;
@@ -282,7 +282,7 @@ impl StringPiece {
   }
 
   fn init_branch(context: impl AllocationOnlyContext) -> HeapLayout<StringPieceLayout> {
-    let mut layout = HeapLayout::<StringPieceLayout>::new(context, StringPiece::SIZE, Shape::string_piece());
+    let mut layout = HeapLayout::<StringPieceLayout>::new(context, context.object_records().string_piece_record());
     layout.parent = StringPiece::default();
     layout.length = 0;
     layout.data = FixedU16CodePointArray::default();
@@ -519,10 +519,10 @@ pub struct FlattenString(HeapLayout<FlattenStringLayout>);
 impl_object!(FlattenString, HeapLayout<FlattenStringLayout>);
 
 impl FlattenString {
-  const SIZE: usize = size_of::<FlattenStringLayout>();
+  pub const SIZE: usize = size_of::<FlattenStringLayout>();
 
   pub fn new(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> FlattenString {
-    let mut layout = HeapLayout::<FlattenStringLayout>::new(context, FlattenString::SIZE, Shape::flatten_string());
+    let mut layout = HeapLayout::<FlattenStringLayout>::new(context, context.object_records().flatten_string_record());
     layout.str = str;
     return FlattenString(layout);
   }
@@ -582,10 +582,11 @@ pub struct StringRope(HeapLayout<StringRopeLayout>);
 impl_object!(StringRope, HeapLayout<StringRopeLayout>);
 
 impl StringRope {
-  const SIZE: usize = size_of::<StringRopeLayout>();
+  pub const SIZE: usize = size_of::<StringRopeLayout>();
+  pub const PIECE_SIZE: usize = StringPiece::SIZE;
 
   pub fn new(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> StringRope {
-    let mut layout = HeapLayout::<StringRopeLayout>::new(context, StringRope::SIZE, Shape::string_rope());
+    let mut layout = HeapLayout::<StringRopeLayout>::new(context, context.object_records().string_rope_record());
     let piece = StringPiece::new(context, str);
     layout.len = str.length();
     layout.piece = piece;
@@ -593,7 +594,7 @@ impl StringRope {
   }
 
   fn from_piece(context: impl Context, str: StringPiece) -> StringRope {
-    let mut layout = HeapLayout::<StringRopeLayout>::new(context, StringRope::SIZE, Shape::string_rope());
+    let mut layout = HeapLayout::<StringRopeLayout>::new(context, context.object_records().string_rope_record());
     layout.piece = str;
     return StringRope(layout);
   }
