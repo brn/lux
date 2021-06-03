@@ -30,40 +30,40 @@ impl FunctionBuilder {
     };
   }
 
-  pub fn set_function_body(&self, function: Repr) -> Self {
+  pub fn set_function_body(&mut self, function: Repr) -> &mut Self {
     self.function = function;
-    return *self;
+    return self;
   }
 
-  pub fn as_builtin(&self, func_type: BuiltinJsFunctionType, to_string_str: FlatString) -> Self {
+  pub fn as_builtin(&mut self, func_type: BuiltinJsFunctionType, to_string_str: FlatString) -> &mut Self {
     self.is_builtin = true;
     self.builtin_function_type = func_type;
     self.builtin_to_string_str = to_string_str;
-    return *self;
+    return self;
   }
 
-  pub fn define_property_from_utf8(&self, str: &str, value: Repr) -> Self {
+  pub fn define_property_from_utf8(&mut self, str: &str, value: Repr) -> &mut Self {
     self
       .properties
       .push(new_property!(LuxContext::from(self.context), str: str, value));
-    return *self;
+    return self;
   }
 
-  pub fn define_property(&self, name: PropertyName, value: Repr) -> Self {
+  pub fn define_property(&mut self, name: PropertyName, value: Repr) -> &mut Self {
     self
       .properties
       .push(new_property!(LuxContext::from(self.context), value: name, value));
-    return *self;
+    return self;
   }
 
-  pub fn set_prototype(&self, prototype: JsObject) -> Self {
+  pub fn set_prototype(&mut self, prototype: JsObject) -> &mut Self {
     self.prototype = prototype;
-    return *self;
+    return self;
   }
 
   pub fn build(&self) -> JsFunction {
     let c = LuxContext::from(self.context);
-    let mut properties = c.empty_internal_array::<Property>();
+    let mut properties = c.globals().empty_internal_array::<Property>();
     if self.properties.len() > 0 {
       properties = InternalArray::<Property>::new(c, self.properties.len());
       for p in &self.properties {

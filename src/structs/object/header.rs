@@ -31,7 +31,7 @@ const _DATA_FIELD_SIZE: usize = 23;
 
 impl Header {
   #[inline]
-  fn init(&mut self) {
+  pub fn init(&mut self) {
     self.field.assign(0);
   }
 
@@ -66,7 +66,7 @@ impl Header {
   }
 
   #[inline]
-  pub fn own_properties_len(&mut self) -> u8 {
+  pub fn own_properties_len(&self) -> u8 {
     return self
       .field
       .mask_range(
@@ -77,7 +77,12 @@ impl Header {
   }
 
   #[inline]
-  pub fn data(&mut self) -> MaskedBitsetMut<u64> {
+  pub fn data(&self) -> MaskedBitset<u64> {
+    return self.field.mask_lower(DATA_FIELD_START);
+  }
+
+  #[inline]
+  pub fn data_mut(&mut self) -> MaskedBitsetMut<u64> {
     return self.field.mask_lower_mut(DATA_FIELD_START);
   }
 

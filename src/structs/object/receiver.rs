@@ -28,7 +28,7 @@ impl JsReceiver {
       return None;
     }
     if repr.is_heap_object() || !repr.is_boxed() {
-      let bitset = Bitset::<u8>::new();
+      let mut bitset = Bitset::<u8>::new();
       bitset.set(JsReceiver::get_bit_flag(repr));
       return Some(JsReceiver {
         object: repr,

@@ -1,11 +1,11 @@
 use super::super::cell::{Cell, HeapLayout, HeapObject};
 use super::super::repr::Repr;
-use super::super::shape::{Shape, ShapeTag};
+use super::super::shape::ShapeTag;
 use super::backend::StringBackend;
 use super::rope::{FlattenString, StringRope};
 use super::string::JsString;
 use super::u16_str::FixedU16CodePointArray;
-use crate::context::{AllocationOnlyContext, Context};
+use crate::context::{Context, ObjectRecordsInitializedContext};
 use crate::def::*;
 use std::mem::size_of;
 
@@ -22,7 +22,7 @@ impl_object!(SmallString, HeapLayout<SmallStringLayout>);
 
 impl SmallString {
   pub const SIZE: usize = size_of::<SmallStringLayout>();
-  pub fn new(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> SmallString {
+  pub fn new(context: impl ObjectRecordsInitializedContext, str: FixedU16CodePointArray) -> SmallString {
     let mut layout = HeapLayout::<SmallStringLayout>::new(context, context.object_records().small_string_record());
     layout.str = str;
     return SmallString(layout);
@@ -76,7 +76,7 @@ impl StringBackend for SmallString {
     return self.str().slice(context, start_index, end_index);
   }
 
-  fn flatten(&mut self, _: impl AllocationOnlyContext) -> FixedU16CodePointArray {
+  fn flatten(&mut self, _: impl ObjectRecordsInitializedContext) -> FixedU16CodePointArray {
     return self.str();
   }
 
@@ -120,7 +120,7 @@ impl_object!(OneByteChar, HeapLayout<OneByteCharLayout>);
 
 impl OneByteChar {
   pub const SIZE: usize = size_of::<OneByteCharLayout>();
-  pub fn new(context: impl AllocationOnlyContext, ch: u16) -> OneByteChar {
+  pub fn new(context: impl ObjectRecordsInitializedContext, ch: u16) -> OneByteChar {
     let mut layout = HeapLayout::<OneByteCharLayout>::new(context, context.object_records().one_byte_char_record());
     layout.ch = OneByte(ch);
     return OneByteChar(layout);
@@ -171,10 +171,10 @@ impl StringBackend for OneByteChar {
     if start_index == 0 && end_index == 1 {
       return fixed_array!(type: u16, context: context, capacity: 1, self.at(0).unwrap());
     }
-    return context.empty_internal_array();
+    return context.globals().empty_internal_array();
   }
 
-  fn flatten(&mut self, context: impl AllocationOnlyContext) -> FixedU16CodePointArray {
+  fn flatten(&mut self, context: impl ObjectRecordsInitializedContext) -> FixedU16CodePointArray {
     return fixed_array!(type: u16, context: context, capacity: 1, self.at(0).unwrap());
   }
 

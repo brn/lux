@@ -27,7 +27,10 @@ mod js_object;
 mod natives;
 mod object_records;
 
-pub use self::cell::{Cell, HeapLayout, HeapObject};
+#[cfg(test)]
+mod object_record_test;
+
+pub use self::cell::{BareHeapLayout, Cell, HeapLayout, HeapObject};
 pub use self::hash_map::HashMap;
 pub use self::internal_array::*;
 pub use self::js_globals::*;

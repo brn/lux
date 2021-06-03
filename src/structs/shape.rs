@@ -48,7 +48,7 @@ pub enum ShapeTag {
 }
 assert_eq_size!(ShapeTag, u8);
 
-#[derive(Debug)]
+#[derive(Copy, Clone, Debug)]
 pub struct Shape {
   tag: ShapeTag,
 }

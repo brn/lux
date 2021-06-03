@@ -1,11 +1,11 @@
 use super::super::cell::{Cell, HeapLayout, HeapObject};
 use super::super::repr::*;
-use super::super::shape::{Shape, ShapeTag};
+use super::super::shape::ShapeTag;
 use super::backend::StringBackend;
 use super::small_string::{OneByteChar, SmallString};
 use super::string::JsString;
 use super::u16_str::FixedU16CodePointArray;
-use crate::context::{AllocationOnlyContext, Context};
+use crate::context::{AllocationOnlyContext, Context, ObjectRecordsInitializedContext};
 use crate::def::*;
 use std::char::decode_utf16;
 use std::mem::size_of;
@@ -43,7 +43,7 @@ impl_object!(StringPiece, HeapLayout<StringPieceLayout>);
 impl StringPiece {
   const SIZE: usize = size_of::<StringPieceLayout>();
 
-  pub fn new(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> StringPiece {
+  pub fn new(context: impl ObjectRecordsInitializedContext, str: FixedU16CodePointArray) -> StringPiece {
     let layout = StringPiece::init(context, str);
     return StringPiece(layout);
   }
@@ -271,7 +271,7 @@ impl StringPiece {
     });
   }
 
-  fn init(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> HeapLayout<StringPieceLayout> {
+  fn init(context: impl ObjectRecordsInitializedContext, str: FixedU16CodePointArray) -> HeapLayout<StringPieceLayout> {
     let mut layout = HeapLayout::<StringPieceLayout>::new(context, context.object_records().string_piece_record());
     layout.parent = StringPiece::default();
     layout.length = str.length();
@@ -281,7 +281,7 @@ impl StringPiece {
     return layout;
   }
 
-  fn init_branch(context: impl AllocationOnlyContext) -> HeapLayout<StringPieceLayout> {
+  fn init_branch(context: impl ObjectRecordsInitializedContext) -> HeapLayout<StringPieceLayout> {
     let mut layout = HeapLayout::<StringPieceLayout>::new(context, context.object_records().string_piece_record());
     layout.parent = StringPiece::default();
     layout.length = 0;
@@ -521,7 +521,7 @@ impl_object!(FlattenString, HeapLayout<FlattenStringLayout>);
 impl FlattenString {
   pub const SIZE: usize = size_of::<FlattenStringLayout>();
 
-  pub fn new(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> FlattenString {
+  pub fn new(context: impl ObjectRecordsInitializedContext, str: FixedU16CodePointArray) -> FlattenString {
     let mut layout = HeapLayout::<FlattenStringLayout>::new(context, context.object_records().flatten_string_record());
     layout.str = str;
     return FlattenString(layout);
@@ -585,7 +585,7 @@ impl StringRope {
   pub const SIZE: usize = size_of::<StringRopeLayout>();
   pub const PIECE_SIZE: usize = StringPiece::SIZE;
 
-  pub fn new(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> StringRope {
+  pub fn new(context: impl ObjectRecordsInitializedContext, str: FixedU16CodePointArray) -> StringRope {
     let mut layout = HeapLayout::<StringRopeLayout>::new(context, context.object_records().string_rope_record());
     let piece = StringPiece::new(context, str);
     layout.len = str.length();
@@ -633,7 +633,7 @@ impl StringBackend for StringRope {
     return fixed_array;
   }
 
-  fn flatten(&mut self, context: impl AllocationOnlyContext) -> FixedU16CodePointArray {
+  fn flatten(&mut self, context: impl ObjectRecordsInitializedContext) -> FixedU16CodePointArray {
     let mut fixed_array = FixedU16CodePointArray::new(context, self.len);
     self.piece.flatten(&mut fixed_array, 0, self.len);
     return fixed_array;

@@ -1,19 +1,14 @@
 use super::super::cell::*;
-use super::super::hash_map::{HashMap, PredefinedHash};
+use super::super::hash_map::PredefinedHash;
 use super::super::internal_array::InternalArray;
-use super::super::object_record::ObjectRecordLayout;
 use super::super::object_record::ObjectSkin;
 use super::super::repr::Repr;
-use super::super::shape::Shape;
 use super::super::string::{FlatString, JsString};
 use super::property_descriptor::PropertyDescriptor;
 use super::symbol::JsSymbol;
-use crate::context::{AllocationOnlyContext, Context};
+use crate::context::{AllocationOnlyContext, Context, ObjectRecordsInitializedContext};
 use crate::def::*;
-use crate::utility::{BitOperator, Bitset};
-use property::Property;
 use std::cmp::PartialEq;
-use std::marker::PhantomData;
 use std::mem::size_of;
 
 #[repr(C)]
@@ -46,7 +41,7 @@ impl PropertyName {
     return self.0.is_string();
   }
 
-  pub fn from_utf8_string(context: impl AllocationOnlyContext, str: &str) -> PropertyName {
+  pub fn from_utf8_string(context: impl ObjectRecordsInitializedContext, str: &str) -> PropertyName {
     let str = FlatString::from_utf8(context, str);
     return PropertyName::new(str.into());
   }
@@ -78,7 +73,7 @@ impl PartialEq for PropertyName {
 }
 
 impl PredefinedHash for PropertyName {
-  fn prepare_hash(&mut self, context: impl Context) {
+  fn prepare_hash(&mut self, context: impl AllocationOnlyContext) {
     if self.predefined_hash() != 0 {
       return;
     }
@@ -165,7 +160,7 @@ impl_object!(Property, HeapLayout<PropertyLayout>);
 
 impl Property {
   pub const SIZE: usize = size_of::<PropertyLayout>();
-  pub fn new(context: impl AllocationOnlyContext, name: PropertyName, desc: PropertyDescriptor) -> Property {
+  pub fn new(context: impl ObjectRecordsInitializedContext, name: PropertyName, desc: PropertyDescriptor) -> Property {
     let mut layout = HeapLayout::<PropertyLayout>::new(context, context.object_records().property_record());
     layout.name = name;
     layout.desc = desc;
@@ -202,7 +197,7 @@ impl FastOwnProperties {
     return None;
   }
 
-  pub fn collect_own_property_keys(&mut self, len: usize, keys: InternalArray<PropertyName>) {
+  pub fn collect_own_property_keys(&mut self, len: usize, mut keys: InternalArray<PropertyName>) {
     for index in 0..len {
       keys.push(self.offset_ref(index as isize).name());
     }

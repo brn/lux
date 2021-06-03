@@ -1,7 +1,7 @@
 use super::super::cell::*;
 use super::super::repr::Repr;
 use super::super::shape::Shape;
-use crate::context::{AllocationOnlyContext, Context};
+use crate::context::{AllocationOnlyContext, Context, ObjectRecordsInitializedContext};
 use crate::utility::{BitOperator, Bitset};
 use std::mem::size_of;
 
@@ -44,7 +44,11 @@ impl PropertyDescriptor {
   const CONFIGURABLE_INDEX: usize = 3;
   const DATA_PD_INDEX: usize = 4;
 
-  pub fn new_data_descriptor(context: impl AllocationOnlyContext, bit: u8, value: Repr) -> PropertyDescriptor {
+  pub fn new_data_descriptor(
+    context: impl ObjectRecordsInitializedContext,
+    bit: u8,
+    value: Repr,
+  ) -> PropertyDescriptor {
     let mut layout =
       HeapLayout::<DataPropertyDescriptorLayout>::new(context, context.object_records().data_descriptor_record());
     layout.value = value;
@@ -67,12 +71,12 @@ impl PropertyDescriptor {
     if get.is_some() {
       a_layout.get = get.unwrap();
     } else {
-      a_layout.get = context.js_undefined();
+      a_layout.get = context.globals().js_undefined();
     }
     if set.is_some() {
       a_layout.set = set.unwrap();
     } else {
-      a_layout.get = context.js_undefined();
+      a_layout.get = context.globals().js_undefined();
     }
     return PropertyDescriptor(layout);
   }

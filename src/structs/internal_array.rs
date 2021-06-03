@@ -1,7 +1,7 @@
 use super::cell::{HeapLayout, HeapObject};
 use super::repr::*;
 use super::shape::Shape;
-use crate::context::AllocationOnlyContext;
+use crate::context::{AllocationOnlyContext, ObjectRecordsInitializedContext};
 use crate::def::*;
 use crate::utility::align;
 use std::marker::PhantomData;
@@ -52,7 +52,7 @@ impl<T: Copy> IndexMut<usize> for InternalArray<T> {
 
 impl<T: Copy> InternalArray<T> {
   pub const TYPE: Shape = Shape::internal_array();
-  pub fn new(context: impl AllocationOnlyContext, capacity: usize) -> InternalArray<T> {
+  pub fn new(context: impl ObjectRecordsInitializedContext, capacity: usize) -> InternalArray<T> {
     return InternalArray::<T>::init(
       HeapLayout::<InternalArrayLayout>::new(
         context,
@@ -66,7 +66,7 @@ impl<T: Copy> InternalArray<T> {
   }
 
   pub fn construct(
-    context: impl AllocationOnlyContext,
+    context: impl ObjectRecordsInitializedContext,
     capacity: usize,
     length: usize,
     data: *mut T,
@@ -86,12 +86,12 @@ impl<T: Copy> InternalArray<T> {
     return array;
   }
 
-  pub fn expand_and_copy(context: impl AllocationOnlyContext, base: InternalArray<T>) -> InternalArray<T> {
+  pub fn expand_and_copy(context: impl ObjectRecordsInitializedContext, base: InternalArray<T>) -> InternalArray<T> {
     return InternalArray::<T>::construct(context, base.capacity() * 2, base.len(), base.data());
   }
 
   pub fn expand_and_copy_with_size(
-    context: impl AllocationOnlyContext,
+    context: impl ObjectRecordsInitializedContext,
     base: InternalArray<T>,
     size: usize,
   ) -> InternalArray<T> {
@@ -115,7 +115,7 @@ impl<T: Copy> InternalArray<T> {
     return align(size_of::<InternalArrayLayout>() + capacity * size_of::<T>(), ALIGNMENT);
   }
 
-  pub fn slice(&self, context: impl AllocationOnlyContext, start: usize, end: usize) -> InternalArray<T> {
+  pub fn slice(&self, context: impl ObjectRecordsInitializedContext, start: usize, end: usize) -> InternalArray<T> {
     assert!(end > start);
     assert!(end - start > 0);
     let mut a = InternalArray::<T>::new(context, end - start);
@@ -126,7 +126,11 @@ impl<T: Copy> InternalArray<T> {
     return a;
   }
 
-  pub fn split(&self, context: impl AllocationOnlyContext, index: usize) -> (InternalArray<T>, InternalArray<T>) {
+  pub fn split(
+    &self,
+    context: impl ObjectRecordsInitializedContext,
+    index: usize,
+  ) -> (InternalArray<T>, InternalArray<T>) {
     assert!(index < self.capacity);
     let left_cap = self.capacity - index;
     let mut left = InternalArray::<T>::new(context, left_cap);
@@ -145,14 +149,14 @@ impl<T: Copy> InternalArray<T> {
     let item = self[index];
     for i in index..self.len() {
       if i + 1 < self.len() {
-        *self.offset(i) = *self.offset(i + 1);
+        unsafe { *self.offset(i) = *self.offset(i + 1) };
       }
     }
     self.set_length(self.len() - 1);
     return item;
   }
 
-  pub fn concat(&self, context: impl AllocationOnlyContext, array: InternalArray<T>) -> InternalArray<T> {
+  pub fn concat(&self, context: impl ObjectRecordsInitializedContext, array: InternalArray<T>) -> InternalArray<T> {
     let ret = InternalArray::<T>::new(context, self.length() + array.length());
     unsafe {
       std::ptr::copy_nonoverlapping(self.data(), ret.data(), self.length());
@@ -176,9 +180,9 @@ impl<T: Copy> InternalArray<T> {
     self.length = self.length + 1;
   }
 
-  pub fn push_safe(&mut self, context: impl AllocationOnlyContext, data: T) -> Self {
+  pub fn push_safe(&mut self, context: impl ObjectRecordsInitializedContext, data: T) -> Self {
     if self.length == self.capacity() {
-      let arr = InternalArray::<T>::expand_and_copy(context, *self);
+      let mut arr = InternalArray::<T>::expand_and_copy(context, *self);
       arr.write(arr.len(), data);
       return arr;
     }
@@ -234,7 +238,7 @@ impl<T: Copy> InternalArray<T> {
   }
 
   fn offset(&self, offset: usize) -> *mut T {
-    return self.data().offset(offset as isize);
+    return unsafe { self.data().offset(offset as isize) };
   }
 
   fn set_data(&self, data: *mut T) {

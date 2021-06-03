@@ -233,7 +233,7 @@ impl Default for Repr {
 }
 
 impl ObjectSkin for Repr {
-  fn set_record(&self, record: ObjectRecord) {
+  fn set_record(&mut self, record: ObjectRecord) {
     assert!(self.is_object());
     return Cell::from(*self).set_record(record);
   }

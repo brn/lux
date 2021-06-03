@@ -8,7 +8,7 @@ use super::backend::StringBackend;
 use super::rope::{FlattenString, StringRope};
 use super::small_string::{OneByteChar, SmallString};
 use super::u16_str::FixedU16CodePointArray;
-use crate::context::{AllocationOnlyContext, Context};
+use crate::context::{AllocationOnlyContext, Context, LuxContext, ObjectRecordsInitializedContext};
 use crate::utility::*;
 use std::convert::TryFrom;
 use std::mem::size_of;
@@ -50,7 +50,7 @@ impl JsString {
   const IS_OBJECT_BIT: usize = 1;
   pub const SIZE: usize = size_of::<JsStringLayout>();
 
-  pub fn new(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> JsString {
+  pub fn new(context: impl ObjectRecordsInitializedContext, str: FixedU16CodePointArray) -> JsString {
     let mut layout = HeapLayout::<JsStringLayout>::new_object(context, context.object_records().string_record());
     layout.backend = JsString::select_backend(context, str);
     let string = JsString(layout);
@@ -58,7 +58,7 @@ impl JsString {
     return string;
   }
 
-  pub fn from_utf8(context: impl AllocationOnlyContext, str: &str) -> JsString {
+  pub fn from_utf8(context: impl ObjectRecordsInitializedContext, str: &str) -> JsString {
     let array = JsString::from_utf8_to_array(context, str);
     return JsString::new(context, array);
   }
@@ -80,7 +80,7 @@ impl JsString {
     return self.flat_content;
   }
 
-  pub fn flatten(&mut self, context: impl AllocationOnlyContext) -> FlatString {
+  pub fn flatten(&mut self, context: impl ObjectRecordsInitializedContext) -> FlatString {
     if !self.flat_content.is_null() {
       return FlatString::from(*self);
     }
@@ -92,15 +92,13 @@ impl JsString {
   pub fn is_object(this: Repr) -> bool {
     debug_assert!(Cell::from(this).shape().is_string());
     let m = JsString::from(this);
-    let data_field = HeapObject::get_data_field(&m);
-    return data_field.get(JsString::IS_OBJECT_BIT);
+    return HeapObject::get_data_field(&m, JsString::IS_OBJECT_BIT);
   }
 
   pub fn to_object(this: Repr) -> JsString {
     debug_assert!(Cell::from(this).shape().is_string());
-    let m = JsString::from(this);
-    let mut data_field = HeapObject::get_data_field(&m);
-    data_field.set(JsString::IS_OBJECT_BIT);
+    let mut m = JsString::from(this);
+    HeapObject::set_data_field(&mut m, JsString::IS_OBJECT_BIT);
     return JsString::from(this);
   }
 
@@ -124,7 +122,7 @@ impl JsString {
     return ObjectRecord::new(context, OneByteChar::SIZE as u32, Shape::one_byte_char());
   }
 
-  fn new_primitive(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> JsString {
+  fn new_primitive(context: impl ObjectRecordsInitializedContext, str: FixedU16CodePointArray) -> JsString {
     let mut layout = HeapLayout::<JsStringLayout>::new_object(context, context.object_records().string_record());
     layout.backend = JsString::select_backend(context, str).into();
     layout.flat_content = FixedU16CodePointArray::default();
@@ -133,7 +131,7 @@ impl JsString {
     return JsString(layout);
   }
 
-  fn select_backend(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> Repr {
+  fn select_backend(context: impl ObjectRecordsInitializedContext, str: FixedU16CodePointArray) -> Repr {
     if str.length() > 10 {
       return StringRope::new(context, str).into();
     } else if str.length() == 1 {
@@ -142,7 +140,7 @@ impl JsString {
     return SmallString::new(context, str).into();
   }
 
-  fn from_utf8_to_array(context: impl AllocationOnlyContext, str: &str) -> FixedU16CodePointArray {
+  fn from_utf8_to_array(context: impl ObjectRecordsInitializedContext, str: &str) -> FixedU16CodePointArray {
     let u16_vec = str.encode_utf16().collect::<Vec<_>>();
     let mut array = FixedU16CodePointArray::new(context, u16_vec.len());
     for w in &u16_vec {
@@ -153,7 +151,7 @@ impl JsString {
 }
 
 impl ObjectSkin for JsString {
-  fn set_record(&self, r: ObjectRecord) {
+  fn set_record(&mut self, r: ObjectRecord) {
     self.0.set_record(r);
   }
   fn record(&self) -> ObjectRecord {
@@ -162,12 +160,12 @@ impl ObjectSkin for JsString {
 }
 
 impl PredefinedHash for JsString {
-  fn prepare_hash(&mut self, context: impl Context) {
-    let r = FullObjectRecord::try_from(self.record()).unwrap();
+  fn prepare_hash(&mut self, context: impl AllocationOnlyContext) {
+    let mut r = FullObjectRecord::try_from(self.record()).unwrap();
     if r.hash() > 0 {
       return;
     }
-    let flat_content = self.flatten(context);
+    let flat_content = self.flatten(LuxContext::from_allocation_only_context(context));
     r.set_hash(flat_content.predefined_hash());
   }
 
@@ -188,8 +186,8 @@ pub struct FlatString(HeapLayout<JsStringLayout>);
 impl_object!(FlatString, HeapLayout<JsStringLayout>);
 
 impl PredefinedHash for FlatString {
-  fn prepare_hash(&mut self, _: impl Context) {
-    let r = FullObjectRecord::try_from(self.record()).unwrap();
+  fn prepare_hash(&mut self, _: impl AllocationOnlyContext) {
+    let mut r = FullObjectRecord::try_from(self.record()).unwrap();
     if r.hash() > 0 {
       return;
     }
@@ -202,11 +200,11 @@ impl PredefinedHash for FlatString {
 }
 
 impl FlatString {
-  pub fn new(context: impl AllocationOnlyContext, str: FixedU16CodePointArray) -> FlatString {
+  pub fn new(context: impl ObjectRecordsInitializedContext, str: FixedU16CodePointArray) -> FlatString {
     return JsString::new_primitive(context, str).flatten(context);
   }
 
-  pub fn from_utf8(context: impl AllocationOnlyContext, str: &str) -> FlatString {
+  pub fn from_utf8(context: impl ObjectRecordsInitializedContext, str: &str) -> FlatString {
     let array = JsString::from_utf8_to_array(context, str);
     return FlatString::new(context, array);
   }
@@ -217,7 +215,7 @@ impl FlatString {
 }
 
 impl ObjectSkin for FlatString {
-  fn set_record(&self, r: ObjectRecord) {
+  fn set_record(&mut self, r: ObjectRecord) {
     self.0.set_record(r);
   }
   fn record(&self) -> ObjectRecord {

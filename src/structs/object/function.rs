@@ -140,7 +140,7 @@ impl JsFunction {
     func_type: BuiltinJsFunctionType,
     to_string_result: FlatString,
   ) -> JsFunction {
-    let layout =
+    let mut layout =
       HeapLayout::<BuiltinJsFunctionLayout>::new_object(context, context.object_records().builtin_function_record());
     let func = JsFunction(HeapLayout::<JsFunctionLayout>::wrap(layout.as_addr()));
     layout.builtin_type = func_type;
@@ -159,7 +159,7 @@ impl JsFunction {
   }
 
   pub fn is_builtin_function(&self) -> bool {
-    return HeapObject::get_data_field(self).get(JsFunction::BUILTIN_BIT);
+    return HeapObject::get_data_field(self, JsFunction::BUILTIN_BIT);
   }
 
   pub fn is_builtin_function_type_of(&self, func_type: BuiltinJsFunctionType) -> bool {

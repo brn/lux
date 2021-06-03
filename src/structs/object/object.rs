@@ -195,16 +195,16 @@ impl JsObject {
 
   pub fn to_string(context: impl Context, object: Repr) -> Repr {
     if object.is_js_undefined() {
-      return context.undefined_str().into();
+      return context.globals().undefined_str().into();
     }
     if object.is_js_null() {
-      return context.null_str().into();
+      return context.globals().null_str().into();
     }
     if object.is_js_true() {
-      return context.true_str().into();
+      return context.globals().true_str().into();
     }
     if object.is_js_false() {
-      return context.false_str().into();
+      return context.globals().false_str().into();
     }
     if !object.is_boxed() {
       unreachable!();

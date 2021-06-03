@@ -1,10 +1,8 @@
 use super::cell::*;
 use super::internal_array::*;
 use super::repr::Repr;
-use super::shape::Shape;
-use crate::context::{AllocationOnlyContext, Context};
+use crate::context::{AllocationOnlyContext, ObjectRecordsInitializedContext};
 use crate::def::*;
-use crate::utility::Len;
 use std::cmp::PartialEq;
 use std::mem::size_of;
 
@@ -12,7 +10,7 @@ pub use std::collections::hash_map::DefaultHasher;
 pub use std::hash::Hasher;
 
 pub trait PredefinedHash {
-  fn prepare_hash(&mut self, context: impl Context);
+  fn prepare_hash(&mut self, context: impl AllocationOnlyContext);
   fn predefined_hash(&self) -> u64;
 }
 
@@ -38,7 +36,13 @@ impl_object!(HashMapEntry<K: HashMapKey, V: HashMapValue>, HeapLayout<HashMapEnt
 
 impl<K: HashMapKey, V: HashMapValue> HashMapEntry<K, V> {
   const SIZE: usize = size_of::<HashMapEntryLayout<K, V>>();
-  pub fn new(context: impl AllocationOnlyContext, key: K, value: V, hash: u64, position: usize) -> HashMapEntry<K, V> {
+  pub fn new(
+    context: impl ObjectRecordsInitializedContext,
+    key: K,
+    value: V,
+    hash: u64,
+    position: usize,
+  ) -> HashMapEntry<K, V> {
     let mut layout = HeapLayout::<HashMapEntryLayout<K, V>>::new(
       context,
       context
@@ -84,7 +88,7 @@ impl<K: HashMapKey, V: HashMapValue> HashMap<K, V> {
   const DEFAULT_CAPACITY: usize = 24;
 
   #[inline]
-  pub fn new(context: impl AllocationOnlyContext) -> HashMap<K, V> {
+  pub fn new(context: impl ObjectRecordsInitializedContext) -> HashMap<K, V> {
     let mut layout = HeapLayout::<HashMapLayout<K, V>>::new(
       context,
       context
@@ -101,7 +105,7 @@ impl<K: HashMapKey, V: HashMapValue> HashMap<K, V> {
   }
 
   #[inline]
-  pub fn insert(&mut self, context: impl AllocationOnlyContext, key: K, value: V) -> usize {
+  pub fn insert(&mut self, context: impl ObjectRecordsInitializedContext, key: K, value: V) -> usize {
     let hash = self.hash(key);
     if self.load() > 0.8 {
       self.grow(context);
@@ -188,7 +192,7 @@ impl<K: HashMapKey, V: HashMapValue> HashMap<K, V> {
   }
 
   #[inline]
-  fn insert_to(&mut self, context: impl AllocationOnlyContext, key: K, value: V, hash: u64) {
+  fn insert_to(&mut self, context: impl ObjectRecordsInitializedContext, key: K, value: V, hash: u64) {
     let mut storage = self.storage;
     let cap = storage.capacity();
     let position = (hash % (cap as u64)) as usize;
@@ -236,7 +240,7 @@ impl<K: HashMapKey, V: HashMapValue> HashMap<K, V> {
   }
 
   #[inline]
-  fn grow(&mut self, context: impl AllocationOnlyContext) {
+  fn grow(&mut self, context: impl ObjectRecordsInitializedContext) {
     let old_storage = self.storage;
     let mut new_storage = InternalArray::<usize>::new(context, old_storage.capacity() * 2);
     new_storage.fill(0);

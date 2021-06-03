@@ -1,44 +1,92 @@
 use super::heap::*;
 use crate::def::*;
 use crate::structs::{
-  Builtins, FlatString, HeapLayout, HeapObject, InternalArray, ObjectRecord, ObjectRecords, PropertyName, Repr, Shape,
-  SymbolRegistry,
+  BareHeapLayout, Builtins, FlatString, HeapLayout, HeapObject, InternalArray, ObjectRecord, ObjectRecords,
+  PropertyName, Repr, Shape, SymbolRegistry,
 };
 use once_cell::sync::Lazy as SyncLazy;
+use property::Property;
 use std::alloc::{alloc, dealloc, Layout};
 use std::mem::size_of;
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, Property)]
 pub struct GlobalObjectsLayout {
+  #[property(get(type = "copy"))]
   js_true: Repr,
+
+  #[property(get(type = "copy"))]
   js_false: Repr,
+
+  #[property(get(type = "copy"))]
   js_undefined: Repr,
+
+  #[property(get(type = "copy"))]
   js_null: Repr,
+
   empty_internal_array: InternalArray<Repr>,
+
+  #[property(get(type = "copy"))]
   empty_string: FlatString,
+
+  #[property(get(type = "copy"))]
   infinity_str: FlatString,
+
+  #[property(get(type = "copy"))]
   true_str: FlatString,
+
+  #[property(get(type = "copy"))]
   false_str: FlatString,
+
+  #[property(get(type = "copy"))]
   null_str: FlatString,
+
+  #[property(get(type = "copy"))]
   undefined_str: FlatString,
+
+  #[property(get(type = "copy"))]
   async_iterator_symbol_str: FlatString,
+
+  #[property(get(type = "copy"))]
   has_instance_symbol_str: FlatString,
+
+  #[property(get(type = "copy"))]
   is_concat_spreadable_symbol_str: FlatString,
+
+  #[property(get(type = "copy"))]
   iterator_symbol_str: FlatString,
+
+  #[property(get(type = "copy"))]
   match_symbol_str: FlatString,
+
+  #[property(get(type = "copy"))]
   match_all_symbol_str: FlatString,
+
+  #[property(get(type = "copy"))]
   replace_symbol_str: FlatString,
+
+  #[property(get(type = "copy"))]
   search_symbol_str: FlatString,
+
+  #[property(get(type = "copy"))]
   species_symbol_str: FlatString,
+
+  #[property(get(type = "copy"))]
   split_symbol_str: FlatString,
+
+  #[property(get(type = "copy"))]
   to_primitive_symbol_str: FlatString,
+
+  #[property(get(type = "copy"))]
   to_string_tag_symbol_str: FlatString,
+
+  #[property(get(type = "copy"))]
   unscopables_symbol_str: FlatString,
 
+  #[property(get(type = "copy"))]
   to_string_to_string_str: FlatString,
-  symbol_to_string_str: FlatString,
 
-  symbol_registry: SymbolRegistry,
+  #[property(get(type = "copy"))]
+  symbol_to_string_str: FlatString,
 }
 
 #[derive(Copy, Clone)]
@@ -48,7 +96,7 @@ impl_object!(GlobalObjects, HeapLayout<GlobalObjectsLayout>);
 impl GlobalObjects {
   const SIZE: usize = size_of::<GlobalObjectsLayout>();
 
-  pub fn new(context: impl AllocationOnlyContext) -> GlobalObjects {
+  pub fn new(context: impl ObjectRecordsInitializedContext) -> GlobalObjects {
     let global_objects_record = ObjectRecord::new(context, GlobalObjects::SIZE as u32, Shape::global_objects());
     let mut layout = HeapLayout::<GlobalObjectsLayout>::persist(context, global_objects_record);
     layout.js_true = Repr::js_true();
@@ -79,8 +127,11 @@ impl GlobalObjects {
     layout.unscopables_symbol_str = FlatString::from_utf8(context, "Symbol.unscopables");
     layout.to_string_to_string_str = FlatString::from_utf8(context, "function toString () { [native code] }");
     layout.symbol_to_string_str = FlatString::from_utf8(context, "function Symbol () { [native code] }");
-    layout.symbol_registry = SymbolRegistry::persist(context);
     return GlobalObjects(layout);
+  }
+
+  pub fn empty_internal_array<T: Copy>(&self) -> InternalArray<T> {
+    return InternalArray::<T>::from(self.empty_internal_array.raw_heap());
   }
 }
 
@@ -95,7 +146,7 @@ impl_object!(StaticNames, HeapLayout<StaticNamesLayout>);
 
 impl StaticNames {
   const SIZE: usize = size_of::<StaticNamesLayout>();
-  pub fn new(context: impl AllocationOnlyContext) -> StaticNames {
+  pub fn new(context: impl ObjectRecordsInitializedContext) -> StaticNames {
     let static_names_record = ObjectRecord::new(context, StaticNames::SIZE as u32, Shape::static_names());
     let mut layout = HeapLayout::<StaticNamesLayout>::persist(context, static_names_record);
     layout.description = PropertyName::from_utf8_string(context, "description");
@@ -115,6 +166,7 @@ static mut HEAP: SyncLazy<Heap> = SyncLazy::new(|| {
 #[derive(Copy, Clone, Default)]
 pub struct LuxContextLayout {
   globals: GlobalObjects,
+  symbol_registry: SymbolRegistry,
   static_names: StaticNames,
   builtins: Builtins,
   object_records: ObjectRecords,
@@ -122,8 +174,8 @@ pub struct LuxContextLayout {
 
 #[repr(C)]
 #[derive(Copy, Clone)]
-pub struct LuxContext(HeapLayout<LuxContextLayout>);
-impl_object!(LuxContext, HeapLayout<LuxContextLayout>);
+pub struct LuxContext(BareHeapLayout<LuxContextLayout>);
+impl_object!(LuxContext, BareHeapLayout<LuxContextLayout>);
 
 impl LuxContext {
   const SIZE: usize = size_of::<LuxContextLayout>();
@@ -131,14 +183,23 @@ impl LuxContext {
   pub fn new() -> LuxContext {
     let l = Layout::from_size_align(LuxContext::SIZE + PTR_SIZE, ALIGNMENT).unwrap();
     let heap = unsafe { alloc(l) };
-    let object_record = ObjectRecord::new_into_heap(heap, LuxContext::SIZE as u32, Shape::context());
-    let mut layout = HeapLayout::<LuxContextLayout>::new_into_heap(heap, object_record);
+    let mut layout = BareHeapLayout::<LuxContextLayout>::wrap(heap);
     let c = LuxContext(layout);
     layout.object_records = ObjectRecords::new(c);
+    layout.object_records.initialize(c);
     layout.static_names = StaticNames::new(c);
     layout.globals = GlobalObjects::new(c);
-    layout.globals.symbol_registry.init_well_known_symbols(c);
     layout.builtins = Builtins::new(c);
+    layout.symbol_registry = SymbolRegistry::persist(c);
+    layout.symbol_registry.init_well_known_symbols(c);
+    return c;
+  }
+
+  pub fn new_only_allocator() -> LuxContext {
+    let l = Layout::from_size_align(LuxContext::SIZE + PTR_SIZE, ALIGNMENT).unwrap();
+    let heap = unsafe { alloc(l) };
+    let mut layout = BareHeapLayout::<LuxContextLayout>::wrap(heap);
+    let c = LuxContext(layout);
     return c;
   }
 
@@ -149,119 +210,28 @@ impl LuxContext {
 }
 
 pub trait AllocationOnlyContext: HeapObject + Copy {
-  fn object_records(&self) -> ObjectRecords;
   fn allocate(&mut self, size: usize) -> Addr;
   fn allocate_persist(&mut self, size: usize) -> Addr;
 }
 
-pub trait Context: AllocationOnlyContext {
+pub trait ObjectRecordsInitializedContext: AllocationOnlyContext {
+  fn object_records(&self) -> ObjectRecords;
+}
+
+pub trait Context: ObjectRecordsInitializedContext {
   fn globals(&self) -> GlobalObjects;
+
   fn static_names(&self) -> StaticNames;
 
-  fn js_true(&self) -> Repr {
-    return self.globals().js_true;
+  fn from_allocation_only_context(context: impl AllocationOnlyContext) -> LuxContext {
+    return LuxContext::from(context.raw_heap());
   }
 
-  fn js_false(&self) -> Repr {
-    return self.globals().js_false;
-  }
-
-  fn js_null(&self) -> Repr {
-    return self.globals().js_null;
-  }
-
-  fn js_undefined(&self) -> Repr {
-    return self.globals().js_undefined;
-  }
-
-  fn empty_internal_array<T: Copy>(&self) -> InternalArray<T> {
-    let h = self.globals().empty_internal_array;
-    let p = &h as *const InternalArray<Repr> as *const u8;
-    return unsafe { *(p as *const InternalArray<T>) };
-  }
-
-  fn empty_string(&self) -> FlatString {
-    return self.globals().empty_string;
-  }
-
-  fn intinify_str(&self) -> FlatString {
-    return self.globals().infinity_str;
-  }
-
-  fn true_str(&self) -> FlatString {
-    return self.globals().true_str;
-  }
-
-  fn false_str(&self) -> FlatString {
-    return self.globals().false_str;
-  }
-
-  fn null_str(&self) -> FlatString {
-    return self.globals().null_str;
-  }
-
-  fn undefined_str(&self) -> FlatString {
-    return self.globals().undefined_str;
-  }
-
-  fn symbol_registry(&self) -> SymbolRegistry {
-    return self.globals().symbol_registry;
-  }
-
-  fn async_iterator_symbol_str(&self) -> FlatString {
-    return self.globals().async_iterator_symbol_str;
-  }
-  fn has_instance_symbol_str(&self) -> FlatString {
-    return self.globals().has_instance_symbol_str;
-  }
-  fn is_concat_spreadable_symbol_str(&self) -> FlatString {
-    return self.globals().is_concat_spreadable_symbol_str;
-  }
-  fn iterator_symbol_str(&self) -> FlatString {
-    return self.globals().iterator_symbol_str;
-  }
-  fn match_symbol_str(&self) -> FlatString {
-    return self.globals().match_symbol_str;
-  }
-  fn match_all_symbol_str(&self) -> FlatString {
-    return self.globals().match_all_symbol_str;
-  }
-  fn replace_symbol_str(&self) -> FlatString {
-    return self.globals().replace_symbol_str;
-  }
-  fn search_symbol_str(&self) -> FlatString {
-    return self.globals().search_symbol_str;
-  }
-  fn species_symbol_str(&self) -> FlatString {
-    return self.globals().species_symbol_str;
-  }
-  fn split_symbol_str(&self) -> FlatString {
-    return self.globals().split_symbol_str;
-  }
-  fn to_primitive_symbol_str(&self) -> FlatString {
-    return self.globals().to_primitive_symbol_str;
-  }
-  fn to_string_tag_symbol_str(&self) -> FlatString {
-    return self.globals().to_string_tag_symbol_str;
-  }
-  fn unscopables_symbol_str(&self) -> FlatString {
-    return self.globals().unscopables_symbol_str;
-  }
-
-  fn symbol_to_string_str(&self) -> FlatString {
-    return self.globals().symbol_to_string_str;
-  }
-
-  fn to_string_to_string_str(&self) -> FlatString {
-    return self.globals().to_string_to_string_str;
-  }
+  fn symbol_registry(&self) -> SymbolRegistry;
 }
 
 #[cfg(not(feature = "nogc"))]
 impl AllocationOnlyContext for LuxContext {
-  fn object_records(&self) -> ObjectRecords {
-    return self.object_records;
-  }
   fn allocate(&mut self, size: usize) -> Addr {
     return unsafe { HEAP.allocate(size) };
   }
@@ -273,15 +243,18 @@ impl AllocationOnlyContext for LuxContext {
 
 #[cfg(feature = "nogc")]
 impl AllocationOnlyContext for LuxContext {
-  fn object_records(&self) -> ObjectRecords {
-    return self.object_records;
-  }
   fn allocate(&mut self, size: usize) -> Addr {
     return unsafe { alloc(Layout::from_size_align(size, ALIGNMENT).unwrap()) };
   }
 
   fn allocate_persist(&mut self, size: usize) -> Addr {
     return unsafe { alloc(Layout::from_size_align(size, ALIGNMENT).unwrap()) };
+  }
+}
+
+impl ObjectRecordsInitializedContext for LuxContext {
+  fn object_records(&self) -> ObjectRecords {
+    return self.object_records;
   }
 }
 
@@ -292,5 +265,9 @@ impl Context for LuxContext {
 
   fn static_names(&self) -> StaticNames {
     return self.static_names;
+  }
+
+  fn symbol_registry(&self) -> SymbolRegistry {
+    return self.symbol_registry;
   }
 }

@@ -2,11 +2,9 @@ use super::super::cell::*;
 use super::super::hash_map::{HashMap, PredefinedHash};
 use super::super::object_record::{ObjectRecord, ObjectSkin, OwnPropertySearchHint, PropertyMode};
 use super::super::repr::Repr;
-use super::super::shape::Shape;
 use super::super::string::FlatString;
 use super::property::PropertyName;
-use crate::context::{AllocationOnlyContext, Context};
-use crate::utility::*;
+use crate::context::{AllocationOnlyContext, Context, LuxContext, ObjectRecordsInitializedContext};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
 use std::mem::size_of;
@@ -38,7 +36,7 @@ impl_object!(SymbolRegistry, HeapLayout<SymbolRegistryLayout>);
 impl SymbolRegistry {
   pub const SIZE: usize = size_of::<SymbolRegistryLayout>();
 
-  pub fn persist(context: impl AllocationOnlyContext) -> SymbolRegistry {
+  pub fn persist(context: impl ObjectRecordsInitializedContext) -> SymbolRegistry {
     let mut layout =
       HeapLayout::<SymbolRegistryLayout>::persist(context, context.object_records().symbol_registry_record());
     layout.map = HashMap::<PropertyName, JsSymbol>::new(context);
@@ -166,19 +164,21 @@ impl JsSymbol {
       Some(result) => {
         if !result.descriptor().value().is_boxed() {
           match WellKnownSymbolType::from_u64(u64::from(result.descriptor().value())) {
-            Some(WellKnownSymbolType::AsyncIterator) => return context.async_iterator_symbol_str(),
-            Some(WellKnownSymbolType::HasInstance) => return context.has_instance_symbol_str(),
-            Some(WellKnownSymbolType::IsConcatSpreadable) => return context.is_concat_spreadable_symbol_str(),
-            Some(WellKnownSymbolType::Iterator) => return context.iterator_symbol_str(),
-            Some(WellKnownSymbolType::Match) => return context.match_symbol_str(),
-            Some(WellKnownSymbolType::MatchAll) => return context.match_all_symbol_str(),
-            Some(WellKnownSymbolType::Replace) => return context.replace_symbol_str(),
-            Some(WellKnownSymbolType::Search) => return context.search_symbol_str(),
-            Some(WellKnownSymbolType::Species) => return context.species_symbol_str(),
-            Some(WellKnownSymbolType::Split) => return context.split_symbol_str(),
-            Some(WellKnownSymbolType::ToPrimitive) => return context.to_primitive_symbol_str(),
-            Some(WellKnownSymbolType::ToStringTag) => return context.to_string_tag_symbol_str(),
-            Some(WellKnownSymbolType::Unscopables) => return context.unscopables_symbol_str(),
+            Some(WellKnownSymbolType::AsyncIterator) => return context.globals().async_iterator_symbol_str(),
+            Some(WellKnownSymbolType::HasInstance) => return context.globals().has_instance_symbol_str(),
+            Some(WellKnownSymbolType::IsConcatSpreadable) => {
+              return context.globals().is_concat_spreadable_symbol_str()
+            }
+            Some(WellKnownSymbolType::Iterator) => return context.globals().iterator_symbol_str(),
+            Some(WellKnownSymbolType::Match) => return context.globals().match_symbol_str(),
+            Some(WellKnownSymbolType::MatchAll) => return context.globals().match_all_symbol_str(),
+            Some(WellKnownSymbolType::Replace) => return context.globals().replace_symbol_str(),
+            Some(WellKnownSymbolType::Search) => return context.globals().search_symbol_str(),
+            Some(WellKnownSymbolType::Species) => return context.globals().species_symbol_str(),
+            Some(WellKnownSymbolType::Split) => return context.globals().split_symbol_str(),
+            Some(WellKnownSymbolType::ToPrimitive) => return context.globals().to_primitive_symbol_str(),
+            Some(WellKnownSymbolType::ToStringTag) => return context.globals().to_string_tag_symbol_str(),
+            Some(WellKnownSymbolType::Unscopables) => return context.globals().unscopables_symbol_str(),
             _ => unreachable!(),
           }
         }
@@ -210,29 +210,26 @@ impl JsSymbol {
   }
 
   pub fn is_well_known_symbol(&self) -> bool {
-    return HeapObject::get_data_field(self).get(JsSymbol::IS_WELLKNOWN_BIT);
+    return HeapObject::get_data_field(self, JsSymbol::IS_WELLKNOWN_BIT);
   }
 
   pub fn is_object(this: Repr) -> bool {
     debug_assert!(Cell::from(this).shape().is_symbol());
     let s = JsSymbol::from(this);
-    let data_field = HeapObject::get_data_field(&s);
-    return data_field.get(JsSymbol::IS_OBJECT_BIT);
+    return HeapObject::get_data_field(&s, JsSymbol::IS_OBJECT_BIT);
   }
 
   pub fn to_object(this: Repr) -> JsSymbol {
     debug_assert!(Cell::from(this).shape().is_symbol());
-    let s = JsSymbol::from(this);
-    let mut data_field = HeapObject::get_data_field(&s);
-    data_field.set(JsSymbol::IS_OBJECT_BIT);
+    let mut s = JsSymbol::from(this);
+    HeapObject::set_data_field(&mut s, JsSymbol::IS_OBJECT_BIT);
     return JsSymbol::from(this);
   }
 
   pub fn to_primitive(this: Repr) -> PrimitiveSymbol {
     debug_assert!(Cell::from(this).shape().is_symbol());
-    let s = JsSymbol::from(this);
-    let mut data_field = HeapObject::get_data_field(&s);
-    data_field.unset(JsSymbol::IS_OBJECT_BIT);
+    let mut s = JsSymbol::from(this);
+    HeapObject::unset_data_field(&mut s, JsSymbol::IS_OBJECT_BIT);
     return PrimitiveSymbol::from(this);
   }
 
@@ -246,8 +243,8 @@ impl JsSymbol {
         Repr::from(symbol_type as u64)
       ),
     );
-    let symbol = JsSymbol(layout);
-    HeapObject::get_data_field(&symbol).set(JsSymbol::IS_OBJECT_BIT);
+    let mut symbol = JsSymbol(layout);
+    HeapObject::set_data_field(&mut symbol, JsSymbol::IS_OBJECT_BIT);
     return symbol;
   }
 }
@@ -255,8 +252,8 @@ impl JsSymbol {
 impl_object_record!(JsSymbol);
 
 impl PredefinedHash for JsSymbol {
-  fn prepare_hash(&mut self, context: impl Context) {
-    let mut desc = self.description(context);
+  fn prepare_hash(&mut self, context: impl AllocationOnlyContext) {
+    let mut desc = self.description(LuxContext::from_allocation_only_context(context));
     desc.prepare_hash(context);
     self.full_record_unchecked().set_hash(desc.predefined_hash());
   }
