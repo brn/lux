@@ -2,49 +2,33 @@ use super::cell::*;
 use super::hash_map::HashMap;
 use super::hash_map::PredefinedHash;
 use super::internal_array::InternalArray;
-use super::object::{FastOwnProperties, Header, JsObject, Property, PropertyDescriptor, PropertyName};
+use super::object::{FastOwnProperties, Header, JsObject, JsReceiver, Property, PropertyDescriptor, PropertyName};
 use super::repr::Repr;
 use super::shape::{Shape, ShapeTag};
 use crate::context::{AllocationOnlyContext, Context, LuxContext, ObjectRecordsInitializedContext};
 use crate::def::*;
 use crate::utility::{BitOperator, MaskedBitsetMut};
 use num_derive::FromPrimitive;
+use property::Property as Prop;
 use std::convert::TryFrom;
-use std::marker::PhantomData;
 use std::mem::size_of;
 
 #[repr(C)]
-#[derive(Copy, Clone, Default)]
-pub struct TransitionRecordLayout {
+#[derive(Copy, Clone, Default, Prop)]
+pub struct TransitionRecord {
+  #[property(get(type = "copy"))]
   property_name: PropertyName,
+
+  #[property(get(type = "copy"))]
   next_record: FullObjectRecord,
 }
 
-#[repr(C)]
-#[derive(Copy, Clone)]
-pub struct TransitionRecord(HeapLayout<TransitionRecordLayout>);
-impl_object!(TransitionRecord, HeapLayout<TransitionRecordLayout>);
-
 impl TransitionRecord {
-  pub const SIZE: usize = size_of::<TransitionRecordLayout>();
-  pub fn new(
-    context: impl ObjectRecordsInitializedContext,
-    property_name: PropertyName,
-    next_record: FullObjectRecord,
-  ) -> TransitionRecord {
-    let mut layout =
-      HeapLayout::<TransitionRecordLayout>::new(context, context.object_records().transition_record_record());
-    layout.property_name = property_name;
-    layout.next_record = next_record;
-    return TransitionRecord(layout);
-  }
-
-  pub fn property_name(&self) -> PropertyName {
-    return self.property_name;
-  }
-
-  pub fn next_record(&self) -> FullObjectRecord {
-    return self.next_record;
+  pub fn new(property_name: PropertyName, next_record: FullObjectRecord) -> TransitionRecord {
+    return TransitionRecord {
+      property_name,
+      next_record,
+    };
   }
 }
 
@@ -181,9 +165,19 @@ impl PropertyStorageCoercible {
   pub fn is_null(&self) -> bool {
     return self.0.is_invalid();
   }
+
+  fn len(&self) -> usize {
+    if self.is_null() {
+      return 0;
+    }
+    return match self.into_storage() {
+      Ok(a) => a.len(),
+      Err(h) => h.len(),
+    };
+  }
 }
 
-#[derive(Copy, Clone, Property)]
+#[derive(Copy, Clone, Prop)]
 pub struct PropertyDescriptorSearchResult {
   #[property(get(type = "copy"))]
   own_property_descriptor_search_result: OwnPropertyDescriptorSearchResult,
@@ -206,12 +200,12 @@ impl PropertyDescriptorSearchResult {
 
 struct PropertyLocation {
   target_property: Option<PropertyName>,
-  own_property_len: u8,
   current: PropertyMode,
   index: usize,
-  fast: FastOwnProperties,
+  fast: Result<FastOwnProperties, ()>,
   properties: PropertyStorageCoercible,
   elements: PropertyStorageCoercible,
+  fast_property_len: usize,
 }
 
 pub struct OwnPropertyIterator(Option<PropertyLocation>);
@@ -300,17 +294,26 @@ impl OwnPropertyIterator {
 
   fn search_fast_own_properties(&mut self) -> Option<OwnPropertyDescriptorSearchResult> {
     let loc = self.property_location_mut();
-    if loc.index == loc.own_property_len as usize {
+    if loc.index == loc.fast_property_len {
       return None;
     }
-    let property = loc.fast.offset_ref(loc.index as isize);
-    if loc.target_property.is_some() && loc.target_property.unwrap() != property.name() {
-      return None;
+    match loc.fast {
+      Ok(fast) => {
+        let property = fast.offset_ref(loc.index as isize);
+        if loc.target_property.is_some() && loc.target_property.unwrap() != property.name() {
+          return None;
+        }
+        let ret = OwnPropertyDescriptorSearchResult::new(
+          property.name(),
+          property.desc(),
+          PropertyMode::FAST,
+          loc.index as isize,
+        );
+        loc.index += 1;
+        return Some(ret);
+      }
+      _ => return None,
     }
-    let ret =
-      OwnPropertyDescriptorSearchResult::new(property.name(), property.desc(), PropertyMode::FAST, loc.index as isize);
-    loc.index += 1;
-    return Some(ret);
   }
 
   fn search_external_properties(&mut self) -> Option<OwnPropertyDescriptorSearchResult> {
@@ -363,16 +366,36 @@ impl OwnPropertyIterator {
 }
 
 const LIGHT_LAYOUT: usize = 1;
-const EXTENSIBLE_INDEX: usize = 2;
+const EMBED_PROPERTY: usize = 2;
+const NOT_EXTENSIBLE_INDEX: usize = 3;
 
 const LIGHT_SIZE: u32 = size_of::<LightObjectRecordLayout>() as u32;
 const FULL_SIZE: u32 = size_of::<ObjectRecordLayout>() as u32;
+
+pub trait ObjectMetaData {
+  fn header(&self) -> &Header;
+  fn header_mut(&mut self) -> &mut Header;
+}
+macro_rules! _impl_obj_metadata {
+  ($name:tt) => {
+    impl ObjectMetaData for $name {
+      fn header(&self) -> &Header {
+        return &self.header;
+      }
+
+      fn header_mut(&mut self) -> &mut Header {
+        return &mut self.header;
+      }
+    }
+  };
+}
 
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct LightObjectRecordLayout {
   header: Header,
 }
+_impl_obj_metadata!(LightObjectRecordLayout);
 
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
@@ -381,30 +404,67 @@ pub struct ObjectRecordLayout {
   parent: FullObjectRecord,
   prototype: JsObject,
   transitions: TransitionArray,
-  hash: u64,
   properties: PropertyStorageCoercible,
   elements: PropertyStorageCoercible,
-  _data_field: PhantomData<u8>,
+  hash: u64,
+}
+_impl_obj_metadata!(ObjectRecordLayout);
+
+#[repr(packed)]
+#[derive(Copy, Clone, Default)]
+pub struct FastPropertiesLayout {
+  fast_property_offset: u32,
+  fast_property_capacity: u32,
+  fast_property_len: u32,
+  _pad: u32,
 }
 
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct ObjectRecord(BareHeapLayout<LightObjectRecordLayout>);
-impl_object!(ObjectRecord, BareHeapLayout<LightObjectRecordLayout>);
+impl_bare_object!(ObjectRecord, BareHeapLayout<LightObjectRecordLayout>);
+
+impl<T: Copy + ObjectMetaData> BareHeapLayout<T> {
+  pub fn size(&self) -> u32 {
+    return self.header().size();
+  }
+
+  pub fn size_contains_object_record(&self) -> u32 {
+    return self.size() + HEAP_LAYOUT_SIZE;
+  }
+
+  pub fn shape_tag(&self) -> ShapeTag {
+    return self.header().shape().tag();
+  }
+
+  pub fn data_field(&mut self) -> MaskedBitsetMut<u64> {
+    return self.header_mut().data_offset(NOT_EXTENSIBLE_INDEX);
+  }
+
+  pub fn is_light_layout(&self) -> bool {
+    return self.header().data().get(LIGHT_LAYOUT);
+  }
+
+  pub fn shape(&self) -> Shape {
+    return self.header().shape();
+  }
+}
 
 impl ObjectRecord {
   pub const SIZE: usize = LIGHT_SIZE as usize;
   pub fn new(mut context: impl AllocationOnlyContext, size: u32, shape: Shape) -> ObjectRecord {
-    return ObjectRecord::new_into_heap(context.allocate(LIGHT_SIZE as usize), size, shape);
+    return ObjectRecord::new_into_heap(context.allocate(LIGHT_SIZE as usize), size, shape, true);
   }
 
-  pub fn new_into_heap(heap: Addr, size: u32, shape: Shape) -> ObjectRecord {
+  pub fn new_into_heap(heap: Addr, size: u32, shape: Shape, is_light_layout: bool) -> ObjectRecord {
     let base_layout = BareHeapLayout::<LightObjectRecordLayout>::wrap(heap);
     let mut object_record = ObjectRecord(base_layout);
     object_record.header.init();
     object_record.header.set_size(size);
     object_record.header.set_shape(shape);
-    object_record.header.data_mut().set(LIGHT_LAYOUT);
+    if is_light_layout {
+      object_record.header.data_mut().set(LIGHT_LAYOUT);
+    }
     return object_record;
   }
 
@@ -415,57 +475,51 @@ impl ObjectRecord {
     layout.header.set_size(size as u32);
     return ObjectRecord(layout);
   }
-
-  pub fn header(&self) -> &Header {
-    return &self.header;
-  }
-
-  pub fn header_mut(&mut self) -> &mut Header {
-    return &mut self.header;
-  }
-
-  pub fn size(&self) -> u32 {
-    return self.header.size();
-  }
-
-  pub fn size_contains_object_record(&self) -> u32 {
-    return self.size()
-      + if self.is_light_layout() {
-        LIGHT_SIZE
-      } else {
-        size_of::<ObjectRecord>() as u32
-      };
-  }
-
-  pub fn shape_tag(&self) -> ShapeTag {
-    return self.header.shape().tag();
-  }
-
-  pub fn data_field(&mut self) -> MaskedBitsetMut<u64> {
-    return self.header.data_offset(EXTENSIBLE_INDEX);
-  }
-
-  pub fn is_light_layout(&self) -> bool {
-    return self.header().data().get(LIGHT_LAYOUT);
-  }
 }
+
+const FULL_OBJECT_RECORD_LAYOUT_SIZE: usize = size_of::<ObjectRecordLayout>();
+const EMBEDDABLE_LAYOUT_SIZE: usize = size_of::<FastPropertiesLayout>();
 
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct FullObjectRecord(BareHeapLayout<ObjectRecordLayout>);
-impl_object!(FullObjectRecord, BareHeapLayout<ObjectRecordLayout>);
+impl_bare_object!(FullObjectRecord, BareHeapLayout<ObjectRecordLayout>);
 
 impl FullObjectRecord {
-  pub fn new(
-    mut context: impl Context,
-    properties: InternalArray<Property>,
-    size: u32,
-    shape: Shape,
-  ) -> FullObjectRecord {
-    const SIZE: usize = size_of::<ObjectRecordLayout>();
-    let object_record = ObjectRecord::new_into_heap(context.allocate(SIZE), size, shape);
-    let full_object_record = FullObjectRecord::try_from(object_record).unwrap();
-    FullObjectRecord::init_properties(context, full_object_record, properties);
+  const EMBEDDED_PROPERTY_SIZE: usize = 7;
+  pub fn new(mut context: impl Context, size: u32, shape: Shape, fast_property_len: u32) -> FullObjectRecord {
+    let mut object_record = ObjectRecord::new_into_heap(
+      context.allocate(
+        FULL_OBJECT_RECORD_LAYOUT_SIZE
+          + if fast_property_len == 0 {
+            0
+          } else {
+            EMBEDDABLE_LAYOUT_SIZE
+          },
+      ),
+      size
+        + if fast_property_len > 0 {
+          fast_property_len * HEAP_LAYOUT_SIZE
+        } else {
+          0
+        },
+      shape,
+      false,
+    );
+    let mut full_object_record = FullObjectRecord::try_from(object_record).unwrap();
+    if fast_property_len > 0 {
+      object_record.header.data_mut().set(EMBED_PROPERTY);
+      let mut layout = FullObjectRecord::get_fast_properties_layout(full_object_record).unwrap();
+      layout.fast_property_offset = size;
+      layout.fast_property_capacity = fast_property_len;
+      layout.fast_property_len = 0;
+    }
+    full_object_record.transitions = TransitionArray::default();
+    full_object_record.properties = PropertyStorageCoercible::default();
+    full_object_record.elements = PropertyStorageCoercible::default();
+    full_object_record.prototype = JsObject::default();
+    full_object_record.parent = FullObjectRecord::default();
+    full_object_record.hash = 0;
     return full_object_record;
   }
 
@@ -475,6 +529,24 @@ impl FullObjectRecord {
 
   pub fn set_hash(&mut self, hash: u64) {
     self.hash = hash;
+  }
+
+  pub fn fast_properties_capacity(&self) -> usize {
+    return match FullObjectRecord::get_fast_properties_layout(*self) {
+      Ok(layout) => layout.fast_property_capacity as usize,
+      _ => 0,
+    };
+  }
+
+  pub fn fast_properties_len(&self) -> usize {
+    return match FullObjectRecord::get_fast_properties_layout(*self) {
+      Ok(layout) => layout.fast_property_len as usize,
+      _ => 0,
+    };
+  }
+
+  pub fn is_enable_fast_mode(&self) -> bool {
+    return self.header.data().get(EMBED_PROPERTY);
   }
 
   pub fn is_fast_mode(&self) -> bool {
@@ -488,7 +560,7 @@ impl FullObjectRecord {
   pub fn is_external_field_mode(&self) -> bool {
     let mut or = ObjectRecord::from(*self);
     let field = or.data_field();
-    return !field.get(PropertyMode::EXTERNAL.into());
+    return field.get(PropertyMode::EXTERNAL.into());
   }
 
   pub fn set_external_field_mode(&self) {
@@ -500,18 +572,21 @@ impl FullObjectRecord {
   pub fn is_element_mode(&self) -> bool {
     let mut or = ObjectRecord::from(*self);
     let field = or.data_field();
-    return !field.get(PropertyMode::ELEMENT.into()) && !field.get(PropertyMode::ELEMENT.into());
+    return field.get(PropertyMode::ELEMENT.into()) && !field.get(PropertyMode::ELEMENT.into());
+  }
+
+  pub fn set_element_mode(&self) {
+    ObjectRecord::from(*self).data_field().set(PropertyMode::ELEMENT.into());
   }
 
   pub fn is_slow_mode(&self) -> bool {
     let mut or = ObjectRecord::from(*self);
     let field = or.data_field();
-    return !field.get(PropertyMode::SLOW.into());
+    return field.get(PropertyMode::SLOW.into());
   }
 
-  pub fn own_properties_len(&self) -> u8 {
-    let or = ObjectRecord::from(*self);
-    return or.header().own_properties_len();
+  pub fn own_properties_len(&self) -> usize {
+    return self.fast_properties_len() + self.properties.len() + self.elements.len();
   }
 
   pub fn is_transited(&self) -> bool {
@@ -529,7 +604,7 @@ impl FullObjectRecord {
     }
     self.transitions = self
       .transitions
-      .push_safe(context, TransitionRecord::new(context, property_name, object_record));
+      .push_safe(context, TransitionRecord::new(property_name, object_record));
     object_record.parent = *self;
     return object_record;
   }
@@ -548,37 +623,51 @@ impl FullObjectRecord {
   }
 
   pub fn is_extensible(&self) -> bool {
-    return self.header.data().get(EXTENSIBLE_INDEX);
+    return !self.header.data().get(NOT_EXTENSIBLE_INDEX);
   }
 
   pub fn prevent_extensions(&mut self) -> bool {
-    self.header.data().unset(EXTENSIBLE_INDEX);
+    self.header.data().set(NOT_EXTENSIBLE_INDEX);
     return true;
   }
 
   pub fn define_own_property(
-    &mut self,
+    this: Self,
     context: impl ObjectRecordsInitializedContext,
+    receiver: JsReceiver,
     property: Property,
   ) -> OwnPropertyDescriptorSearchResult {
     if property.name().is_number() {
-      self.set_external_field_mode();
-    } else if self.is_fast_mode() {
-      return FullObjectRecord::define_fast_property(self, property);
+      this.set_element_mode();
+      return Self::define_element_property(this, context, property);
     }
-    return FullObjectRecord::define_external_property(self, context, property);
+    if this.is_fast_mode() && this.is_enable_fast_mode() {
+      return Self::define_fast_property(this, context, receiver, property);
+    }
+    return Self::define_external_property(this, context, property);
   }
 
-  pub fn define_own_properties(&self, context: impl Context, properties: InternalArray<Property>) {
-    FullObjectRecord::init_properties(context, *self, properties);
+  pub fn define_own_properties(
+    this: Self,
+    context: impl Context,
+    receiver: JsReceiver,
+    properties: InternalArray<Property>,
+  ) {
+    for p in properties.into_iter() {
+      Self::define_own_property(this, context, receiver, p);
+    }
   }
 
-  pub fn has_property(&self, hint: PropertySearchHint) -> Option<PropertyDescriptorSearchResult> {
+  pub fn has_property(
+    this: Self,
+    receiver: JsReceiver,
+    hint: PropertySearchHint,
+  ) -> Option<PropertyDescriptorSearchResult> {
     if hint.full_object_record().is_null() {
-      let mut maybe_full_object_record = self.prototype();
+      let mut maybe_full_object_record = this.prototype();
       while maybe_full_object_record.is_some() {
         let full_object_record = maybe_full_object_record.unwrap().full_record_unchecked();
-        let result = full_object_record.get_own_property(hint.own_property_search_hint());
+        let result = Self::get_own_property(full_object_record, receiver, hint.own_property_search_hint());
         if result.is_some() {
           return Some(PropertyDescriptorSearchResult::new(
             &result.unwrap(),
@@ -589,10 +678,7 @@ impl FullObjectRecord {
       }
       return None;
     }
-    match hint
-      .full_object_record
-      .get_own_property(hint.own_property_search_hint())
-    {
+    match Self::get_own_property(hint.full_object_record, receiver, hint.own_property_search_hint()) {
       Some(result) => {
         return Some(PropertyDescriptorSearchResult::new(&result, hint.full_object_record()));
       }
@@ -600,8 +686,12 @@ impl FullObjectRecord {
     }
   }
 
-  pub fn get_own_property(&self, hint: OwnPropertySearchHint) -> Option<OwnPropertyDescriptorSearchResult> {
-    let mut iterator = FullObjectRecord::init_own_property_iterator_with_hint(self, hint);
+  pub fn get_own_property(
+    this: Self,
+    receiver: JsReceiver,
+    hint: OwnPropertySearchHint,
+  ) -> Option<OwnPropertyDescriptorSearchResult> {
+    let mut iterator = FullObjectRecord::init_own_property_iterator_with_hint(this, receiver, hint);
     if hint.index() >= 0 {
       return iterator.next();
     }
@@ -613,9 +703,13 @@ impl FullObjectRecord {
     return None;
   }
 
-  pub fn own_property_keys(&mut self, context: impl Context) -> InternalArray<PropertyName> {
-    let iterator = FullObjectRecord::init_own_property_iterator(self);
-    let estimated_len = self.own_properties_len() as usize;
+  pub fn own_property_keys(
+    this: Self,
+    context: impl ObjectRecordsInitializedContext,
+    receiver: JsReceiver,
+  ) -> InternalArray<PropertyName> {
+    let iterator = FullObjectRecord::init_own_property_iterator(this, receiver);
+    let estimated_len = this.own_properties_len() as usize;
     let mut array = InternalArray::<PropertyName>::new(context, if estimated_len == 0 { 10 } else { estimated_len });
     for r in iterator {
       array = array.push_safe(context, r.name());
@@ -623,24 +717,29 @@ impl FullObjectRecord {
     return array;
   }
 
-  fn init_properties(context: impl Context, mut this: FullObjectRecord, properties: InternalArray<Property>) {
-    for p in properties {
-      p.name().prepare_hash(context);
-      FullObjectRecord::define_fast_property(&mut this, p);
+  fn define_fast_property(
+    this: Self,
+    context: impl ObjectRecordsInitializedContext,
+    receiver: JsReceiver,
+    property: Property,
+  ) -> OwnPropertyDescriptorSearchResult {
+    let mut layout = Self::get_fast_properties_layout_unchecked(this);
+    if layout.fast_property_capacity <= layout.fast_property_len {
+      return Self::define_external_property(this, context, property);
     }
-  }
-
-  fn define_fast_property(this: &mut Self, property: Property) -> OwnPropertyDescriptorSearchResult {
-    let offset = this.own_properties_len();
-    ObjectRecord::from(*this)
-      .header_mut()
-      .set_own_properties_len(this.own_properties_len() + 1);
-    FastOwnProperties::from(*this).add_property(offset, property);
-    return OwnPropertyDescriptorSearchResult::new(property.name(), property.desc(), PropertyMode::FAST, offset.into());
+    let mut fast_own_properties = FullObjectRecord::fast_own_properties_unchecked(this, receiver);
+    fast_own_properties.add_property(layout.fast_property_capacity, layout.fast_property_len, property);
+    layout.fast_property_len += 1;
+    return OwnPropertyDescriptorSearchResult::new(
+      property.name(),
+      property.desc(),
+      PropertyMode::FAST,
+      (layout.fast_property_len - 1) as isize,
+    );
   }
 
   fn define_element_property(
-    this: &mut Self,
+    mut this: Self,
     context: impl ObjectRecordsInitializedContext,
     property: Property,
   ) -> OwnPropertyDescriptorSearchResult {
@@ -680,7 +779,7 @@ impl FullObjectRecord {
   }
 
   fn define_external_property(
-    this: &mut Self,
+    this: Self,
     context: impl ObjectRecordsInitializedContext,
     property: Property,
   ) -> OwnPropertyDescriptorSearchResult {
@@ -692,7 +791,7 @@ impl FullObjectRecord {
   }
 
   fn define_external_array_proeprty(
-    this: &mut Self,
+    mut this: Self,
     context: impl ObjectRecordsInitializedContext,
     mut array: InternalArray<Property>,
     property: Property,
@@ -721,28 +820,66 @@ impl FullObjectRecord {
     return OwnPropertyDescriptorSearchResult::new(property.name(), property.desc(), PropertyMode::SLOW, -1);
   }
 
-  fn init_own_property_iterator(this: &Self) -> OwnPropertyIterator {
+  fn init_own_property_iterator(this: Self, receiver: JsReceiver) -> OwnPropertyIterator {
     return OwnPropertyIterator(Some(PropertyLocation {
       target_property: None,
-      own_property_len: this.own_properties_len(),
       index: 0,
       current: PropertyMode::FAST,
-      fast: FastOwnProperties::from(*this),
+      fast: FullObjectRecord::fast_own_properties(this, receiver),
       properties: this.properties,
       elements: this.elements,
+      fast_property_len: this.fast_properties_len(),
     }));
   }
 
-  fn init_own_property_iterator_with_hint(this: &Self, hint: OwnPropertySearchHint) -> OwnPropertyIterator {
+  fn init_own_property_iterator_with_hint(
+    this: Self,
+    receiver: JsReceiver,
+    hint: OwnPropertySearchHint,
+  ) -> OwnPropertyIterator {
     return OwnPropertyIterator(Some(PropertyLocation {
       target_property: None,
-      own_property_len: this.own_properties_len(),
       index: if hint.index() < 0 { 0 } else { hint.index() as usize },
       current: hint.mode(),
-      fast: FastOwnProperties::from(*this),
+      fast: FullObjectRecord::fast_own_properties(this, receiver),
       properties: this.properties,
       elements: this.elements,
+      fast_property_len: this.fast_properties_len(),
     }));
+  }
+
+  fn get_embedded_properties_head_addr(this: Self, receiver: JsReceiver) -> Addr {
+    return unsafe {
+      Cell::from(receiver.object())
+        .get_body()
+        .offset(Self::get_fast_properties_layout_unchecked(this).fast_property_offset as isize)
+    };
+  }
+
+  fn fast_own_properties(this: Self, receiver: JsReceiver) -> Result<FastOwnProperties, ()> {
+    if this.is_enable_fast_mode() {
+      return Ok(FastOwnProperties::from(
+        FullObjectRecord::get_embedded_properties_head_addr(this, receiver),
+      ));
+    }
+    return Err(());
+  }
+
+  fn fast_own_properties_unchecked(this: Self, receiver: JsReceiver) -> FastOwnProperties {
+    return FastOwnProperties::from(FullObjectRecord::get_embedded_properties_head_addr(this, receiver));
+  }
+
+  fn get_fast_properties_layout(this: FullObjectRecord) -> Result<BareHeapLayout<FastPropertiesLayout>, ()> {
+    if this.is_enable_fast_mode() {
+      return Ok(BareHeapLayout::<FastPropertiesLayout>::wrap(unsafe {
+        this.raw_heap().offset(FULL_OBJECT_RECORD_LAYOUT_SIZE as isize)
+      }));
+    }
+    Err(())
+  }
+
+  fn get_fast_properties_layout_unchecked(this: FullObjectRecord) -> BareHeapLayout<FastPropertiesLayout> {
+    return BareHeapLayout::<FastPropertiesLayout>::wrap(this.raw_heap());
   }
 }
 
@@ -804,14 +941,6 @@ impl TryFrom<ObjectRecord> for FullObjectRecord {
   }
 }
 
-impl From<FullObjectRecord> for FastOwnProperties {
-  fn from(a: FullObjectRecord) -> FastOwnProperties {
-    return FastOwnProperties::wrap(unsafe {
-      std::mem::transmute::<&PhantomData<u8>, *mut Property>(&a.0._data_field)
-    });
-  }
-}
-
 pub trait ObjectSkin {
   fn set_record(&mut self, record: ObjectRecord);
   fn record(&self) -> ObjectRecord;
@@ -839,43 +968,41 @@ macro_rules! impl_object_record {
 pub struct FullObjectRecordBuilder {
   context: Repr,
   prototype: JsObject,
-  properties: Vec<Property>,
   base: FullObjectRecord,
   bits: Vec<usize>,
   size: u32,
   shape: Shape,
+  fast_property_capacity: u32,
 }
 
 impl FullObjectRecordBuilder {
-  pub fn new(context: impl AllocationOnlyContext, shape: Shape, size: u32) -> FullObjectRecordBuilder {
+  pub fn new(
+    context: impl AllocationOnlyContext,
+    shape: Shape,
+    size: u32,
+    fast_property_capacity: u32,
+  ) -> FullObjectRecordBuilder {
     return FullObjectRecordBuilder {
       context: context.into(),
-      properties: Vec::new(),
       prototype: JsObject::default(),
       bits: Vec::new(),
       base: FullObjectRecord::default(),
       size,
       shape,
+      fast_property_capacity,
     };
   }
 
   pub fn from_base(context: impl AllocationOnlyContext, base: FullObjectRecord) -> Self {
     return FullObjectRecordBuilder {
       context: context.into(),
-      properties: Vec::new(),
       prototype: JsObject::default(),
       bits: Vec::new(),
       base,
       size: base.size() as u32,
       shape: base.shape(),
+      fast_property_capacity: base.fast_properties_capacity() as u32,
     };
-  }
-
-  pub fn add_peroperty(&mut self, name: PropertyName, value: Repr) -> &mut Self {
-    self
-      .properties
-      .push(new_property!(LuxContext::from(self.context), value: name, value));
-    return self;
   }
 
   pub fn set_prototype(&mut self, prototype: JsObject) -> &mut Self {
@@ -890,15 +1017,10 @@ impl FullObjectRecordBuilder {
 
   pub fn build(&mut self) -> FullObjectRecord {
     let context = LuxContext::from(self.context);
-    let mut props = InternalArray::<Property>::new(context, self.properties.len());
-    for p in &self.properties {
-      props.push(*p);
-    }
-
     let full_object_record = if !self.base.is_null() {
       FullObjectRecord::try_from(ObjectRecord::from(self.base).copy_with_size(context, self.size as usize)).unwrap()
     } else {
-      FullObjectRecord::new(context, props, self.size, self.shape)
+      FullObjectRecord::new(context, self.size, self.shape, self.fast_property_capacity)
     };
 
     let mut object_record = ObjectRecord::from(full_object_record);

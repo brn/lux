@@ -8,14 +8,12 @@ use std::mem::size_of;
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct DataPropertyDescriptorLayout {
-  flags: Bitset<u8>,
   value: Repr,
 }
 
 #[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct AccessorPropertyDescriptorLayout {
-  flags: Bitset<u8>,
   get: Repr,
   set: Repr,
 }
@@ -51,10 +49,11 @@ impl PropertyDescriptor {
   ) -> PropertyDescriptor {
     let mut layout =
       HeapLayout::<DataPropertyDescriptorLayout>::new(context, context.object_records().data_descriptor_record());
+    let mut descriptor = PropertyDescriptor(layout);
     layout.value = value;
-    layout.flags.assign(bit);
-    layout.flags.set(PropertyDescriptor::DATA_PD_INDEX);
-    return PropertyDescriptor(layout);
+    HeapObject::assign_data_field(&mut descriptor, bit as u64);
+    HeapObject::set_data_field(&mut descriptor, PropertyDescriptor::DATA_PD_INDEX);
+    return descriptor;
   }
 
   pub fn new_accessor_descriptor(
@@ -66,8 +65,9 @@ impl PropertyDescriptor {
     let layout =
       HeapLayout::<DataPropertyDescriptorLayout>::new(context, context.object_records().accessor_descriptor_record());
     let mut a_layout = HeapLayout::<AccessorPropertyDescriptorLayout>::from(layout);
-    a_layout.flags.assign(bit);
-    a_layout.flags.set(PropertyDescriptor::DATA_PD_INDEX);
+    let mut descriptor = PropertyDescriptor(layout);
+    HeapObject::assign_data_field(&mut descriptor, bit as u64);
+    HeapObject::set_data_field(&mut descriptor, PropertyDescriptor::DATA_PD_INDEX);
     if get.is_some() {
       a_layout.get = get.unwrap();
     } else {
@@ -78,19 +78,19 @@ impl PropertyDescriptor {
     } else {
       a_layout.get = context.globals().js_undefined();
     }
-    return PropertyDescriptor(layout);
+    return descriptor;
   }
 
   pub fn is_writable(&self) -> bool {
-    return self.flags.get(PropertyDescriptor::WRITABLE_INDEX);
+    return HeapObject::get_data_field(self, PropertyDescriptor::WRITABLE_INDEX);
   }
 
   pub fn is_enumerable(&self) -> bool {
-    return self.flags.get(PropertyDescriptor::ENUMERABLE_INDEX);
+    return HeapObject::get_data_field(self, PropertyDescriptor::ENUMERABLE_INDEX);
   }
 
   pub fn is_configurable(&self) -> bool {
-    return self.flags.get(PropertyDescriptor::CONFIGURABLE_INDEX);
+    return HeapObject::get_data_field(self, PropertyDescriptor::CONFIGURABLE_INDEX);
   }
 
   pub fn value(&self) -> Repr {
@@ -111,7 +111,7 @@ impl PropertyDescriptor {
   }
 
   pub fn is_data_descriptor(&self) -> bool {
-    return self.flags.get(PropertyDescriptor::DATA_PD_INDEX);
+    return HeapObject::get_data_field(self, PropertyDescriptor::DATA_PD_INDEX);
   }
 
   pub fn is_accessor_descriptor(&self) -> bool {

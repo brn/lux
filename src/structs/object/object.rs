@@ -7,6 +7,7 @@ use super::super::repr::Repr;
 use super::super::shape::{Shape, ShapeTag};
 use super::super::string::JsString;
 use super::property::{Property, PropertyName};
+use super::receiver::JsReceiver;
 use super::symbol::WellKnownSymbolType;
 use crate::context::Context;
 use std::mem::size_of;
@@ -55,23 +56,28 @@ impl JsObject {
 
   pub fn get_own_property(object: Repr, hint: OwnPropertySearchHint) -> Option<OwnPropertyDescriptorSearchResult> {
     debug_assert!(object.is_object());
-    return object.full_record_unchecked().get_own_property(hint);
+    return FullObjectRecord::get_own_property(object.full_record_unchecked(), JsReceiver::new(object), hint);
   }
 
   pub fn define_own_property(
     context: impl Context,
-    object: impl ObjectSkin,
+    object: Repr,
     property: Property,
   ) -> OwnPropertyDescriptorSearchResult {
-    return object.full_record_unchecked().define_own_property(context, property);
+    return FullObjectRecord::define_own_property(
+      object.full_record_unchecked(),
+      context,
+      JsReceiver::new(object),
+      property,
+    );
   }
 
-  pub fn has_property(object: impl ObjectSkin, hint: PropertySearchHint) -> bool {
-    return object.full_record_unchecked().has_property(hint).is_some();
+  pub fn has_property(object: Repr, hint: PropertySearchHint) -> bool {
+    return FullObjectRecord::has_property(object.full_record_unchecked(), JsReceiver::new(object), hint).is_some();
   }
 
-  pub fn own_property_keys(context: impl Context, object: impl ObjectSkin) -> InternalArray<PropertyName> {
-    return object.full_record_unchecked().own_property_keys(context);
+  pub fn own_property_keys(context: impl Context, object: Repr) -> InternalArray<PropertyName> {
+    return FullObjectRecord::own_property_keys(object.full_record_unchecked(), context, JsReceiver::new(object));
   }
 
   // https://262.ecma-international.org/11.0/#sec-ordinary-object-internal-methods-and-internal-slots-get-p-receiver

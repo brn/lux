@@ -181,12 +181,8 @@ impl LuxContext {
   const SIZE: usize = size_of::<LuxContextLayout>();
   #[cfg(feature = "nogc")]
   pub fn new() -> LuxContext {
-    let l = Layout::from_size_align(LuxContext::SIZE + PTR_SIZE, ALIGNMENT).unwrap();
-    let heap = unsafe { alloc(l) };
-    let mut layout = BareHeapLayout::<LuxContextLayout>::wrap(heap);
-    let c = LuxContext(layout);
-    layout.object_records = ObjectRecords::new(c);
-    layout.object_records.initialize(c);
+    let c = LuxContext::new_until_js_object_records();
+    let mut layout = c.0;
     layout.static_names = StaticNames::new(c);
     layout.globals = GlobalObjects::new(c);
     layout.builtins = Builtins::new(c);
@@ -196,10 +192,25 @@ impl LuxContext {
   }
 
   pub fn new_only_allocator() -> LuxContext {
-    let l = Layout::from_size_align(LuxContext::SIZE + PTR_SIZE, ALIGNMENT).unwrap();
+    let l = Layout::from_size_align(LuxContext::SIZE, ALIGNMENT).unwrap();
     let heap = unsafe { alloc(l) };
-    let mut layout = BareHeapLayout::<LuxContextLayout>::wrap(heap);
+    let layout = BareHeapLayout::<LuxContextLayout>::wrap(heap);
     let c = LuxContext(layout);
+    return c;
+  }
+
+  pub fn new_until_internal_object_records() -> LuxContext {
+    let mut c = LuxContext::new_only_allocator();
+    let mut records = ObjectRecords::new(c);
+    c.object_records = records;
+    records.initialize_internal_structs(c);
+    return c;
+  }
+
+  pub fn new_until_js_object_records() -> LuxContext {
+    let c = LuxContext::new_until_internal_object_records();
+    let mut records = c.object_records;
+    records.initialize_js_objects(c);
     return c;
   }
 

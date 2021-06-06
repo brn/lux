@@ -7,6 +7,11 @@ extern crate static_assertions;
 #[macro_use]
 extern crate property;
 
+extern crate backtrace;
+
+#[macro_use]
+mod debug;
+
 pub mod def;
 
 #[macro_use]

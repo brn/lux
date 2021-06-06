@@ -8,6 +8,7 @@ use super::property_descriptor::PropertyDescriptor;
 use super::symbol::JsSymbol;
 use crate::context::{AllocationOnlyContext, Context, ObjectRecordsInitializedContext};
 use crate::def::*;
+use property::Property as Prop;
 use std::cmp::PartialEq;
 use std::mem::size_of;
 
@@ -30,7 +31,7 @@ impl PropertyName {
   }
 
   pub fn is_number(&self) -> bool {
-    return !self.0.is_number();
+    return self.0.is_number();
   }
 
   pub fn is_symbol(&self) -> bool {
@@ -181,13 +182,14 @@ impl Property {
 pub struct FastOwnProperties(*mut Property);
 
 impl FastOwnProperties {
-  pub fn add_property(&mut self, offset: u8, property: Property) {
+  pub fn add_property(&mut self, cap: u32, len: u32, property: Property) {
+    debug_assert!(len < cap);
     unsafe {
-      *(self.properties().offset(offset.into())) = property;
+      *(self.properties().offset(len as isize)) = property;
     }
   }
 
-  pub fn get_property_descriptor(&self, len: u8, property: Property) -> Option<(isize, PropertyDescriptor)> {
+  pub fn get_property_descriptor(&self, len: u32, property: Property) -> Option<(isize, PropertyDescriptor)> {
     for index in 0..len {
       let p = self.offset(index as isize);
       if !p.is_null() && property.name() == self.offset_ref(index as isize).name() {
@@ -197,25 +199,31 @@ impl FastOwnProperties {
     return None;
   }
 
-  pub fn collect_own_property_keys(&mut self, len: usize, mut keys: InternalArray<PropertyName>) {
+  pub fn collect_own_property_keys(&mut self, len: u32, mut keys: InternalArray<PropertyName>) {
     for index in 0..len {
       keys.push(self.offset_ref(index as isize).name());
     }
   }
 
-  pub fn wrap(ptr: *mut Property) -> FastOwnProperties {
-    return FastOwnProperties(ptr);
+  pub fn wrap(ptr: Addr) -> FastOwnProperties {
+    return FastOwnProperties(ptr as *mut Property);
   }
 
   pub fn properties(&self) -> *mut Property {
-    return self.0;
+    return self.0 as *mut Property;
   }
 
   pub fn offset(&self, offset: isize) -> *mut Property {
-    return unsafe { self.0.offset(offset) };
+    return unsafe { self.properties().offset(offset) };
   }
 
   pub fn offset_ref(&self, offset: isize) -> &Property {
     return unsafe { &*self.offset(offset) };
+  }
+}
+
+impl From<Addr> for FastOwnProperties {
+  fn from(a: Addr) -> FastOwnProperties {
+    return FastOwnProperties::wrap(a);
   }
 }

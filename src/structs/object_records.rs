@@ -13,10 +13,10 @@ use std::mem::size_of;
 #[derive(Copy, Clone, Default, Property)]
 pub struct ObjectRecordsLayout {
   #[property(get(type = "copy"))]
-  root_object_record: FullObjectRecord,
+  internal_array_record: ObjectRecord,
 
   #[property(get(type = "copy"))]
-  internal_array_record: ObjectRecord,
+  root_object_record: FullObjectRecord,
 
   #[property(get(type = "copy"))]
   hash_map_entry_record: ObjectRecord,
@@ -88,31 +88,15 @@ impl ObjectRecords {
   const SIZE: usize = size_of::<ObjectRecordsLayout>();
   pub fn new(context: impl AllocationOnlyContext) -> ObjectRecords {
     let global_objects_record = ObjectRecord::new(context, ObjectRecords::SIZE as u32, Shape::object_records());
-    let mut layout = HeapLayout::<ObjectRecordsLayout>::persist(context, global_objects_record);
+    let layout = HeapLayout::<ObjectRecordsLayout>::persist(context, global_objects_record);
     return ObjectRecords(layout);
   }
 
-  pub fn initialize(&mut self, context: impl ObjectRecordsInitializedContext) {
+  pub fn initialize_internal_structs(&mut self, context: impl ObjectRecordsInitializedContext) {
     self.internal_array_record = ObjectRecord::new(context, 0, Shape::internal_array());
     self.hash_map_entry_record = ObjectRecord::new(context, 0, Shape::hash_map_entry());
     self.hash_map_record = ObjectRecord::new(context, 0, Shape::hash_map());
-    self.string_piece_record = JsString::string_piece_record(context);
-    self.string_rope_record = JsString::string_rope_record(context);
-    self.small_string_record = JsString::small_string_record(context);
-    self.one_byte_char_record = JsString::one_byte_char_record(context);
-    self.flatten_string_record = JsString::flatten_string_record(context);
     self.property_record = ObjectRecord::new(context, Property::SIZE as u32, Shape::property());
-    self.root_object_record = FullObjectRecordBuilder::new(context, Shape::root_object_record(), 0).build();
-    self.string_record = self.root_object_record.transition(
-      context,
-      PropertyName::from_utf8_string(context, "String"),
-      FullObjectRecordBuilder::new(context, Shape::string(), JsString::SIZE as u32).build(),
-    );
-    self.js_object_record = self.root_object_record.transition(
-      context,
-      PropertyName::from_utf8_string(context, "Object"),
-      FullObjectRecordBuilder::new(context, Shape::object(), JsObject::SIZE as u32).build(),
-    );
     self.data_descriptor_record = ObjectRecord::new(
       context,
       PropertyDescriptor::DATA_DESCRIPTOR_SIZE as u32,
@@ -124,38 +108,55 @@ impl ObjectRecords {
       Shape::property_descriptor(),
     );
     self.builtins_record = ObjectRecord::new(context, Builtins::SIZE as u32, Shape::builtins());
+    self.symbol_registry_record = ObjectRecord::new(context, SymbolRegistry::SIZE as u32, Shape::symbol_registry());
+    self.native_function_record = ObjectRecord::new(context, NATIVE_FUNCTION_SIZE as u32, Shape::native_function());
+    // self.transition_record_record =
+    //   ObjectRecord::new(context, TransitionRecord::SIZE as u32, Shape::transition_record());
+  }
 
+  pub fn initialize_js_objects(&mut self, context: impl ObjectRecordsInitializedContext) {
+    self.string_piece_record = JsString::string_piece_record(context);
+    self.string_rope_record = JsString::string_rope_record(context);
+    self.small_string_record = JsString::small_string_record(context);
+    self.one_byte_char_record = JsString::one_byte_char_record(context);
+    self.flatten_string_record = JsString::flatten_string_record(context);
+    self.root_object_record = FullObjectRecordBuilder::new(context, Shape::root_object_record(), 0, 0).build();
+    self.string_record = FullObjectRecordBuilder::new(context, Shape::string(), JsString::SIZE as u32, 1).build();
+    let string_record = self.string_record;
+    let p = PropertyName::from_utf8_string(context, "String");
+    self.root_object_record.transition(
+      context,
+      PropertyName::from_utf8_string(context, "String"),
+      string_record,
+    );
+    self.js_object_record = self.root_object_record.transition(
+      context,
+      PropertyName::from_utf8_string(context, "Object"),
+      FullObjectRecordBuilder::new(context, Shape::object(), JsObject::SIZE as u32, 0).build(),
+    );
     self.symbol_record = self.root_object_record.transition(
       context,
       PropertyName::from_utf8_string(context, "Symbol"),
-      FullObjectRecordBuilder::new(context, Shape::symbol(), JsSymbol::SIZE as u32).build(),
+      FullObjectRecordBuilder::new(context, Shape::symbol(), JsSymbol::SIZE as u32, 0).build(),
     );
-
-    self.symbol_registry_record = ObjectRecord::new(context, SymbolRegistry::SIZE as u32, Shape::symbol_registry());
-
-    self.native_function_record = ObjectRecord::new(context, NATIVE_FUNCTION_SIZE as u32, Shape::native_function());
-
     self.function_record = self.root_object_record.transition(
       context,
       PropertyName::from_utf8_string(context, "Function"),
-      FullObjectRecordBuilder::new(context, Shape::function(), JsFunction::SIZE as u32).build(),
+      FullObjectRecordBuilder::new(context, Shape::function(), JsFunction::SIZE as u32, 2).build(),
     );
 
     self.builtin_function_record = self.root_object_record.transition(
       context,
       PropertyName::from_utf8_string(context, "BuiltinFunction"),
-      FullObjectRecordBuilder::new(context, Shape::function(), JsFunction::SIZE as u32)
+      FullObjectRecordBuilder::new(context, Shape::function(), JsFunction::SIZE as u32, 2)
         .set_bit_field(JsFunction::BUILTIN_BIT)
         .build(),
     );
 
-    self.transition_record_record =
-      ObjectRecord::new(context, TransitionRecord::SIZE as u32, Shape::transition_record());
-
     self.function_prototype_record = self.root_object_record.transition(
       context,
       PropertyName::from_utf8_string(context, "Function.prototype"),
-      FullObjectRecordBuilder::new(context, Shape::function_prototype(), JsFunction::SIZE as u32).build(),
+      FullObjectRecordBuilder::new(context, Shape::function_prototype(), JsFunction::SIZE as u32, 4).build(),
     );
   }
 }

@@ -112,12 +112,12 @@ impl<T: HeapBody> HeapLayout<T> {
 
   #[inline(always)]
   pub fn as_ref(&self) -> &T {
-    return unsafe { std::mem::transmute::<Addr, &T>(self.addr().offset(self.cell().size() as isize)) };
+    return unsafe { std::mem::transmute::<Addr, &T>(self.cell().get_body()) };
   }
 
   #[inline(always)]
   pub fn as_ref_mut(&mut self) -> &mut T {
-    return unsafe { std::mem::transmute::<Addr, &mut T>(self.addr().offset(self.cell().size() as isize)) };
+    return unsafe { std::mem::transmute::<Addr, &mut T>(self.cell().get_body()) };
   }
 
   #[inline(always)]
@@ -133,7 +133,7 @@ impl<T: HeapBody> HeapLayout<T> {
   #[inline(always)]
   pub fn set(this: &HeapLayout<T>, value: &T) {
     unsafe {
-      *(this.addr().offset(this.cell().size() as isize) as *mut T) = *value;
+      *(this.addr().offset(Cell::SIZE as isize) as *mut T) = *value;
     };
   }
 
@@ -231,8 +231,8 @@ pub trait HeapObject: Into<Repr> + Copy + From<Addr> {
   }
 
   #[inline(always)]
-  fn size(&self) -> usize {
-    return self.cell().size() as usize;
+  fn size(&self) -> u32 {
+    return self.cell().size();
   }
 
   #[inline(always)]
@@ -258,6 +258,11 @@ pub trait HeapObject: Into<Repr> + Copy + From<Addr> {
   #[inline(always)]
   fn set_data_field(this: &mut Self, index: usize) {
     this.cell().set_data_field(index);
+  }
+
+  #[inline(always)]
+  fn assign_data_field(this: &mut Self, value: u64) {
+    this.cell().assign_data_field(value);
   }
 
   #[inline(always)]
@@ -392,26 +397,41 @@ impl<T: Copy> BareHeapLayout<T> {
   pub fn wrap(value: Addr) -> BareHeapLayout<T> {
     return BareHeapLayout::<T>(value, PhantomData);
   }
+
+  pub fn as_ref(&self) -> &T {
+    return unsafe { &*(self.0 as *mut T) };
+  }
+
+  pub fn as_mut(&mut self) -> &mut T {
+    return unsafe { &mut *(self.0 as *mut T) };
+  }
+
+  pub fn raw_heap(&self) -> Addr {
+    return self.0;
+  }
+
+  pub fn is_null(&self) -> bool {
+    return self.0.is_null();
+  }
 }
 
 impl<T: Copy> Deref for BareHeapLayout<T> {
   type Target = T;
   fn deref(&self) -> &Self::Target {
-    return unsafe { &*(self.0 as *mut T) };
+    return self.as_ref();
   }
 }
 
 impl<T: Copy> DerefMut for BareHeapLayout<T> {
   fn deref_mut(&mut self) -> &mut T {
-    return unsafe { &mut *(self.0 as *mut T) };
+    return self.as_mut();
   }
 }
 
-#[repr(packed)]
+#[repr(C)]
 #[derive(Copy, Clone, Default)]
 pub struct CellLayout {
   object_record: ObjectRecord,
-  heap: usize,
 }
 
 #[repr(C)]
@@ -420,16 +440,17 @@ pub struct Cell(BareHeapLayout<CellLayout>);
 
 impl Cell {
   pub const TYPE: Shape = Shape::cell();
+  pub const SIZE: usize = size_of::<CellLayout>();
 
   #[inline(always)]
   pub fn init_heap(mut context: impl AllocationOnlyContext, object_record: ObjectRecord) -> Addr {
-    let heap = context.allocate((object_record.size() + HEAP_LAYOUT_SIZE) as usize);
+    let heap = context.allocate((object_record.size() + size_of::<CellLayout>() as u32) as usize);
     return Cell::init_into_heap(heap, object_record);
   }
 
   #[inline(always)]
   pub fn init_persistent_heap(mut context: impl AllocationOnlyContext, object_record: ObjectRecord) -> Addr {
-    let heap = context.allocate_persist((object_record.size() + HEAP_LAYOUT_SIZE) as usize);
+    let heap = context.allocate_persist((object_record.size() + size_of::<CellLayout>() as u32) as usize);
     return Cell::init_into_heap(heap, object_record);
   }
 
@@ -437,19 +458,18 @@ impl Cell {
   pub fn init_into_heap(heap: Addr, object_record: ObjectRecord) -> Addr {
     let mut layout = BareHeapLayout::<CellLayout>::wrap(heap);
     layout.object_record = object_record;
-    layout.heap = unsafe { heap.offset(HEAP_LAYOUT_SIZE as isize) } as usize;
     return heap;
   }
 
   #[inline(always)]
   pub fn init_object(mut context: impl AllocationOnlyContext, object_record: FullObjectRecord) -> Addr {
-    let heap = context.allocate(object_record.size());
+    let heap = context.allocate((object_record.size() + size_of::<CellLayout>() as u32) as usize);
     return Cell::init_object_into_heap(context, heap, object_record);
   }
 
   #[inline(always)]
   pub fn init_persistent_object(mut context: impl AllocationOnlyContext, object_record: FullObjectRecord) -> Addr {
-    let heap = context.allocate_persist(object_record.size());
+    let heap = context.allocate_persist((object_record.size() + size_of::<CellLayout>() as u32) as usize);
     return Cell::init_object_into_heap(context, heap, object_record);
   }
 
@@ -460,7 +480,6 @@ impl Cell {
   ) -> Addr {
     let mut layout = BareHeapLayout::<CellLayout>::wrap(heap);
     layout.object_record = object_record.into();
-    layout.heap = unsafe { heap.offset(HEAP_LAYOUT_SIZE as isize) } as usize;
     return heap;
   }
 
@@ -470,18 +489,23 @@ impl Cell {
   }
 
   #[inline(always)]
-  pub fn shape(&mut self) -> Shape {
+  pub fn shape(&self) -> Shape {
     return self.record().shape();
   }
 
   #[inline(always)]
   pub fn get_body(&self) -> Addr {
-    return self.heap as Addr;
+    return unsafe { self.as_addr().offset(size_of::<CellLayout>() as isize) };
   }
 
   #[inline(always)]
   pub fn set_data_field(&mut self, index: usize) {
     self.record().data_field().set(index);
+  }
+
+  #[inline(always)]
+  pub fn assign_data_field(&mut self, value: u64) {
+    self.record().data_field().assign(value);
   }
 
   #[inline(always)]
@@ -511,19 +535,9 @@ macro_rules! impl_bare_object {
   ($name:ident, $layout:ident<$body:ty>) => {
     impl_from_addr!($name, $layout);
     impl_into_addr!($name);
-    impl_heap_object!($name);
     impl_repr_convertion!($name, $layout);
-    impl Deref for $name {
-      type Target = $body;
-      fn deref(&self) -> &Self::Target {
-        return &*self.0;
-      }
-    }
-    impl DerefMut for $name {
-      fn deref_mut(&mut self) -> &mut Self::Target {
-        return &mut *self.0;
-      }
-    }
+    impl_default!($name);
+    impl_deref_heap!($name, $layout, $body);
   };
 }
 

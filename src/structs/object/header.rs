@@ -8,8 +8,8 @@ pub struct Header {
   ///
   /// Use as object size information and used as forwarded pointer and mark bit.
   ///
-  /// |---data----|--own properties count--|--size---|--object_record bit--|--size tag--|--type tag--|--mark bit--|
-  /// |---17bit---|----------6bit-----------|--32bit--|--------1bit--------|----1bit----|----6bit----|----1bit----|
+  /// |---data-----|--size---|--object_record bit--|--size tag--|--type tag--|--mark bit--|
+  /// |---23bit----|--32bit--|--------1bit---------|----1bit----|----6bit----|----1bit----|
   ///
   field: Bitset<u64>,
 }
@@ -24,9 +24,7 @@ const OBJECT_RECORD_BIT_START: usize = SIZE_TAG_START + SIZE_TAG_SIZE;
 const OBJECT_RECORD_BIT_SIZE: usize = 1;
 const SIZE_FIELD_START: usize = OBJECT_RECORD_BIT_START + OBJECT_RECORD_BIT_SIZE;
 const SIZE_FIELD_SIZE: usize = 32;
-const OWN_PROPERTIES_COUNT_START: usize = SIZE_FIELD_START + SIZE_FIELD_SIZE;
-const OWN_PROPERTIES_COUNT_SIZE: usize = 6;
-const DATA_FIELD_START: usize = OWN_PROPERTIES_COUNT_START + OWN_PROPERTIES_COUNT_SIZE;
+const DATA_FIELD_START: usize = SIZE_FIELD_START + SIZE_FIELD_SIZE;
 const _DATA_FIELD_SIZE: usize = 23;
 
 impl Header {
@@ -52,28 +50,6 @@ impl Header {
       return mask.bits() as u32;
     }
     return 0;
-  }
-
-  #[inline]
-  pub fn set_own_properties_len(&mut self, offset: u8) {
-    return self
-      .field
-      .mask_range_mut(
-        OWN_PROPERTIES_COUNT_START,
-        OWN_PROPERTIES_COUNT_START + OWN_PROPERTIES_COUNT_SIZE,
-      )
-      .set(offset as usize);
-  }
-
-  #[inline]
-  pub fn own_properties_len(&self) -> u8 {
-    return self
-      .field
-      .mask_range(
-        OWN_PROPERTIES_COUNT_START,
-        OWN_PROPERTIES_COUNT_START + OWN_PROPERTIES_COUNT_SIZE,
-      )
-      .bits() as u8;
   }
 
   #[inline]

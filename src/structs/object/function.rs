@@ -1,11 +1,12 @@
 use super::super::cell::*;
 use super::super::internal_array::InternalArray;
 use super::super::natives::{NativeFunction, NativeFunctionCall};
-use super::super::object_record::ObjectSkin;
+use super::super::object_record::{FullObjectRecord, ObjectSkin};
 use super::super::repr::Repr;
 use super::super::shape::Shape;
 use super::super::string::FlatString;
 use super::property::Property;
+use super::receiver::JsReceiver;
 use crate::context::Context;
 use crate::utility::*;
 use num_derive::FromPrimitive;
@@ -129,7 +130,12 @@ impl JsFunction {
   pub fn new(context: impl Context, properties: InternalArray<Property>) -> JsFunction {
     let layout = HeapLayout::<JsFunctionLayout>::new_object(context, context.object_records().function_record());
     let func = JsFunction(layout);
-    func.full_record_unchecked().define_own_properties(context, properties);
+    FullObjectRecord::define_own_properties(
+      func.full_record_unchecked(),
+      context,
+      JsReceiver::new(func.into()),
+      properties,
+    );
     return func;
   }
 

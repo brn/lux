@@ -1,4 +1,5 @@
 use super::cell::{HeapLayout, HeapObject};
+use super::object_record::ObjectRecord;
 use super::repr::*;
 use super::shape::Shape;
 use crate::context::{AllocationOnlyContext, ObjectRecordsInitializedContext};
@@ -53,16 +54,23 @@ impl<T: Copy> IndexMut<usize> for InternalArray<T> {
 impl<T: Copy> InternalArray<T> {
   pub const TYPE: Shape = Shape::internal_array();
   pub fn new(context: impl ObjectRecordsInitializedContext, capacity: usize) -> InternalArray<T> {
-    return InternalArray::<T>::init(
-      HeapLayout::<InternalArrayLayout>::new(
-        context,
-        context
-          .object_records()
-          .internal_array_record()
-          .copy_with_size(context, InternalArray::<T>::calc_size(capacity)),
-      ),
+    return InternalArray::<T>::new_from_object_record(
+      context,
+      context
+        .object_records()
+        .internal_array_record()
+        .copy_with_size(context, InternalArray::<T>::calc_size(capacity)),
       capacity,
     );
+  }
+
+  pub fn new_from_object_record(
+    context: impl ObjectRecordsInitializedContext,
+    object_record: ObjectRecord,
+    capacity: usize,
+  ) -> InternalArray<T> {
+    assert_eq!(object_record.size() as usize, InternalArray::<T>::calc_size(capacity));
+    return InternalArray::<T>::init(HeapLayout::<InternalArrayLayout>::new(context, object_record), capacity);
   }
 
   pub fn construct(
