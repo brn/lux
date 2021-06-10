@@ -5,6 +5,7 @@ mod object;
 mod property;
 mod builder;
 mod header;
+pub mod object_property;
 mod property_descriptor;
 mod receiver;
 mod symbol;

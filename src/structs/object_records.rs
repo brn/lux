@@ -3,6 +3,7 @@ use super::js_object::*;
 use super::natives::*;
 use super::object::*;
 use super::object_record::*;
+use super::repr::*;
 use super::shape::*;
 use super::string::*;
 use crate::context::*;
@@ -123,39 +124,38 @@ impl ObjectRecords {
     self.root_object_record = FullObjectRecordBuilder::new(context, Shape::root_object_record(), 0, 0).build();
     self.string_record = FullObjectRecordBuilder::new(context, Shape::string(), JsString::SIZE as u32, 1).build();
     let string_record = self.string_record;
-    let p = PropertyName::from_utf8_string(context, "String");
-    self.root_object_record.transition(
+    self.root_object_record.transition_with_record(
       context,
-      PropertyName::from_utf8_string(context, "String"),
+      new_property!(context, str: "String", Repr::invalid()),
       string_record,
     );
-    self.js_object_record = self.root_object_record.transition(
+    self.js_object_record = self.root_object_record.transition_with_record(
       context,
-      PropertyName::from_utf8_string(context, "Object"),
+      new_property!(context, str: "Object", Repr::invalid()),
       FullObjectRecordBuilder::new(context, Shape::object(), JsObject::SIZE as u32, 0).build(),
     );
-    self.symbol_record = self.root_object_record.transition(
+    self.symbol_record = self.root_object_record.transition_with_record(
       context,
-      PropertyName::from_utf8_string(context, "Symbol"),
+      new_property!(context, str: "Symbol", Repr::invalid()),
       FullObjectRecordBuilder::new(context, Shape::symbol(), JsSymbol::SIZE as u32, 0).build(),
     );
-    self.function_record = self.root_object_record.transition(
+    self.function_record = self.root_object_record.transition_with_record(
       context,
-      PropertyName::from_utf8_string(context, "Function"),
+      new_property!(context, str: "Function", Repr::invalid()),
       FullObjectRecordBuilder::new(context, Shape::function(), JsFunction::SIZE as u32, 2).build(),
     );
 
-    self.builtin_function_record = self.root_object_record.transition(
+    self.builtin_function_record = self.root_object_record.transition_with_record(
       context,
-      PropertyName::from_utf8_string(context, "BuiltinFunction"),
+      new_property!(context, str: "BuiltinFunction", Repr::invalid()),
       FullObjectRecordBuilder::new(context, Shape::function(), JsFunction::SIZE as u32, 2)
         .set_bit_field(JsFunction::BUILTIN_BIT)
         .build(),
     );
 
-    self.function_prototype_record = self.root_object_record.transition(
+    self.function_prototype_record = self.root_object_record.transition_with_record(
       context,
-      PropertyName::from_utf8_string(context, "Function.prototype"),
+      new_property!(context, str: "Function.prototype", Repr::invalid()),
       FullObjectRecordBuilder::new(context, Shape::function_prototype(), JsFunction::SIZE as u32, 4).build(),
     );
   }

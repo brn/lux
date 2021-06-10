@@ -274,6 +274,11 @@ pub trait HeapObject: Into<Repr> + Copy + From<Addr> {
   fn get_data_field(this: &Self, index: usize) -> bool {
     return this.cell().get_data_field(index);
   }
+
+  #[inline(always)]
+  fn get_data_field_bits(this: &Self) -> u64 {
+    return this.cell().get_data_field_bits();
+  }
 }
 
 macro_rules! impl_default {
@@ -516,6 +521,11 @@ impl Cell {
   #[inline(always)]
   pub fn get_data_field(&self, index: usize) -> bool {
     return self.record().data_field().get(index);
+  }
+
+  #[inline(always)]
+  pub fn get_data_field_bits(&self) -> u64 {
+    return self.record().data_field().bits();
   }
 }
 

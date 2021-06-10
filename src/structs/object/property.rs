@@ -73,6 +73,15 @@ impl PartialEq for PropertyName {
   }
 }
 
+impl std::fmt::Debug for PropertyName {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    if self.is_string() {
+      return write!(f, "{:?}", FlatString::from(self.0));
+    }
+    return write!(f, "Symbol");
+  }
+}
+
 impl PredefinedHash for PropertyName {
   fn prepare_hash(&mut self, context: impl AllocationOnlyContext) {
     if self.predefined_hash() != 0 {
@@ -219,6 +228,10 @@ impl FastOwnProperties {
 
   pub fn offset_ref(&self, offset: isize) -> &Property {
     return unsafe { &*self.offset(offset) };
+  }
+
+  pub fn offset_mut(&mut self, offset: isize) -> &mut Property {
+    return unsafe { &mut *self.offset(offset) };
   }
 }
 

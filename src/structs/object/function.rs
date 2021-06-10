@@ -1,14 +1,11 @@
 use super::super::cell::*;
 use super::super::internal_array::InternalArray;
 use super::super::natives::{NativeFunction, NativeFunctionCall};
-use super::super::object_record::{FullObjectRecord, ObjectSkin};
 use super::super::repr::Repr;
-use super::super::shape::Shape;
 use super::super::string::FlatString;
+use super::object_property;
 use super::property::Property;
-use super::receiver::JsReceiver;
-use crate::context::Context;
-use crate::utility::*;
+use crate::context::ObjectRecordsInitializedContext;
 use num_derive::FromPrimitive;
 use std::mem::size_of;
 
@@ -127,20 +124,15 @@ impl_object!(JsFunction, HeapLayout<JsFunctionLayout>);
 impl JsFunction {
   pub const SIZE: usize = size_of::<JsFunctionLayout>();
   pub const BUILTIN_BIT: usize = 1;
-  pub fn new(context: impl Context, properties: InternalArray<Property>) -> JsFunction {
+  pub fn new(context: impl ObjectRecordsInitializedContext, properties: InternalArray<Property>) -> JsFunction {
     let layout = HeapLayout::<JsFunctionLayout>::new_object(context, context.object_records().function_record());
     let func = JsFunction(layout);
-    FullObjectRecord::define_own_properties(
-      func.full_record_unchecked(),
-      context,
-      JsReceiver::new(func.into()),
-      properties,
-    );
+    object_property::define_own_properties(func.into(), context, properties);
     return func;
   }
 
   pub fn new_builtin(
-    context: impl Context,
+    context: impl ObjectRecordsInitializedContext,
     properties: InternalArray<Property>,
     function: Repr,
     func_type: BuiltinJsFunctionType,
@@ -186,7 +178,7 @@ impl JsFunction {
     };
   }
 
-  pub fn get_native_to_string_result(&self, context: impl Context) -> Option<FlatString> {
+  pub fn get_native_to_string_result(&self, context: impl ObjectRecordsInitializedContext) -> Option<FlatString> {
     match JsFunction::get_builtin_layout(self) {
       Some(layout) => {
         return Some(layout.to_string_result);

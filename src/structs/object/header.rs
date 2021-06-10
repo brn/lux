@@ -129,15 +129,11 @@ impl std::fmt::Debug for Header {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     return write!(
       f,
-      "
-{:?} {{
-  size: {:?},
+      "  size: {:?},
   shape: {:?},
   mark: {:?},
   is_size_used_as_size: {:?},
-  has_object_record: {:?}
-}}",
-      std::any::type_name::<Header>(),
+  has_object_record: {:?}",
       self.size(),
       self.shape(),
       self.is_marked(),

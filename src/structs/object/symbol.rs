@@ -1,10 +1,10 @@
 use super::super::cell::*;
 use super::super::hash_map::{HashMap, PredefinedHash};
-use super::super::object_record::{FullObjectRecord, ObjectRecord, ObjectSkin, OwnPropertySearchHint, PropertyMode};
+use super::super::object_record::{ObjectSkin, OwnPropertySearchHint, PropertyMode};
 use super::super::repr::Repr;
 use super::super::string::FlatString;
+use super::object_property;
 use super::property::PropertyName;
-use super::receiver::JsReceiver;
 use crate::context::{AllocationOnlyContext, Context, LuxContext, ObjectRecordsInitializedContext};
 use num_derive::FromPrimitive;
 use num_traits::FromPrimitive;
@@ -129,11 +129,11 @@ impl JsSymbol {
     desc.prepare_hash(context);
     let mut layout = HeapLayout::<JsSymbolLayout>::new_object(context, context.object_records().symbol_record());
     let symbol = JsSymbol(layout);
-    let result = FullObjectRecord::define_own_property(
-      layout.full_record_unchecked(),
+    let result = object_property::define_own_property_kv(
+      symbol.into(),
       context,
-      JsReceiver::new(symbol.into()),
-      new_property!(context, value: context.static_names().description(), desc.into()),
+      context.static_names().description(),
+      desc.into(),
     );
     if result.usable_as_cache() {
       layout.description_index = result.index();
@@ -146,11 +146,11 @@ impl JsSymbol {
   pub fn new_primitive(context: impl Context, desc: FlatString) -> JsSymbol {
     let mut layout = HeapLayout::<JsSymbolLayout>::new_object(context, context.object_records().symbol_record());
     let symbol = JsSymbol(layout);
-    let result = FullObjectRecord::define_own_property(
-      symbol.full_record_unchecked(),
+    let result = object_property::define_own_property_kv(
+      symbol.into(),
       context,
-      JsReceiver::new(symbol.into()),
-      new_property!(context, value: context.static_names().description(), desc.into()),
+      context.static_names().description(),
+      desc.into(),
     );
     if result.usable_as_cache() {
       layout.description_index = result.index();
@@ -161,14 +161,11 @@ impl JsSymbol {
   }
 
   pub fn description(&self, context: impl Context) -> FlatString {
-    match FullObjectRecord::get_own_property(
-      self.full_record_unchecked(),
-      JsReceiver::new((*self).into()),
-      OwnPropertySearchHint::new_with(
-        context.static_names().description(),
-        self.description_index,
-        PropertyMode::FAST,
-      ),
+    match object_property::get_own_property_raw_with(
+      (*self).into(),
+      context.static_names().description(),
+      self.description_index,
+      PropertyMode::Fast,
     ) {
       Some(result) => {
         if !result.descriptor().value().is_boxed() {
@@ -200,14 +197,11 @@ impl JsSymbol {
 
   pub fn wellknown_symbol_type(&self, context: impl Context) -> Option<WellKnownSymbolType> {
     if self.is_well_known_symbol() {
-      match FullObjectRecord::get_own_property(
-        self.full_record_unchecked(),
-        JsReceiver::new((*self).into()),
-        OwnPropertySearchHint::new_with(
-          context.static_names().description(),
-          self.description_index,
-          PropertyMode::FAST,
-        ),
+      match object_property::get_own_property_raw_with(
+        (*self).into(),
+        context.static_names().description(),
+        self.description_index,
+        PropertyMode::Fast,
       ) {
         Some(result) => {
           if !result.descriptor().value().is_boxed() {
@@ -247,15 +241,11 @@ impl JsSymbol {
   fn new_wellknown(context: impl Context, symbol_type: WellKnownSymbolType) -> JsSymbol {
     let layout = HeapLayout::<JsSymbolLayout>::persist_object(context, context.object_records().symbol_record());
     let mut symbol = JsSymbol(layout);
-    FullObjectRecord::define_own_property(
-      layout.full_record_unchecked(),
+    object_property::define_own_property_kv(
+      symbol.into(),
       context,
-      JsReceiver::new(symbol.into()),
-      new_property!(
-        context,
-        value: context.static_names().description(),
-        Repr::from(symbol_type as u64)
-      ),
+      context.static_names().description(),
+      Repr::from(symbol_type as u64),
     );
     HeapObject::set_data_field(&mut symbol, JsSymbol::IS_OBJECT_BIT);
     return symbol;

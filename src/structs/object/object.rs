@@ -6,6 +6,8 @@ use super::super::object_record::{
 use super::super::repr::Repr;
 use super::super::shape::{Shape, ShapeTag};
 use super::super::string::JsString;
+use super::object_property;
+use super::object_property::OwnKeys;
 use super::property::{Property, PropertyName};
 use super::receiver::JsReceiver;
 use super::symbol::WellKnownSymbolType;
@@ -56,7 +58,12 @@ impl JsObject {
 
   pub fn get_own_property(object: Repr, hint: OwnPropertySearchHint) -> Option<OwnPropertyDescriptorSearchResult> {
     debug_assert!(object.is_object());
-    return FullObjectRecord::get_own_property(object.full_record_unchecked(), JsReceiver::new(object), hint);
+    return object_property::get_own_property(object, hint);
+  }
+
+  pub fn get_own_property_by_name(object: Repr, name: PropertyName) -> Option<OwnPropertyDescriptorSearchResult> {
+    debug_assert!(object.is_object());
+    return object_property::get_own_property(object, OwnPropertySearchHint::new(name));
   }
 
   pub fn define_own_property(
@@ -64,20 +71,15 @@ impl JsObject {
     object: Repr,
     property: Property,
   ) -> OwnPropertyDescriptorSearchResult {
-    return FullObjectRecord::define_own_property(
-      object.full_record_unchecked(),
-      context,
-      JsReceiver::new(object),
-      property,
-    );
+    return object_property::define_own_property(object, context, property);
   }
 
   pub fn has_property(object: Repr, hint: PropertySearchHint) -> bool {
-    return FullObjectRecord::has_property(object.full_record_unchecked(), JsReceiver::new(object), hint).is_some();
+    return object_property::has_property(object, hint).is_some();
   }
 
-  pub fn own_property_keys(context: impl Context, object: Repr) -> InternalArray<PropertyName> {
-    return FullObjectRecord::own_property_keys(object.full_record_unchecked(), context, JsReceiver::new(object));
+  pub fn own_property_keys(context: impl Context, object: Repr) -> OwnKeys {
+    return object_property::own_property_keys(object, context);
   }
 
   // https://262.ecma-international.org/11.0/#sec-ordinary-object-internal-methods-and-internal-slots-get-p-receiver

@@ -214,6 +214,17 @@ impl FlatString {
   }
 }
 
+impl std::fmt::Debug for FlatString {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    use std::char::decode_utf16;
+    let flat_content = self.flat_content();
+    let chars = decode_utf16(flat_content.into_iter())
+      .map(|r| r.unwrap_or('#'))
+      .collect::<String>();
+    return write!(f, "{}", chars);
+  }
+}
+
 impl ObjectSkin for FlatString {
   fn set_record(&mut self, r: ObjectRecord) {
     self.0.set_record(r);

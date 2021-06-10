@@ -94,6 +94,29 @@ impl<T: Copy> InternalArray<T> {
     return array;
   }
 
+  pub fn copy_construct(
+    context: impl ObjectRecordsInitializedContext,
+    capacity: usize,
+    length: usize,
+    data: *mut T,
+  ) -> InternalArray<T> {
+    let mut array = InternalArray::<T>::init(
+      HeapLayout::<InternalArrayLayout>::new(
+        context,
+        context
+          .object_records()
+          .internal_array_record()
+          .copy_with_size(context, InternalArray::<T>::calc_size(capacity)),
+      ),
+      capacity,
+    );
+    for i in 0..length {
+      array.write(i, unsafe { *data.offset(i as isize) });
+    }
+    array.length = length;
+    return array;
+  }
+
   pub fn expand_and_copy(context: impl ObjectRecordsInitializedContext, base: InternalArray<T>) -> InternalArray<T> {
     return InternalArray::<T>::construct(context, base.capacity() * 2, base.len(), base.data());
   }
@@ -295,7 +318,13 @@ impl<T: Copy> IntoIterator for InternalArray<T> {
 
 impl<T: Copy> std::fmt::Debug for InternalArray<T> {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    return write!(f, "{:?}", self.0);
+    return write!(
+      f,
+      "InternalArray<{}> {{ len: {}, cap: {} }}",
+      std::any::type_name::<T>(),
+      self.len(),
+      self.capacity()
+    );
   }
 }
 

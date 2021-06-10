@@ -33,15 +33,16 @@ impl PropertyDescriptor {
   pub const DATA_DESCRIPTOR_SIZE: usize = size_of::<DataPropertyDescriptorLayout>();
   pub const ACCESSOR_DESCRIPTOR_SIZE: usize = size_of::<AccessorPropertyDescriptorLayout>();
   pub const DEFAULT: u8 = 0;
-  pub const WRITABLE: u8 = 0x1;
-  pub const ENUMERABLE: u8 = 0x2;
-  pub const CONFIGURABLE: u8 = 0x4;
+  pub const WRITABLE: u8 = 1;
+  pub const ENUMERABLE: u8 = 2;
+  pub const CONFIGURABLE: u8 = 4;
 
   const WRITABLE_INDEX: usize = 1;
   const ENUMERABLE_INDEX: usize = 2;
   const CONFIGURABLE_INDEX: usize = 3;
   const DATA_PD_INDEX: usize = 4;
 
+  #[inline]
   pub fn new_data_descriptor(
     context: impl ObjectRecordsInitializedContext,
     bit: u8,
@@ -81,40 +82,55 @@ impl PropertyDescriptor {
     return descriptor;
   }
 
+  #[inline(always)]
   pub fn is_writable(&self) -> bool {
     return HeapObject::get_data_field(self, PropertyDescriptor::WRITABLE_INDEX);
   }
 
+  #[inline(always)]
   pub fn is_enumerable(&self) -> bool {
     return HeapObject::get_data_field(self, PropertyDescriptor::ENUMERABLE_INDEX);
   }
 
+  #[inline(always)]
   pub fn is_configurable(&self) -> bool {
     return HeapObject::get_data_field(self, PropertyDescriptor::CONFIGURABLE_INDEX);
   }
 
+  #[inline(always)]
   pub fn value(&self) -> Repr {
     assert!(self.is_data_descriptor());
     return self.value;
   }
 
+  #[inline(always)]
   pub fn getter(&self) -> Repr {
     assert!(self.is_accessor_descriptor());
     let accessor_property_descriptor = HeapLayout::<AccessorPropertyDescriptorLayout>::from(self.0);
     return accessor_property_descriptor.get;
   }
 
+  #[inline(always)]
   pub fn setter(&self) -> Repr {
     assert!(self.is_accessor_descriptor());
     let accessor_property_descriptor = HeapLayout::<AccessorPropertyDescriptorLayout>::from(self.0);
     return accessor_property_descriptor.set;
   }
 
+  #[inline(always)]
   pub fn is_data_descriptor(&self) -> bool {
     return HeapObject::get_data_field(self, PropertyDescriptor::DATA_PD_INDEX);
   }
 
+  #[inline(always)]
   pub fn is_accessor_descriptor(&self) -> bool {
     return self.is_data_descriptor();
+  }
+}
+
+impl std::cmp::PartialEq for PropertyDescriptor {
+  #[inline(always)]
+  fn eq(&self, a: &PropertyDescriptor) -> bool {
+    return HeapObject::get_data_field_bits(self) == HeapObject::get_data_field_bits(a);
   }
 }

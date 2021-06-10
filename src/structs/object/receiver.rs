@@ -27,14 +27,6 @@ impl JsReceiver {
     return self.0.is_object_type();
   }
 
-  pub fn is_number(&self) -> bool {
-    return self.0.is_number();
-  }
-
-  pub fn is_boolean(&self) -> bool {
-    return self.0.is_js_boolean();
-  }
-
   pub fn object(&self) -> Repr {
     return self.0;
   }

@@ -105,6 +105,24 @@ impl<K: HashMapKey, V: HashMapValue> HashMap<K, V> {
   }
 
   #[inline]
+  pub fn copy_construct(context: impl ObjectRecordsInitializedContext, old_hash_map: Self) -> HashMap<K, V> {
+    let mut new_hash_map = Self::new(context);
+    new_hash_map.storage = InternalArray::<usize>::copy_construct(
+      context,
+      old_hash_map.storage.capacity(),
+      old_hash_map.storage.len(),
+      old_hash_map.storage.data(),
+    );
+    new_hash_map.ordered_storage = InternalArray::<HashMapEntry<K, V>>::copy_construct(
+      context,
+      old_hash_map.ordered_storage.capacity(),
+      old_hash_map.ordered_storage.len(),
+      old_hash_map.ordered_storage.data(),
+    );
+    return new_hash_map;
+  }
+
+  #[inline]
   pub fn insert(&mut self, context: impl ObjectRecordsInitializedContext, key: K, value: V) -> usize {
     let hash = self.hash(key);
     if self.load() > 0.8 {
@@ -189,6 +207,15 @@ impl<K: HashMapKey, V: HashMapValue> HashMap<K, V> {
       return Some((e.key, e.value));
     }
     return None;
+  }
+
+  pub fn update_entry_from_index(&self, index: usize, key: K, value: V) {
+    if index < self.ordered_storage.len() {
+      let mut e = self.ordered_storage[index];
+      if !e.is_null() && e.key == key {
+        e.value = value;
+      }
+    }
   }
 
   #[inline]
@@ -284,6 +311,19 @@ impl<K: HashMapKey, V: HashMapValue> IntoIterator for HashMap<K, V> {
       ordered_storage: self.ordered_storage,
       index: 0,
     };
+  }
+}
+
+impl<K: HashMapKey, V: HashMapValue> std::fmt::Debug for HashMap<K, V> {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    return write!(
+      f,
+      "HashMap<{}, {}> {{ len: {}, load: {} }}",
+      std::any::type_name::<K>(),
+      std::any::type_name::<V>(),
+      self.len(),
+      self.load()
+    );
   }
 }
 
