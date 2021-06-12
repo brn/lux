@@ -889,6 +889,20 @@ impl FullObjectRecord {
   }
 
   #[inline(always)]
+  pub fn find_transition(&mut self, property: Property) -> Option<FullObjectRecord> {
+    if self.transitions.is_null() {
+      return None;
+    }
+
+    for record in self.transitions.into_iter() {
+      if record.property() == property {
+        return Some(record.next_record());
+      }
+    }
+    return None;
+  }
+
+  #[inline(always)]
   pub fn transition_with_record(
     &mut self,
     context: impl ObjectRecordsInitializedContext,
@@ -1419,8 +1433,14 @@ impl FullObjectRecordTraistion {
     mut old_record: FullObjectRecord,
     property: Property,
   ) -> FullObjectRecord {
-    let new_record = FullObjectRecord::copy_fast(context, old_record);
-    return old_record.transition_with_record(context, property, new_record);
+    return match old_record.find_transition(property) {
+      Some(t) => t,
+      _ => {
+        let new_record = FullObjectRecord::copy_fast(context, old_record);
+        old_record.transition_with_record(context, property, new_record);
+        new_record
+      }
+    };
   }
 
   fn transition_properties_mode(
@@ -1440,8 +1460,14 @@ impl FullObjectRecordTraistion {
     property: Property,
     array: PropertyDescriptorArray,
   ) -> FullObjectRecord {
-    let new_record = FullObjectRecord::copy_external_array(context, old_record, array);
-    return old_record.transition_with_record(context, property, new_record);
+    return match old_record.find_transition(property) {
+      Some(t) => t,
+      _ => {
+        let new_record = FullObjectRecord::copy_external_array(context, old_record, array);
+        old_record.transition_with_record(context, property, new_record);
+        new_record
+      }
+    };
   }
 
   fn transition_external_hashmap_mode(
@@ -1450,8 +1476,14 @@ impl FullObjectRecordTraistion {
     property: Property,
     hash_map: PropertyDescriptorTable,
   ) -> FullObjectRecord {
-    let new_record = FullObjectRecord::copy_external_hashmap(context, old_record, hash_map);
-    return old_record.transition_with_record(context, property, new_record);
+    return match old_record.find_transition(property) {
+      Some(t) => t,
+      _ => {
+        let new_record = FullObjectRecord::copy_external_hashmap(context, old_record, hash_map);
+        old_record.transition_with_record(context, property, new_record);
+        new_record
+      }
+    };
   }
 
   fn transition_elements_mode(
@@ -1471,8 +1503,14 @@ impl FullObjectRecordTraistion {
     property: Property,
     array: PropertyDescriptorArray,
   ) -> FullObjectRecord {
-    let new_record = FullObjectRecord::copy_elements_array(context, old_record, array);
-    return old_record.transition_with_record(context, property, new_record);
+    return match old_record.find_transition(property) {
+      Some(t) => t,
+      _ => {
+        let new_record = FullObjectRecord::copy_elements_array(context, old_record, array);
+        old_record.transition_with_record(context, property, new_record);
+        new_record
+      }
+    };
   }
 
   fn transition_elements_hashmap_mode(
@@ -1481,8 +1519,14 @@ impl FullObjectRecordTraistion {
     property: Property,
     hash_map: PropertyDescriptorTable,
   ) -> FullObjectRecord {
-    let new_record = FullObjectRecord::copy_elements_hashmap(context, old_record, hash_map);
-    return old_record.transition_with_record(context, property, new_record);
+    return match old_record.find_transition(property) {
+      Some(t) => t,
+      _ => {
+        let new_record = FullObjectRecord::copy_elements_hashmap(context, old_record, hash_map);
+        old_record.transition_with_record(context, property, new_record);
+        new_record
+      }
+    };
   }
 }
 

@@ -40,5 +40,5 @@ pub use self::object_record::*;
 pub use self::object_records::*;
 pub use self::repr::{FromUnchecked, Repr};
 pub use self::shape::Shape;
-pub use self::string::{FixedU16CodePointArray, FlatString, JsString};
+pub use self::string::{FixedU16CodePointArray, FixedU16CodePointArrayItearator, FlatString, JsString};
 pub use self::util::*;

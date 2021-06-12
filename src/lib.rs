@@ -10,6 +10,9 @@ extern crate property;
 extern crate backtrace;
 
 #[macro_use]
+extern crate itertools;
+
+#[macro_use]
 mod debug;
 
 pub mod def;
@@ -28,3 +31,5 @@ pub mod unicode;
 pub mod context;
 
 pub mod heap;
+
+pub mod parser;

@@ -186,6 +186,12 @@ impl Property {
   }
 }
 
+impl std::cmp::PartialEq for Property {
+  fn eq(&self, a: &Property) -> bool {
+    return self.name() == a.name() && self.desc() == a.desc();
+  }
+}
+
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct FastOwnProperties(*mut Property);
