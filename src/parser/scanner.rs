@@ -1,6 +1,7 @@
 use super::super::structs::{FixedU16CodePointArray, FixedU16CodePointArrayIterator};
 use super::super::unicode::chars;
 use super::error_reporter::*;
+use super::parser_state::{ParserState, ParserStateStack};
 use super::source_position::SourcePosition;
 use crate::context::ObjectRecordsInitializedContext;
 use crate::utility::*;
@@ -14,13 +15,38 @@ use std::vec::Vec;
 #[derive(PartialEq, Eq)]
 pub enum Token {
   ArrowFunctionGlyph,
+  Await,
   BackQuote,
+  Break,
+  Case,
+  Catch,
+  Class,
   Colon,
   Comma,
+  Const,
+  Continue,
+  Debugger,
+  Default,
+  Delete,
+  Do,
+  Dot,
+  Else,
+  Enum,
+  Export,
+  Extends,
   False,
+  Finally,
+  For,
+  Function,
+  If,
+  Import,
+  In,
+  Instanceof,
   LeftBrace,
   LeftBracket,
   LeftParen,
+  New,
+  Null,
   OpAnd,
   OpAndAssign,
   OpAssign,
@@ -43,6 +69,8 @@ pub enum Token {
   OpMulAssign,
   OpNot,
   OpNotEq,
+  OpNullCoalescing,
+  OpOptionalChaining,
   OpOr,
   OpOrAssign,
   OpPlus,
@@ -61,26 +89,37 @@ pub enum Token {
   OpXor,
   OpXorAssign,
   Question,
+  Return,
   RightBrace,
   RightBracket,
   RightParen,
   Spread,
+  Super,
+  Switch,
   Terminate,
+  This,
+  Throw,
   True,
+  Try,
+  Typeof,
+  Var,
+  Void,
+  While,
+  With,
+  Yield,
   Identifier,
   NumericLiteral,
   StringLiteral,
   Template,
+  TemplateSubstitution,
   End,
   Invalid,
 }
 
-pub enum ScannerState {
+enum ScannerState {
   ImplicitOctal,
   HasLinebreakBefore,
   HasLinebreakAfter,
-  InTemplateLiteral,
-  RegexpExpected,
 }
 
 #[derive(Copy, Clone)]
@@ -90,6 +129,7 @@ pub struct IterVal {
 }
 
 const INVALID: u16 = 0xFFFF;
+const INVALID_CHAR: char = chars::ch(INVALID);
 impl IterVal {
   pub fn new(iter: Peekable<FixedU16CodePointArrayIterator>) -> IterVal {
     return IterVal { value: INVALID, iter };
@@ -105,7 +145,7 @@ impl IterVal {
   }
 
   pub fn as_char(&self) -> char {
-    return self.value as char;
+    return chars::ch(self.value);
   }
 }
 
@@ -132,9 +172,11 @@ pub struct Scanner<'a> {
   lookahead_literal_buffer: Vec<u16>,
   current_literal_buffer: &'a mut Vec<u16>,
 
-  state: Bitset<u8>,
-  lookahead_state: Bitset<u8>,
-  current_state: &'a mut Bitset<u8>,
+  scanner_state: Bitset<u8>,
+  lookahead_scanner_state: Bitset<u8>,
+  current_scanner_state: &'a mut Bitset<u8>,
+
+  parser_state_stack: &'a mut ParserStateStack,
 
   previous_position: SourcePosition,
   position: SourcePosition,
@@ -158,11 +200,12 @@ impl<'a> Scanner<'a> {
     context: impl ObjectRecordsInitializedContext,
     source: &str,
     error_reporter: &'a mut ErrorReporter,
+    parser_state_stack: &'a mut ParserStateStack,
   ) -> Pin<Box<Scanner<'a>>> {
     let source = FixedU16CodePointArray::from_utf8(context, source);
     let literal_buffer = Vec::<u16>::new();
     let position = SourcePosition::new();
-    let state = Bitset::<u8>::new();
+    let scanner_state = Bitset::<u8>::new();
     return Box::pin(Scanner {
       token: Token::Invalid,
       lookahead_token: Token::Invalid,
@@ -173,9 +216,11 @@ impl<'a> Scanner<'a> {
       lookahead_literal_buffer: Vec::<u16>::new(),
       current_literal_buffer: &mut literal_buffer,
 
-      state,
-      lookahead_state: Bitset::<u8>::new(),
-      current_state: &mut state,
+      scanner_state,
+      lookahead_scanner_state: Bitset::<u8>::new(),
+      current_scanner_state: &mut scanner_state,
+
+      parser_state_stack,
 
       previous_position: position,
       position,
@@ -206,8 +251,8 @@ impl<'a> Scanner<'a> {
   pub fn next(&'a mut self) -> Token {
     self.current_literal_buffer = &mut self.literal_buffer;
     self.current_position = &mut self.position;
-    self.current_state = &mut self.state;
-    if self.iter.peek().is_none() {
+    self.current_scanner_state = &mut self.scanner_state;
+    if self.has_more() {
       self.lookahead_position = self.position;
       self.lookahead_token = Token::End;
       return self.lookahead_token;
@@ -218,7 +263,7 @@ impl<'a> Scanner<'a> {
       self.lookahead_token = Token::Invalid;
       self.literal_buffer = self.lookahead_literal_buffer;
       self.position = self.lookahead_position;
-      self.state = self.lookahead_state;
+      self.scanner_state = self.lookahead_scanner_state;
       return self.token;
     }
     self.prologue();
@@ -230,8 +275,8 @@ impl<'a> Scanner<'a> {
   pub fn peek(&'a mut self) -> Token {
     self.current_literal_buffer = &mut self.lookahead_literal_buffer;
     self.current_position = &mut self.lookahead_position;
-    self.current_state = &mut self.lookahead_state;
-    if self.iter.peek().is_none() {
+    self.current_scanner_state = &mut self.lookahead_scanner_state;
+    if !self.has_more() {
       self.lookahead_position = self.position;
       self.lookahead_token = Token::End;
       return self.lookahead_token;
@@ -290,9 +335,24 @@ impl<'a> Scanner<'a> {
     return Ok(u);
   }
 
-  fn prologue(&mut self) {
+  fn decode_escape_sequence(&mut self) -> Result<u16, ()> {
+    self.advance();
+    let mut result = INVALID;
+    if chars::is_start_unicode_escape_sequence(*self.iter) {
+      self.advance();
+      return self.decode_hex_escape(4);
+    }
+
+    if chars::is_start_ascii_escape_sequence(*self.iter) {
+      self.advance();
+      return self.decode_ascii_escape();
+    }
+    return Err(());
+  }
+
+  fn prologue(&'a mut self) {
     self.current_position.set_start_col(self.current_position.end_col());
-    self.unset_flag(ScannerState::ImplicitOctal);
+    self.current_scanner_state = &mut self.scanner_state;
     self.unset_linebreak_before();
     loop {
       if self.skip_line_break() {
@@ -320,9 +380,9 @@ impl<'a> Scanner<'a> {
   }
 
   fn tokenize(&self) -> Token {
-    if self.get_flag(ScannerState::InTemplateLiteral) {
+    if self.parser_state_stack.is_in_state(ParserState::InTemplateLiteral) {
       return self.tokenize_template_literal_characters();
-    } else if self.get_flag(ScannerState::RegexpExpected) {
+    } else if self.parser_state_stack.is_in_state(ParserState::RegexpExpected) {
       return self.tokenize_regexp_characters();
     }
 
@@ -489,7 +549,313 @@ impl<'a> Scanner<'a> {
         }
         return OpOr;
       }
+      '&' => {
+        self.advance();
+        if self.iter.as_char() == '=' {
+          self.advance();
+          return OpAndAssign;
+        }
+        if self.iter.as_char() == '&' {
+          self.advance();
+          return OpLogicalAnd;
+        }
+        return OpAnd;
+      }
+      '~' => {
+        self.advance();
+        return OpTilde;
+      }
+      '^' => {
+        self.advance();
+        if self.iter.as_char() == '=' {
+          self.advance();
+          return OpXorAssign;
+        }
+        return OpXor;
+      }
+      '.' => {
+        self.advance();
+        if chars::is_decimal_digits(*self.iter) {
+          return self.tokenize_numeric_literal(true);
+        }
+        if self.iter.as_char() == '.' {
+          self.advance();
+          if self.iter.as_char() == '.' {
+            self.advance();
+            return Spread;
+          }
+          return Invalid;
+        }
+        return Dot;
+      }
+      '!' => {
+        self.advance();
+        if self.iter.as_char() == '=' {
+          self.advance();
+          if self.iter.as_char() == '=' {
+            self.advance();
+            return OpStrictNotEq;
+          }
+          return OpNotEq;
+        }
+        return OpNot;
+      }
+      chars::LT_CHAR | chars::PS_CHAR | ';' => {
+        self.advance();
+        return Terminate;
+      }
+      ':' => {
+        self.advance();
+        return Colon;
+      }
+      '?' => {
+        self.advance();
+        if self.iter.as_char() == '.' {
+          self.advance();
+          return OpOptionalChaining;
+        }
+        if self.iter.as_char() == '?' {
+          self.advance();
+          return OpNullCoalescing;
+        }
+        return Question;
+      }
+      '`' => {
+        self.advance();
+        self.parser_state_stack.push_state(ParserState::InTemplateLiteral);
+        return BackQuote;
+      }
+      '\'' | '"' => {
+        return self.tokenize_string_literal();
+      }
+      '$' => {
+        if self.parser_state_stack.is_in_state(ParserState::InTemplateLiteral) {
+          if let Some(peek) = self.iter.peek() {
+            if chars::ch(peek) == '{' {
+              self.advance();
+              return TemplateSubstitution;
+            }
+          }
+        }
+        return self.tokenize_identifier();
+      }
     }
+  }
+
+  fn tokenize_string_literal(&mut self) -> Token {
+    self.current_literal_buffer.clear();
+    let mut value = *self.iter;
+    let start = value;
+    self.advance();
+
+    let is_escaped = false;
+    while self.has_more() {
+      value = *self.iter;
+      match self.iter.as_char() {
+        '\\' => {
+          if !is_escaped {
+            if let Some(lookahead) = self.iter.peek() {
+              if chars::is_start_escape_sequence(lookahead) {
+                let mut ok = true;
+                if let Ok(ret) = self.decode_escape_sequence() {
+                  value = ret;
+                } else {
+                  report_syntax_error!(self, "Invalid unicode escape sequence found", Token::Invalid);
+                }
+              } else {
+                is_escaped = true;
+                self.advance();
+                break;
+              }
+            }
+          } else {
+            self.advance();
+          }
+          is_escaped = false;
+          self.current_literal_buffer.push(value);
+          break;
+        }
+        INVALID_CHAR => {
+          return Token::Invalid;
+        }
+        _ => {
+          if chars::is_cr_or_lf(*self.iter) {
+            if !is_escaped {
+              report_syntax_error!(self, "Unterminated string literal", Token::Invalid);
+            }
+            self.collect_line_break();
+            continue;
+          }
+          if value == start {
+            if !is_escaped {
+              self.advance();
+              return Token::StringLiteral;
+            }
+          }
+          if is_escaped {
+            is_escaped = false;
+          }
+          self.current_literal_buffer.push(value);
+          self.advance();
+        }
+      }
+    }
+    unreachable!();
+  }
+
+  fn tokenize_identifier(&mut self) -> Token {
+    self.current_literal_buffer.clear();
+    let mut value = *self.iter;
+    debug_assert!(chars::is_identifier_start(value));
+    while self.has_more() && chars::is_identifier_continue(value, false) {
+      if chars::ch(value) == '\\' {
+        let v = Vec::<u16>::new();
+        self.advance();
+        let unicode_keyword = *self.iter;
+        if chars::ch(unicode_keyword) == 'u' {
+          self.advance();
+          let mut ok = true;
+          if let Ok(u) = self.decode_hex_escape(4) {
+            value = u;
+          } else {
+            return Token::Invalid;
+          }
+        }
+      }
+      self.advance_and_push_buffer();
+      value = *self.iter;
+    }
+
+    return self.get_identifier_type();
+  }
+
+  fn get_identifier_type(&self) -> Token {
+    use Token::*;
+    let buf = self.current_literal_buffer;
+    if buf.len() == 0 {
+      return Token::Invalid;
+    }
+    if buf.len() < 2 || buf.len() >= 10 {
+      return Token::Identifier;
+    }
+
+    macro_rules! _keyword_unroll_check {
+      ($buf:expr, $keyword:expr, $token:tt) => {
+        {
+          let k = $keyword;
+          if $buf.len() == k.len() {
+            let b = k.as_bytes();
+            if $buf[1] as u8 == b[1] &&
+              (k.len() <= 2 || $buf[2] as u8 == b[2]) &&
+              (k.len() <= 3 || $buf[3] as u8 == b[3]) &&
+              (k.len() <= 4 || $buf[4] as u8 == b[4]) &&
+              (k.len() <= 5 || $buf[5] as u8 == b[5]) &&
+              (k.len() <= 6 || $buf[6] as u8 == b[6]) &&
+              (k.len() <= 7 || $buf[7] as u8 == b[7]) &&
+              (k.len() <= 8 || $buf[8] as u8 == b[8]) &&
+              (k.len() <= 9 || $buf[9] as u8 == b[9]) {
+                return $token;
+              }
+          }
+        }
+      };
+      ($buf:expr, $($group:tt => {$($keyword:tt : $token:tt,)+},)+) => {
+        match chars::ch($buf[0]) {
+          $(
+            $group => {
+              $(
+                _keyword_unroll_check!($buf, $keyword, $token);
+              )*
+            }
+          )*,
+          _ => {
+            return Identifier;
+          }
+        }
+      }
+    }
+
+    _keyword_unroll_check!(buf, 'a' => {
+      "await": Await,
+    }, 'b' => {
+      "break": Break,
+    }, 'c' => {
+      "case": Case,
+      "catch": Catch,
+      "class": Class,
+      "const": Const,
+      "continue": Continue,
+    }, 'd' => {
+      "debugger": Debugger,
+      "default": Default,
+      "delete": Delete,
+      "do": Do,
+    }, 'e' => {
+      "else": Else,
+      "export": Export,
+      "extends": Extends,
+    }, 'f' => {
+      "finally": Finally,
+      "for": For,
+      "function": Function,
+    }, 'i' => {
+      "if": If,
+      "import": Import,
+      "in": In,
+      "instanceof": Instanceof,
+    }, 'n' => {
+      "new": New,
+      "null": Null,
+    }, 'r' => {
+      "return": Return,
+    }, 's' => {
+      "super": Super,
+      "switch": Switch,
+    }, 't' => {
+      "this": This,
+      "throw": Throw,
+      "try": Try,
+      "typeof": Typeof,
+    }, 'v' => {
+      "var": Var,
+      "void": Void,
+    }, 'w' => {
+      "while": While,
+      "with": With,
+    }, 'y' => {
+      "yield": Yield,
+    },);
+
+    return Identifier;
+  }
+
+  fn tokenize_numeric_literal(&mut self, is_period_seen: bool) -> Token {
+    if is_period_seen {
+      return Token::NumericLiteral;
+    }
+    return Token::NumericLiteral;
+  }
+
+  fn tokenize_regexp_characters(&mut self) -> Token {
+    return Token::NumericLiteral;
+  }
+
+  fn tokenize_template_literal_characters(&mut self) -> Token {
+    return Token::NumericLiteral;
+  }
+
+  fn collect_line_break(&mut self) {
+    if chars::is_cr(*self.iter) {
+      self.advance_and_push_buffer();
+      if chars::is_lf(*self.iter) {
+        self.advance_and_push_buffer();
+      }
+    }
+  }
+
+  fn advance_and_push_buffer(&mut self) -> u16 {
+    self.current_literal_buffer.push(*self.iter);
+    return self.advance();
   }
 
   fn advance(&mut self) -> u16 {
@@ -524,7 +890,7 @@ impl<'a> Scanner<'a> {
   }
 
   fn skip_signleline_comment(&mut self) {
-    while self.iter.peek().is_some() {
+    while self.has_more() {
       if chars::is_cr(*self.iter) {
         self.advance();
         if chars::is_lf(*self.iter) {
@@ -556,6 +922,11 @@ impl<'a> Scanner<'a> {
   }
 
   #[inline(always)]
+  fn has_more(&self) -> bool {
+    return *self.iter != INVALID && !self.error_reporter.has_pending_error();
+  }
+
+  #[inline(always)]
   fn unset_linebreak_before(&mut self) {
     self.unset_flag(ScannerState::HasLinebreakBefore);
   }
@@ -577,16 +948,16 @@ impl<'a> Scanner<'a> {
 
   #[inline(always)]
   fn set_flag(&mut self, state: ScannerState) {
-    self.state.set(state as usize);
-  }
-
-  #[inline(always)]
-  fn get_flag(&mut self, state: ScannerState) -> bool {
-    return self.state.get(state as usize);
+    self.current_scanner_state.set(state as usize);
   }
 
   #[inline(always)]
   fn unset_flag(&mut self, state: ScannerState) {
-    self.state.set(state as usize);
+    self.current_scanner_state.set(state as usize);
+  }
+
+  #[inline(always)]
+  fn get_flag(&self, state: ScannerState) -> bool {
+    return self.current_scanner_state.get(state as usize);
   }
 }

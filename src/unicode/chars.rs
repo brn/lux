@@ -1,5 +1,9 @@
-const LF: u16 = 0x00A;
-const CR: u16 = 0x00D;
+pub const LF: u16 = 0x00A;
+pub const CR: u16 = 0x00D;
+pub const LT: u16 = 0x2028;
+pub const PS: u16 = 0x2029;
+pub const LT_CHAR: char = LT as char;
+pub const PS_CHAR: char = PS as char;
 
 #[inline(always)]
 pub fn is_decimal_digits(u: u16) -> bool {
@@ -57,6 +61,21 @@ pub fn is_cr_or_lf(u: u16) -> bool {
   return is_cr(u) || is_lf(u);
 }
 
+#[inline(always)]
+pub fn is_start_unicode_escape_sequence(u: u16) -> bool {
+  return ch(u) == 'u';
+}
+
+#[inline(always)]
+pub fn is_start_ascii_escape_sequence(u: u16) -> bool {
+  return ch(u) == 'x';
+}
+
+#[inline(always)]
+pub fn is_start_escape_sequence(u: u16) -> bool {
+  return is_start_ascii_escape_sequence(u) || is_start_unicode_escape_sequence(u);
+}
+
 // http://www.ecma-international.org/ecma-262/9.0/index.html#sec-runtime-semantics-wordcharacters-abstract-operation
 pub fn is_word_char(u: u16) -> bool {
   let c = ch(u);
@@ -83,7 +102,7 @@ pub fn is_whitespace(c: u16) -> bool {
 }
 
 #[inline(always)]
-pub fn ch(u: u16) -> char {
+pub const fn ch(u: u16) -> char {
   return u as u8 as char;
 }
 
