@@ -290,6 +290,7 @@ impl<T: Copy> InternalArray<T> {
   }
 }
 
+#[derive(Clone)]
 pub struct InternalArrayIterator<T: Copy> {
   array: InternalArray<T>,
   index: usize,

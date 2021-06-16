@@ -1,6 +1,6 @@
 use std::vec::Vec;
 
-#[derive(PartialEq, Eq)]
+#[derive(PartialEq, Eq, Copy, Clone)]
 pub enum ParserState {
   InTemplateLiteral,
   RegexpExpected,
@@ -14,8 +14,7 @@ pub struct ParserStateStack {
 
 impl ParserStateStack {
   pub fn new() -> ParserStateStack {
-    let state_count = Vec::<u32>::with_capacity(ParserState::_Sentinel as usize);
-    state_count.fill(0);
+    let mut state_count = vec![0; ParserState::_Sentinel as usize];
     return ParserStateStack {
       stack: Vec::<ParserState>::new(),
       state_count,

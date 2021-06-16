@@ -6,11 +6,13 @@ use std::vec::Vec;
 #[derive(Clone, Property)]
 pub struct ErrorDescriptor {
   ignore: bool,
-  #[property(get(type = "copy"))]
+  #[property(get(type = "ref"))]
   error_message: String,
-  #[property(get(type = "copy"))]
+  #[property(get(type = "ref"))]
   source_position: SourcePosition,
 }
+
+pub struct ErrorDescriptorMessageContainer<'a>(&'a mut String);
 
 impl ErrorDescriptor {
   pub fn new(source_position: &SourcePosition) -> Box<ErrorDescriptor> {
@@ -22,11 +24,35 @@ impl ErrorDescriptor {
   }
 }
 
-impl std::ops::Shl<&str> for Box<ErrorDescriptor> {
-  type Output = Box<ErrorDescriptor>;
+impl<'a> std::ops::Shl<&str> for &'a mut Box<ErrorDescriptor> {
+  type Output = ErrorDescriptorMessageContainer<'a>;
   fn shl(self, message: &str) -> Self::Output {
     self.error_message.push_str(message);
-    return self;
+    return ErrorDescriptorMessageContainer::<'a>(&mut self.error_message);
+  }
+}
+
+impl<'a> std::ops::Shl<String> for &'a mut Box<ErrorDescriptor> {
+  type Output = ErrorDescriptorMessageContainer<'a>;
+  fn shl(self, message: String) -> Self::Output {
+    self.error_message.push_str(&message);
+    return ErrorDescriptorMessageContainer::<'a>(&mut self.error_message);
+  }
+}
+
+impl<'a> std::ops::Shl<&str> for ErrorDescriptorMessageContainer<'a> {
+  type Output = ErrorDescriptorMessageContainer<'a>;
+  fn shl(self, message: &str) -> Self::Output {
+    self.0.push_str(message);
+    return ErrorDescriptorMessageContainer::<'a>(self.0);
+  }
+}
+
+impl<'a> std::ops::Shl<String> for ErrorDescriptorMessageContainer<'a> {
+  type Output = ErrorDescriptorMessageContainer<'a>;
+  fn shl(self, message: String) -> Self::Output {
+    self.0.push_str(&message);
+    return ErrorDescriptorMessageContainer::<'a>(self.0);
   }
 }
 
@@ -41,10 +67,9 @@ impl ErrorReporter {
     };
   }
 
-  pub fn report_syntax_error(&mut self, ed: Box<ErrorDescriptor>) -> Box<ErrorDescriptor> {
-    ed << "SyntaxError: ";
+  pub fn report_syntax_error(&mut self, ed: Box<ErrorDescriptor>) -> &mut Box<ErrorDescriptor> {
     self.pending_errors.push(ed);
-    return ed;
+    return self.pending_errors.last_mut().unwrap();
   }
 
   pub fn print_errors(&self) {
@@ -59,7 +84,7 @@ impl ErrorReporter {
     return self.pending_errors.len() > 0;
   }
 
-  pub fn last_error(&self) -> Option<String> {
+  pub fn last_error(&self) -> Option<&String> {
     if self.has_pending_error() {
       return Some(self.pending_errors.last().unwrap().error_message());
     }
@@ -70,25 +95,38 @@ impl ErrorReporter {
 pub trait ReportSyntaxError {
   fn error_reporter(&mut self) -> &mut ErrorReporter;
 
-  fn report_syntax_error(&mut self, ed: Box<ErrorDescriptor>) -> Box<ErrorDescriptor> {
+  fn source_position(&self) -> &SourcePosition;
+
+  fn report_syntax_error(&mut self, ed: Box<ErrorDescriptor>) -> &mut Box<ErrorDescriptor> {
     return self.error_reporter().report_syntax_error(ed);
   }
 }
 
 macro_rules! _base_report_syntax_error {
   ($parser:tt) => {{
-    let e = ErrorDescriptor::new($parser.position());
-    parser.report_syntax_error(e)
+    let e = ErrorDescriptor::new($parser.source_position());
+    $parser.report_syntax_error(e)
   }};
 }
 
 #[cfg(debug_assertions)]
 macro_rules! report_syntax_error {
   (noreturn $parser:tt, $message:expr) => {
-    _base_report_syntax_error!($parser) << "[Debug] line: " << line!() << "\n" << $message
+    _base_report_syntax_error!($parser) << "[Debug] line: " << line!().to_string() << "\n" << $message
   };
   ($parser:tt, $message:expr, $return_value:expr) => {
-    report_scanner_error!(noreturn $parser, $message);
+    report_syntax_error!(noreturn $parser, $message);
+    return $return_value;
+  };
+}
+
+#[cfg(not(debug_assertions))]
+macro_rules! report_syntax_error {
+  (noreturn $parser:tt, $message:expr) => {
+    _base_report_syntax_error!($parser) << $message
+  };
+  ($parser:tt, $message:expr, $return_value:expr) => {
+    report_syntax_error!(noreturn $parser, $message);
     return $return_value;
   };
 }

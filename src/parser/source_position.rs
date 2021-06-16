@@ -57,6 +57,10 @@ impl SourcePosition {
   pub fn inc_end_col(&mut self) {
     self.end_col += 1;
   }
+
+  pub fn inc_end_line_number(&mut self) {
+    self.end_line_number += 1;
+  }
 }
 
 impl Debug for SourcePosition {

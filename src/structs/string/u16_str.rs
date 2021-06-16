@@ -4,7 +4,7 @@ use crate::context::{AllocationOnlyContext, ObjectRecordsInitializedContext};
 use std::hash::Hash;
 
 pub type FixedU16CodePointArray = InternalArray<u16>;
-pub type FixedU16CodePointArrayItearator = InternalArrayIterator<u16>;
+pub type FixedU16CodePointArrayIterator = InternalArrayIterator<u16>;
 
 pub fn from_utf8(context: impl ObjectRecordsInitializedContext, str: &str) -> FixedU16CodePointArray {
   let u16_vec = str.encode_utf16().collect::<Vec<_>>();
