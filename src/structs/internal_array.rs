@@ -268,6 +268,10 @@ impl<T: Copy> InternalArray<T> {
     };
   }
 
+  pub fn iter<'a>(&'a self) -> RefInternalArrayIterator<'a, T> {
+    return RefInternalArrayIterator::<'a, T> { array: self, index: 0 };
+  }
+
   fn offset(&self, offset: usize) -> *mut T {
     return unsafe { self.data().offset(offset as isize) };
   }
@@ -287,6 +291,24 @@ impl<T: Copy> InternalArray<T> {
     array.capacity = capacity;
     array.length = 0;
     return array;
+  }
+}
+
+#[derive(Clone)]
+pub struct RefInternalArrayIterator<'a, T: Copy> {
+  array: &'a InternalArray<T>,
+  index: usize,
+}
+
+impl<'a, T: Copy> Iterator for RefInternalArrayIterator<'a, T> {
+  type Item = &'a T;
+  fn next(&mut self) -> Option<Self::Item> {
+    if self.index >= self.array.length() {
+      return None;
+    }
+    let result = self.array.at(self.index);
+    self.index += 1;
+    return Some(result);
   }
 }
 

@@ -112,9 +112,11 @@ macro_rules! _base_report_syntax_error {
 #[cfg(debug_assertions)]
 macro_rules! report_syntax_error {
   (noreturn $parser:tt, $message:expr) => {
+    debug_log!("===SYNTAX ERROR FOUND===");
     _base_report_syntax_error!($parser) << "[Debug] line: " << line!().to_string() << "\n" << $message
   };
   ($parser:tt, $message:expr, $return_value:expr) => {
+    debug_log!("===SYNTAX ERROR FOUND===");
     report_syntax_error!(noreturn $parser, $message);
     return $return_value;
   };

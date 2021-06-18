@@ -26,6 +26,7 @@ criterion = {varsion = "0.3", features = ["html_reports"]}
 [features]
 default = []
 nogc = []
+debug = []
 
 [[bench]]
 name = "hashmap_benchmark"

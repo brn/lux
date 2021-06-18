@@ -13,7 +13,7 @@ use std::pin::Pin;
 use std::vec::Vec;
 
 macro_rules! token_enum {
-  ($name:ident { $(($item:ident, $pseudo:tt, $state_affected:tt, $repr:expr),)* }) => {
+  ($name:ident { $(($item:ident, $pseudo:tt, $repr:expr),)* }) => {
     #[derive(PartialEq, Eq, Copy, Clone, Debug)]
     pub enum $name {
       $(
@@ -22,14 +22,6 @@ macro_rules! token_enum {
     }
 
     impl $name {
-      pub fn is_state_affected(&self) -> bool {
-        match self {
-          $(
-            &$name::$item => $state_affected,
-          )*
-        }
-      }
-
       pub fn is_pseudo_token(&self) -> bool {
         match self {
           $(
@@ -56,108 +48,109 @@ macro_rules! token_enum {
 
 token_enum! {
   Token {
-    (Invalid,              true,  false, ""),
-    (ArrowFunctionGlyph,   false, false, "=>"),
-    (Await,                false, false, "await"),
-    (BackQuote,            false, true,  "`"),
-    (Break,                false, false, "break"),
-    (Case,                 false, false, "case"),
-    (Catch,                false, false, "catch"),
-    (Class,                false, false, "class"),
-    (Colon,                false, false, ":"),
-    (Comma,                false, false, ","),
-    (Const,                false, false, "const"),
-    (Continue,             false, false, "continue"),
-    (Debugger,             false, false, "debugger"),
-    (Default,              false, false, "default"),
-    (Delete,               false, false, "delete"),
-    (Do,                   false, false, "do"),
-    (Dot,                  false, false, "."),
-    (Else,                 false, false, "else"),
-    (Enum,                 false, false, "enum"),
-    (Export,               false, false, "export"),
-    (Extends,              false, false, "extends"),
-    (False,                false, false, "false"),
-    (Finally,              false, false, "finally"),
-    (For,                  false, false, "for"),
-    (Function,             false, false, "function"),
-    (If,                   false, false, "if"),
-    (Import,               false, false, "import"),
-    (In,                   false, false, "in"),
-    (Instanceof,           false, false, "instanceof"),
-    (LeftBrace,            false, false, "{"),
-    (LeftBracket,          false, false, "["),
-    (LeftParen,            false, false, "("),
-    (New,                  false, false, "new"),
-    (Null,                 false, false, "null"),
-    (OpAnd,                false, false, "&"),
-    (OpAndAssign,          false, false, "&="),
-    (OpAssign,             false, false, "="),
-    (OpDecrement,          false, false, "--"),
-    (OpDiv,                false, false, "/"),
-    (OpDivAssign,          false, false, "/="),
-    (OpEq,                 false, false, "=="),
-    (OpGreaterThan,        false, false, ">"),
-    (OpGreaterThanOrEq,    false, false, ">="),
-    (OpIncrement,          false, false, "++"),
-    (OpLessThan,           false, false, "<"),
-    (OpLessThanOrEq,       false, false, "<="),
-    (OpLogicalAnd,         false, false, "&&"),
-    (OpLogicalOr,          false, false, "||"),
-    (OpMinus,              false, false, "-"),
-    (OpMinusAssign,        false, false, "-="),
-    (OpMod,                false, false, "%"),
-    (OpModAssign,          false, false, "%="),
-    (OpMul,                false, false, "*"),
-    (OpMulAssign,          false, false, "*="),
-    (OpNot,                false, false, "!"),
-    (OpNotEq,              false, false, "!="),
-    (OpNullCoalescing,     false, false, "??"),
-    (OpOptionalChaining,   false, false, "?."),
-    (OpOr,                 false, false, "|"),
-    (OpOrAssign,           false, false, "|="),
-    (OpPlus,               false, false, "+"),
-    (OpPlusAssign,         false, false, "+="),
-    (OpPow,                false, false, "**"),
-    (OpPowAssign,          false, false, "**="),
-    (OpShl,                false, false, "<<"),
-    (OpShlAssign,          false, false, "<<="),
-    (OpShr,                false, false, ">>"),
-    (OpShrAssign,          false, false, ">>="),
-    (OpStrictEq,           false, false, "==="),
-    (OpStrictNotEq,        false, false, "!=="),
-    (OpTilde,              false, false, "~"),
-    (OpUShr,               false, false, ">>>"),
-    (OpUShrAssign,         false, false, ">>>="),
-    (OpXor,                false, false, "^"),
-    (OpXorAssign,          false, false, "^="),
-    (Question,             false, false, "?"),
-    (RegExp,               true,  false, "$RegExp"),
-    (Return,               false, false, "return"),
-    (RightBrace,           false, false, "}"),
-    (RightBracket,         false, false, "]"),
-    (RightParen,           false, false, ")"),
-    (Spread,               false, false, "..."),
-    (Super,                false, false, "super"),
-    (Switch,               false, false, "switch"),
-    (Terminate,            false, false, ";"),
-    (This,                 false, false, "this"),
-    (Throw,                false, false, "throw"),
-    (True,                 false, false, "true"),
-    (Try,                  false, false, "try"),
-    (Typeof,               false, false, "typeof"),
-    (Var,                  false, false, "var"),
-    (Void,                 false, false, "void"),
-    (While,                false, false, "while"),
-    (With,                 false, false, "with"),
-    (Yield,                false, false, "yield"),
-    (Identifier,           true,  false, "$Identifier"),
-    (NumericLiteral,       true,  false, "$NumericLiteral"),
-    (StringLiteral,        true,  false, "$StringLiteral"),
-    (Template,             true,  false, "$Template"),
-    (TemplateParts,        true,  false, "$TemplateParts"),
-    (TemplateSubstitution, true,  false, "$TemplateSubstitution"),
-    (End,                  true,  false, "$End"),
+    (Invalid,              true,  ""),
+    (ArrowFunctionGlyph,   false, "=>"),
+    (Await,                false, "await"),
+    (BackQuote,            false, "`"),
+    (Break,                false, "break"),
+    (Case,                 false, "case"),
+    (Catch,                false, "catch"),
+    (Class,                false, "class"),
+    (Colon,                false, ":"),
+    (Comma,                false, ","),
+    (Const,                false, "const"),
+    (Continue,             false, "continue"),
+    (Debugger,             false, "debugger"),
+    (Default,              false, "default"),
+    (Delete,               false, "delete"),
+    (Do,                   false, "do"),
+    (Dot,                  false, "."),
+    (Else,                 false, "else"),
+    (Enum,                 false, "enum"),
+    (Export,               false, "export"),
+    (Extends,              false, "extends"),
+    (False,                false, "false"),
+    (Finally,              false, "finally"),
+    (For,                  false, "for"),
+    (Function,             false, "function"),
+    (If,                   false, "if"),
+    (Import,               false, "import"),
+    (In,                   false, "in"),
+    (Instanceof,           false, "instanceof"),
+    (LeftBrace,            false, "{"),
+    (LeftBracket,          false, "["),
+    (LeftParen,            false, "("),
+    (New,                  false, "new"),
+    (Null,                 false, "null"),
+    (OpAnd,                false, "&"),
+    (OpAndAssign,          false, "&="),
+    (OpAssign,             false, "="),
+    (OpDecrement,          false, "--"),
+    (OpDiv,                false, "/"),
+    (OpDivAssign,          false, "/="),
+    (OpEq,                 false, "=="),
+    (OpGreaterThan,        false, ">"),
+    (OpGreaterThanOrEq,    false, ">="),
+    (OpIncrement,          false, "++"),
+    (OpLessThan,           false, "<"),
+    (OpLessThanOrEq,       false, "<="),
+    (OpLogicalAnd,         false, "&&"),
+    (OpLogicalOr,          false, "||"),
+    (OpMinus,              false, "-"),
+    (OpMinusAssign,        false, "-="),
+    (OpMod,                false, "%"),
+    (OpModAssign,          false, "%="),
+    (OpMul,                false, "*"),
+    (OpMulAssign,          false, "*="),
+    (OpNot,                false, "!"),
+    (OpNotEq,              false, "!="),
+    (OpNullCoalescing,     false, "??"),
+    (OpOptionalChaining,   false, "?."),
+    (OpOr,                 false, "|"),
+    (OpOrAssign,           false, "|="),
+    (OpPlus,               false, "+"),
+    (OpPlusAssign,         false, "+="),
+    (OpPow,                false, "**"),
+    (OpPowAssign,          false, "**="),
+    (OpShl,                false, "<<"),
+    (OpShlAssign,          false, "<<="),
+    (OpShr,                false, ">>"),
+    (OpShrAssign,          false, ">>="),
+    (OpStrictEq,           false, "==="),
+    (OpStrictNotEq,        false, "!=="),
+    (OpTilde,              false, "~"),
+    (OpUShr,               false, ">>>"),
+    (OpUShrAssign,         false, ">>>="),
+    (OpXor,                false, "^"),
+    (OpXorAssign,          false, "^="),
+    (Question,             false, "?"),
+    (RegExp,               true,  "$RegExp"),
+    (Return,               false, "return"),
+    (RightBrace,           false, "}"),
+    (RightBracket,         false, "]"),
+    (RightParen,           false, ")"),
+    (Spread,               false, "..."),
+    (Super,                false, "super"),
+    (Switch,               false, "switch"),
+    (Terminate,            false, ";"),
+    (This,                 false, "this"),
+    (Throw,                false, "throw"),
+    (True,                 false, "true"),
+    (Try,                  false, "try"),
+    (Typeof,               false, "typeof"),
+    (Var,                  false, "var"),
+    (Void,                 false, "void"),
+    (While,                false, "while"),
+    (With,                 false, "with"),
+    (Yield,                false, "yield"),
+    (Identifier,           true,  "$Identifier"),
+    (NumericLiteral,       true,  "$NumericLiteral"),
+    (ImplicitOctalLiteral, true,  "$ImplicitOctalLiteral"),
+    (StringLiteral,        true,  "$StringLiteral"),
+    (Template,             true,  "$Template"),
+    (TemplateParts,        true,  "$TemplateParts"),
+    (TemplateSubstitution, true,  "$TemplateSubstitution"),
+    (End,                  true,  "$End"),
   }
 }
 
@@ -180,6 +173,13 @@ impl Uc32 {
     return Uc32 {
       code: code as u32,
       is_surrogate_pair: false,
+    };
+  }
+
+  fn from_u32(code: u32) -> Uc32 {
+    return Uc32 {
+      code,
+      is_surrogate_pair: chars::is_surrogate_pair(code as u16),
     };
   }
 
@@ -218,13 +218,16 @@ impl IterVal {
     return Uc32::new(self.value);
   }
 
-  fn next(&mut self) -> u16 {
+  fn next(&mut self) -> &u16 {
     self.value = self.iter.next().unwrap_or(INVALID);
-    return self.value;
+    return &self.value;
   }
 
   fn peek(&mut self) -> Option<&u16> {
-    return self.iter.peek();
+    return match self.iter.peek() {
+      Some(a) => Some(a),
+      _ => None,
+    };
   }
 
   fn as_char(&self) -> char {
@@ -257,16 +260,18 @@ pub struct Scanner<'a> {
   iter: IterVal,
   source: FixedU16CodePointArray,
 
+  numeric_value: [f64; 2],
+
   literal_buffer: [Vec<u16>; 2],
 
   scanner_state: [Bitset<u8>; 2],
 
-  parser_state_stack: &'a mut ParserStateStack,
+  parser_state_stack: &'a ParserStateStack,
 
   previous_position: SourcePosition,
   position: [SourcePosition; 2],
 
-  error_reporter: &'a mut ErrorReporter,
+  error_reporter: ErrorReporter,
 
   mode: Mode,
 
@@ -275,7 +280,7 @@ pub struct Scanner<'a> {
 
 impl<'a> ReportSyntaxError for Scanner<'a> {
   fn error_reporter(&mut self) -> &mut ErrorReporter {
-    return self.error_reporter;
+    return &mut self.error_reporter;
   }
 
   fn source_position(&self) -> &SourcePosition {
@@ -287,26 +292,27 @@ impl<'a> Scanner<'a> {
   pub fn new(
     context: impl ObjectRecordsInitializedContext,
     source: &str,
-    error_reporter: &'a mut ErrorReporter,
-    parser_state_stack: &'a mut ParserStateStack,
+    parser_state_stack: &'a ParserStateStack,
   ) -> Scanner<'a> {
-    let source = FixedU16CodePointArray::from_utf8(context, source);
+    let u16_source = FixedU16CodePointArray::from_utf8(context, source);
     let mut sc = Scanner::<'a> {
       token: Token::Invalid,
       lookahead_token: Token::Invalid,
-      source,
-      iter: IterVal::new(source.into_iter().peekable()),
+      source: u16_source,
+      iter: IterVal::new(u16_source.into_iter().peekable().clone()),
 
       literal_buffer: [Vec::<u16>::new(), Vec::<u16>::new()],
 
       scanner_state: [Bitset::<u8>::new(), Bitset::<u8>::new()],
+
+      numeric_value: [0.0_f64, 0.0_f64],
 
       parser_state_stack,
 
       previous_position: SourcePosition::new(),
       position: [SourcePosition::new(), SourcePosition::new()],
 
-      error_reporter,
+      error_reporter: ErrorReporter::new(),
 
       mode: Mode::Current,
 
@@ -349,7 +355,8 @@ impl<'a> Scanner<'a> {
     }
 
     self.prologue();
-    self.token = self.tokenize();
+    let token = self.tokenize();
+    self.token = token;
     self.epilogue();
     return self.token;
   }
@@ -371,10 +378,6 @@ impl<'a> Scanner<'a> {
     return self.lookahead_token;
   }
 
-  fn as_mut(self: Pin<&'a mut Self>) -> &'a mut Scanner {
-    return unsafe { self.get_unchecked_mut() };
-  }
-
   fn is_succeeding(&mut self, value: u16) -> bool {
     if let Some(next) = self.iter.peek() {
       return *next == value;
@@ -382,25 +385,28 @@ impl<'a> Scanner<'a> {
     return false;
   }
 
-  fn decode_hex_escape(&mut self, len: u32) -> Result<u16, ()> {
+  fn decode_hex_escape(&mut self, len: u32) -> Result<u32, ()> {
     let unicode_hex_start = self.iter.as_char();
-    let mut ret: u16 = 0;
+    let mut ret: u32 = 0;
     if unicode_hex_start == '{' {
       self.advance();
-      while self.iter.as_char() == '}' {
-        ret = ret * 16 + chars::to_hex(*self.iter) as u16;
+      while self.iter.as_char() != '}' && *self.iter != INVALID {
+        if let Ok(hex) = chars::to_hex(*self.iter) {
+          ret = ret * 16 + hex;
+        } else {
+          report_syntax_error!(self, "Unrecognized hex token", Err(()));
+        }
         self.advance();
       }
-
       if self.iter.as_char() != '}' {
         report_syntax_error!(noreturn self, "'}' expected");
       } else {
         self.advance();
       }
     } else {
-      for i in 0..len {
-        if chars::is_hex_digits(*self.iter) {
-          ret = ret * 16 + chars::to_hex(*self.iter) as u16;
+      for _ in 0..len {
+        if let Ok(hex) = chars::to_hex(*self.iter) {
+          ret = ret * 16 + hex;
         } else {
           report_syntax_error!(self, "Unrecognized hex token", Err(()));
         }
@@ -416,10 +422,10 @@ impl<'a> Scanner<'a> {
     if u > 127 {
       return Err(());
     }
-    return Ok(u);
+    return Ok(u as u16);
   }
 
-  fn decode_escape_sequence(&mut self) -> Result<u16, ()> {
+  fn decode_escape_sequence(&mut self) -> Result<u32, ()> {
     self.advance();
 
     if chars::is_start_unicode_escape_sequence(*self.iter) {
@@ -429,7 +435,10 @@ impl<'a> Scanner<'a> {
 
     if chars::is_start_ascii_escape_sequence(*self.iter) {
       self.advance();
-      return self.decode_ascii_escape();
+      return match self.decode_ascii_escape() {
+        Ok(u) => Ok(u as u32),
+        _ => Err(()),
+      };
     }
     return Err(());
   }
@@ -465,7 +474,7 @@ impl<'a> Scanner<'a> {
   }
 
   #[inline(always)]
-  fn current_position(&self) -> &SourcePosition {
+  pub fn current_position(&self) -> &SourcePosition {
     return &self.position[self.mode as usize];
   }
 
@@ -475,13 +484,23 @@ impl<'a> Scanner<'a> {
   }
 
   #[inline(always)]
-  fn current_literal_buffer(&self) -> &Vec<u16> {
+  pub fn current_literal_buffer(&self) -> &Vec<u16> {
     return &self.literal_buffer[self.mode as usize];
   }
 
   #[inline(always)]
   fn current_literal_buffer_mut(&mut self) -> &mut Vec<u16> {
     return &mut self.literal_buffer[self.mode as usize];
+  }
+
+  #[inline(always)]
+  pub fn current_numeric_value(&self) -> f64 {
+    return self.numeric_value[self.mode as usize];
+  }
+
+  #[inline(always)]
+  pub fn set_current_numeric_value(&mut self, value: f64) {
+    self.numeric_value[self.mode as usize] = value;
   }
 
   #[inline(always)]
@@ -747,7 +766,6 @@ impl<'a> Scanner<'a> {
       }
       '`' => {
         self.advance();
-        self.parser_state_stack.push_state(ParserState::InTemplateLiteral);
         return BackQuote;
       }
       '\'' | '"' => {
@@ -791,25 +809,31 @@ impl<'a> Scanner<'a> {
             if let Some(lookahead) = self.iter.peek() {
               if chars::is_start_escape_sequence(*lookahead) {
                 if let Ok(ret) = self.decode_escape_sequence() {
-                  value = ret;
+                  if let Ok((hi, low)) = chars::uc32_to_uc16(ret) {
+                    self.current_literal_buffer_mut().push(hi);
+                    if low != 0 {
+                      self.current_literal_buffer_mut().push(low);
+                    }
+                  } else {
+                    report_syntax_error!(self, "Invalid unicode escape sequence found", Token::Invalid);
+                  }
                 } else {
                   report_syntax_error!(self, "Invalid unicode escape sequence found", Token::Invalid);
                 }
               } else {
                 is_escaped = true;
-                self.advance();
-                break;
+                self.advance_and_push_buffer();
               }
+            } else {
+              report_syntax_error!(self, "Unterminated string literal", Token::Invalid);
             }
           } else {
-            self.advance();
+            self.advance_and_push_buffer();
+            is_escaped = false;
           }
-          is_escaped = false;
-          self.current_literal_buffer_mut().push(value);
-          break;
         }
         INVALID_CHAR => {
-          return Token::Invalid;
+          report_syntax_error!(self, "Unexpected token found", Token::Invalid);
         }
         _ => {
           if chars::is_cr_or_lf(*self.iter) {
@@ -833,7 +857,7 @@ impl<'a> Scanner<'a> {
         }
       }
     }
-    unreachable!();
+    report_syntax_error!(self, "Unterminated string literal", Token::Invalid);
   }
 
   fn tokenize_identifier(&mut self) -> Token {
@@ -847,24 +871,39 @@ impl<'a> Scanner<'a> {
         if !unicode_keyword.is_surrogate_pair() && chars::ch(unicode_keyword.code() as u16) == 'u' {
           self.advance();
           if let Ok(u) = self.decode_hex_escape(4) {
-            value = Uc32::new(u);
+            if !chars::is_identifier_continue(u, false) {
+              self.current_literal_buffer_mut().clear();
+              report_syntax_error!(self, "Invalid unicode escape sequence", Token::Invalid);
+            }
+            if let Ok((hi, low)) = chars::uc32_to_uc16(u) {
+              self.current_literal_buffer_mut().push(hi);
+              if low != 0 {
+                self.current_literal_buffer_mut().push(low);
+              }
+            } else {
+              report_syntax_error!(self, "Invalid unicode escape sequence", Token::Invalid);
+            }
           } else {
-            return Token::Invalid;
+            self.current_literal_buffer_mut().clear();
+            report_syntax_error!(self, "Invalid unicode escape sequence", Token::Invalid);
           }
+        } else {
+          self.advance_and_push_buffer();
         }
+      } else {
+        self.advance_and_push_buffer();
       }
-      self.advance_and_push_buffer();
       value = self.iter.uc32();
     }
 
     return self.get_identifier_type();
   }
 
-  fn get_identifier_type(&self) -> Token {
+  fn get_identifier_type(&mut self) -> Token {
     use Token::*;
     let buf = self.current_literal_buffer();
     if buf.len() == 0 {
-      return Token::Invalid;
+      report_syntax_error!(self, "Unexpected end of input", Token::Invalid);
     }
     if buf.len() < 2 || buf.len() > 10 {
       return Token::Identifier;
@@ -965,115 +1004,16 @@ impl<'a> Scanner<'a> {
 
   fn tokenize_numeric_literal(&mut self, is_period_seen: bool) -> Token {
     self.current_literal_buffer_mut().clear();
-    let mut value = *self.iter;
-    debug_assert!(chars::is_decimal_digits(value));
-    let mut leading_zeros = false;
-
-    #[derive(PartialEq)]
-    enum Kind {
-      Decimal,
-      DecimalLeadingZero,
-      Hex,
-      Binary,
-      Octal,
-      ImplicitOctal,
-    }
-    let mut kind = Kind::Decimal;
-
-    if is_period_seen {
-      self.current_literal_buffer_mut().push('.' as u8 as u16);
-      while chars::is_decimal_digits(*self.iter) {
-        self.advance_and_push_buffer();
+    let result = chars::parse_numeric_value(self.iter.iter.by_ref(), is_period_seen);
+    if let Ok((value, kind)) = result {
+      self.set_current_numeric_value(value);
+      if kind == chars::NumericValueKind::ImplicitOctal {
+        return Token::ImplicitOctalLiteral;
       }
       return Token::NumericLiteral;
-    } else if chars::ch(value) == '0' {
-      self.advance_and_push_buffer();
-      leading_zeros = true;
-      if self.iter.as_char() == 'x' {
-        self.advance_and_push_buffer();
-        kind = Kind::Hex;
-      }
-      if !chars::is_hex_digits(*self.iter) {
-        report_syntax_error!(self, "Expected hex digit.", Token::Invalid);
-      }
-      while chars::is_hex_digits(*self.iter) {
-        self.advance_and_push_buffer();
-      }
-      return Token::NumericLiteral;
-    } else if chars::ch(value) == 'b' {
-      kind = Kind::Binary;
-      self.advance_and_push_buffer();
-      if !chars::is_binary_digits(*self.iter) {
-        report_syntax_error!(self, "Expected binary digit.", Token::Invalid);
-      }
-      while chars::is_binary_digits(*self.iter) {
-        self.advance_and_push_buffer();
-      }
-      return Token::NumericLiteral;
-    } else if chars::ch(value) == 'o' {
-      kind = Kind::Octal;
-      self.advance_and_push_buffer();
-      if !chars::is_octal_digits(*self.iter) {
-        report_syntax_error!(self, "Expected octal digit.", Token::Invalid);
-      }
-      while chars::is_octal_digits(*self.iter) {
-        self.advance_and_push_buffer();
-      }
-      return Token::NumericLiteral;
-    } else if chars::ch(value) >= '0' && chars::ch(value) <= '7' {
-      kind = Kind::ImplicitOctal;
-      self.set_flag(ScannerState::ImplicitOctal);
-      while chars::is_octal_digits(*self.iter) {
-        self.advance_and_push_buffer();
-      }
-    } else if chars::ch(value) == '8' && chars::ch(value) == '9' {
-      kind = Kind::DecimalLeadingZero;
-      while chars::is_decimal_digits(*self.iter) {
-        self.advance_and_push_buffer();
-      }
     }
-
-    if kind == Kind::ImplicitOctal {
-      if chars::is_decimal_digits(*self.iter) && chars::ch(*self.iter) > '7' {
-        self.unset_flag(ScannerState::ImplicitOctal);
-        while chars::is_decimal_digits(*self.iter) {
-          self.advance_and_push_buffer();
-        }
-        kind = Kind::DecimalLeadingZero;
-      }
-    }
-
-    if chars::ch(*self.iter) == '.' && !is_period_seen {
-      if kind == Kind::Decimal && kind != Kind::DecimalLeadingZero {
-        report_syntax_error!(self, "Unexpected token.", Token::Invalid);
-      }
-      self.advance_and_push_buffer();
-    }
-
-    while chars::is_decimal_digits(*self.iter) {
-      self.advance_and_push_buffer();
-    }
-
-    if chars::ch(*self.iter) == 'e' || chars::ch(*self.iter) == 'E' {
-      if kind != Kind::Decimal && kind != Kind::DecimalLeadingZero {
-        report_syntax_error!(self, "Unexpected token.", Token::Invalid);
-      }
-      self.advance_and_push_buffer();
-      if chars::ch(*self.iter) == '+' || chars::ch(*self.iter) == '-' {
-        self.advance_and_push_buffer();
-        if !chars::is_decimal_digits(*self.iter) {
-          report_syntax_error!(self, "Expected exponent digit.", Token::Invalid);
-        }
-      }
-      if chars::is_decimal_digits(*self.iter) {
-        report_syntax_error!(self, "Expected exponent digit.", Token::Invalid);
-      }
-      while chars::is_decimal_digits(*self.iter) {
-        self.advance_and_push_buffer();
-      }
-    }
-
-    return Token::NumericLiteral;
+    let err = result.unwrap_err();
+    report_syntax_error!(self, err, Token::Invalid);
   }
 
   fn tokenize_regexp_characters(&mut self) -> Token {
@@ -1114,20 +1054,27 @@ impl<'a> Scanner<'a> {
             if let Some(lookahead) = self.iter.peek() {
               if chars::is_start_escape_sequence(*lookahead) {
                 if let Ok(ret) = self.decode_hex_escape(4) {
-                  value = ret;
+                  if let Ok((hi, low)) = chars::uc32_to_uc16(ret) {
+                    self.current_literal_buffer_mut().push(hi);
+                    if low != 0 {
+                      self.current_literal_buffer_mut().push(low);
+                    }
+                  } else {
+                    report_syntax_error!(self, "Invalid unicode escape sequence found.", Token::Invalid);
+                  }
                 } else {
                   report_syntax_error!(self, "Invalid unicode escape sequence found.", Token::Invalid);
                 }
               } else {
                 is_escaped = true;
-                self.advance();
+                self.advance_and_push_buffer();
               }
             } else {
               report_syntax_error!(self, "Unexpected end of input.", Token::Invalid);
             }
+          } else {
+            is_escaped = !is_escaped;
           }
-          is_escaped = !is_escaped;
-          self.current_literal_buffer_mut().push(value);
         }
         '$' => {
           if !is_escaped {

@@ -36,7 +36,7 @@ impl ParserStateStack {
     return false;
   }
 
-  pub fn is_in_state(&mut self, state: ParserState) -> bool {
+  pub fn is_in_state(&self, state: ParserState) -> bool {
     return self.state_count[state as usize] > 0;
   }
 }
