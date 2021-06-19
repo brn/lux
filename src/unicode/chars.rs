@@ -245,11 +245,10 @@ pub fn parse_octal<'a>(iter: &'a mut impl Iterator<Item = u16>) -> u64 {
   return value;
 }
 
-pub fn parse_decimal<'a>(
-  iter: &'a mut std::iter::Peekable<impl Iterator<Item = u16>>,
-  mut is_floating_point: bool,
-) -> f64 {
+const PARTIAL_MOD_LIMIT: u64 = 10000000000000000;
+pub fn parse_decimal<'a>(iter: &'a mut std::iter::Peekable<impl Iterator<Item = u16>>) -> f64 {
   const DIGITS: f64 = 10.0;
+
   while let Some(peek) = iter.peek().cloned() {
     if ch(peek) == '0' {
       iter.next();
@@ -257,15 +256,13 @@ pub fn parse_decimal<'a>(
       break;
     }
   }
-  let mut floating_digits = 10.0_f64;
+  let mut is_floating_point = false;
+  let mut floating_digits = 1;
   let mut value = 0.0_f64;
   let mut exponents = 0.0_f64;
   let mut is_negative_exponents = false;
   let mut start_exponents = false;
   for u in iter.by_ref() {
-    if !is_decimal_digits(u) {
-      break;
-    }
     if start_exponents {
       if ch(u) == '-' {
         is_negative_exponents = true;
@@ -276,19 +273,24 @@ pub fn parse_decimal<'a>(
       exponents += to_int(u).unwrap() as f64;
     } else if ch(u) == '.' {
       is_floating_point = true;
-    } else {
+    } else if is_decimal_digits(u) {
       if ch(u) == 'e' || ch(u) == 'E' {
         start_exponents = true;
         continue;
       }
       if !is_floating_point {
-        value *= DIGITS;
-        value += to_int(u).unwrap() as f64;
+        value = value.mul_add(DIGITS, to_int(u).unwrap() as f64);
       } else {
-        let n = to_int(u).unwrap() as f64;
-        value += n / floating_digits;
-        floating_digits *= 10.0;
+        value = value.mul_add(DIGITS, to_int(u).unwrap() as f64);
+        if floating_digits >= PARTIAL_MOD_LIMIT {
+          value /= floating_digits as f64;
+          floating_digits = 1;
+        } else {
+          floating_digits *= 10;
+        }
       }
+    } else {
+      break;
     }
   }
   if start_exponents {
@@ -298,7 +300,7 @@ pub fn parse_decimal<'a>(
       u64::pow(10, exponents as u32) as f64
     };
   }
-  return value;
+  return value / (floating_digits as f64);
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -325,6 +327,7 @@ pub fn parse_numeric_value<'a>(
     if ch(*uc) == '.' {
       is_period_seen = true;
       iter.next();
+      buffer.push('.' as u16);
     }
   }
 
@@ -353,8 +356,10 @@ pub fn parse_numeric_value<'a>(
           return Ok((parse_octal(iter) as f64, NumericValueKind::Octal));
         } else if ch(*next) == '.' {
           iter.next();
+          is_leading_zeros = false;
           is_period_seen = true;
           kind = Decimal;
+          buffer.push('.' as u16);
         }
       }
     }
@@ -397,12 +402,14 @@ pub fn parse_numeric_value<'a>(
         if kind == Decimal {
           is_period_seen = true;
           iter.next();
+          buffer.push('.' as u16);
         }
       }
 
       for u in iter.by_ref() {
         if !is_period_seen && ch(u) == '.' && kind == Decimal {
           is_period_seen = true;
+          buffer.push('.' as u16);
           continue;
         }
         if !is_decimal_digits(u) {
@@ -443,10 +450,7 @@ pub fn parse_numeric_value<'a>(
 
       let mut buffer_iter = buffer.into_iter();
       return match kind {
-        Decimal | DecimalLeadingZero => Ok((
-          parse_decimal(buffer_iter.peekable().by_ref(), is_period_seen) as f64,
-          kind,
-        )),
+        Decimal | DecimalLeadingZero => Ok((parse_decimal(buffer_iter.peekable().by_ref()) as f64, kind)),
         _ => Ok((parse_octal(buffer_iter.by_ref()) as f64, kind)),
       };
     }
@@ -587,6 +591,26 @@ mod chars_test {
     assert!(result.is_ok());
     let (value, kind) = result.unwrap();
     assert_eq!(value, 0.7769837);
+    assert_eq!(kind, NumericValueKind::Decimal);
+  }
+
+  #[test]
+  fn parse_numeric_value_floating_point_not_start_zeros_test() {
+    let buf = ".7769837".encode_utf16().collect::<Vec<_>>();
+    let result = parse_numeric_value(buf.into_iter().peekable().by_ref(), false);
+    assert!(result.is_ok());
+    let (value, kind) = result.unwrap();
+    assert_eq!(value, 0.7769837);
+    assert_eq!(kind, NumericValueKind::Decimal);
+  }
+
+  #[test]
+  fn parse_numeric_value_floating_point_intermeditate_test() {
+    let buf = "776.9837".encode_utf16().collect::<Vec<_>>();
+    let result = parse_numeric_value(buf.into_iter().peekable().by_ref(), false);
+    assert!(result.is_ok());
+    let (value, kind) = result.unwrap();
+    assert_eq!(value, 776.9837);
     assert_eq!(kind, NumericValueKind::Decimal);
   }
 }
