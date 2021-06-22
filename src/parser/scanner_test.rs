@@ -228,4 +228,146 @@ mod scanner_test {
       assert_eq!(scanner.next(), Token::Invalid);
     });
   }
+
+  #[test]
+  fn scanner_scan_digit_double() {
+    init_scanner(".3032", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::NumericLiteral);
+      assert_eq!(scanner.current_numeric_value(), 0.3032);
+    });
+  }
+
+  #[test]
+  fn scanner_scan_digit_hex() {
+    init_scanner("0xFEFEFE", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::NumericLiteral);
+      assert_eq!(scanner.current_numeric_value(), 0xFEFEFE as f64);
+    });
+  }
+
+  #[test]
+  fn scanner_scan_int() {
+    init_scanner("1349075", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::NumericLiteral);
+      assert_eq!(scanner.current_numeric_value(), 1349075.0);
+    });
+  }
+
+  #[test]
+  fn scanner_scan_double2() {
+    init_scanner("1349.075", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::NumericLiteral);
+      assert_eq!(scanner.current_numeric_value(), 1349.075);
+    });
+  }
+
+  #[test]
+  fn scanner_scan_digit_exponents() {
+    init_scanner("1349e+2", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::NumericLiteral);
+      assert_eq!(scanner.current_numeric_value(), 1349e+2 as f64);
+    });
+  }
+
+  #[test]
+  fn scanner_scan_digit_exponents2() {
+    init_scanner("1349e-2", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::NumericLiteral);
+      assert_eq!(scanner.current_numeric_value(), 1349e-2 as f64);
+    });
+  }
+
+  #[test]
+  fn scanner_scan_digit_exponents3() {
+    init_scanner("1349e20", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::NumericLiteral);
+      assert_eq!(scanner.current_numeric_value(), 1349e20 as f64);
+    });
+  }
+
+  #[test]
+  fn scanner_scan_digit_double_exponents3() {
+    init_scanner("1.3e+1", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::NumericLiteral);
+      assert_eq!(scanner.current_numeric_value(), 1.3e+1 as f64);
+    });
+  }
+
+  #[test]
+  fn scanner_scan_digit_octal() {
+    init_scanner("0o72377", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::NumericLiteral);
+      assert_eq!(scanner.current_numeric_value(), 0o72377 as f64);
+    });
+  }
+
+  #[test]
+  fn scanner_scan_digit_implicit_octal() {
+    init_scanner("072377", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::ImplicitOctalLiteral);
+      assert_eq!(scanner.current_numeric_value(), 0o72377 as f64);
+    });
+  }
+
+  #[test]
+  fn scanner_scan_single_line_comment() {
+    init_scanner(
+      "//abcdefghijklmnopqrstuvwxyz1234567890!@#$%^&*()-_|\\`~{}[]\"\':;/?.<>,",
+      None,
+      |mut scanner| {
+        assert_eq!(scanner.next(), Token::End);
+      },
+    );
+  }
+
+  #[test]
+  fn scanner_scan_single_line_comment_with_line_feed() {
+    init_scanner(
+      "foo//abcdefghijklmnopqrstuvwxyz1234567890!@#$%^&*()-_|\\`~{}[]\"\':;/?.<>,\naaa",
+      None,
+      |mut scanner| {
+        assert_eq!(scanner.next(), Token::Identifier);
+        let mut value = chars::to_utf8(scanner.current_literal_buffer());
+        assert_eq!(&value, "foo");
+        assert_eq!(scanner.next(), Token::Identifier);
+        value = chars::to_utf8(scanner.current_literal_buffer());
+        assert_eq!(&value, "aaa");
+        assert_eq!(scanner.next(), Token::End);
+      },
+    );
+  }
+
+  #[test]
+  fn scanner_scan_multiline_comments() {
+    init_scanner(
+      "foo/*aaaaaaaa\nbbbbbbbbbb\ncccccccccccc\nddddddddddddd*/aaa",
+      None,
+      |mut scanner| {
+        assert_eq!(scanner.next(), Token::Identifier);
+        let mut value = chars::to_utf8(scanner.current_literal_buffer());
+        assert_eq!(&value, "foo");
+        assert_eq!(scanner.next(), Token::Identifier);
+        value = chars::to_utf8(scanner.current_literal_buffer());
+        assert_eq!(&value, "aaa");
+        assert_eq!(scanner.next(), Token::End);
+      },
+    );
+  }
+
+  #[test]
+  fn scanner_scan_multiline_comments_2() {
+    init_scanner(
+      "foo/*aaaaaaaa\r\nbbbbbbbbbb\r\ncccccccccccc\r\nddddddddddddd*/aaa",
+      None,
+      |mut scanner| {
+        assert_eq!(scanner.next(), Token::Identifier);
+        let mut value = chars::to_utf8(scanner.current_literal_buffer());
+        assert_eq!(&value, "foo");
+        assert_eq!(scanner.next(), Token::Identifier);
+        value = chars::to_utf8(scanner.current_literal_buffer());
+        assert_eq!(&value, "aaa");
+        assert_eq!(scanner.next(), Token::End);
+      },
+    );
+  }
 }

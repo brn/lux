@@ -8,7 +8,9 @@ pub fn to_number(array: FixedU16CodePointArray) -> Result<Repr, Repr> {
     return Ok(Repr::from(0.0_f64));
   }
 
-  return match chars::parse_numeric_value(array.into_iter().peekable().by_ref(), false) {
+  let mut iter = array.into_iter();
+  let mut clone = iter.clone();
+  return match chars::parse_numeric_value(iter.by_ref(), &mut clone, false) {
     Ok((value, _)) => Ok(Repr::from(value)),
     _ => Err(Repr::nan()),
   };

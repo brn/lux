@@ -192,58 +192,106 @@ impl Uc32 {
 }
 
 #[derive(Clone)]
-struct IterVal {
-  value: u16,
-  iter: Peekable<FixedU16CodePointArrayIterator>,
+struct SourceCursor {
+  source: FixedU16CodePointArray,
+  index: isize,
 }
 
 const INVALID: u16 = 0xFFFF;
 const INVALID_CHAR: char = chars::ch(INVALID);
-impl IterVal {
-  fn new(iter: Peekable<FixedU16CodePointArrayIterator>) -> IterVal {
-    return IterVal { value: INVALID, iter };
+impl SourceCursor {
+  fn new(source: FixedU16CodePointArray) -> SourceCursor {
+    return SourceCursor { source, index: -1 };
   }
 
   fn uc32(&mut self) -> Uc32 {
-    if chars::is_high_surrogate(self.value) {
-      let high = self.value;
-      if let Some(low) = self.iter.peek() {
-        let uc32 = chars::join_surrogate_pair(high, *low);
+    if chars::is_high_surrogate(self.val()) {
+      let high = self.val();
+      if let Some(low) = self.peek() {
+        let uc32 = chars::join_surrogate_pair(high, low);
         self.next();
         return Uc32::surrogate_pair(uc32);
       } else {
         return Uc32::new(INVALID);
       }
     }
-    return Uc32::new(self.value);
+    return Uc32::new(self.val());
   }
 
-  fn next(&mut self) -> &u16 {
-    self.value = self.iter.next().unwrap_or(INVALID);
-    return &self.value;
+  fn back(&mut self) -> Option<u16> {
+    if self.source.len() == 0 {
+      return None;
+    }
+    if self.index == 0 {
+      self.index = -1;
+      return None;
+    }
+    if self.index > 0 {
+      self.index -= 1;
+      return Some(self.source[self.index as usize]);
+    }
+    return Some(self.source[0]);
   }
 
-  fn peek(&mut self) -> Option<&u16> {
-    return match self.iter.peek() {
-      Some(a) => Some(a),
+  fn pos(&self) -> isize {
+    return self.index;
+  }
+
+  fn val(&self) -> u16 {
+    return self.get_val(self.index).cloned().unwrap_or(INVALID);
+  }
+
+  fn val_ref(&self) -> &u16 {
+    return self.get_val(self.index).unwrap_or(&INVALID);
+  }
+
+  fn as_char(&self) -> char {
+    return chars::ch(self.val());
+  }
+
+  fn peek(&self) -> Option<u16> {
+    return self.get_val(self.index + 1).cloned();
+  }
+
+  fn peek_as_char(&self) -> Option<char> {
+    return match self.get_val(self.index + 1).cloned() {
+      Some(uc) => Some(chars::ch(uc)),
       _ => None,
     };
   }
 
-  fn as_char(&self) -> char {
-    return chars::ch(self.value);
+  fn get_val(&self, i: isize) -> Option<&u16> {
+    return if i >= 0 && self.source.len() as isize > i {
+      Some(&self.source[i as usize])
+    } else {
+      None
+    };
   }
 }
 
-impl std::ops::Deref for IterVal {
+impl Iterator for SourceCursor {
+  type Item = u16;
+  fn next(&mut self) -> Option<Self::Item> {
+    if self.index < (self.source.len() as isize) {
+      self.index += 1;
+    }
+    return if self.source.len() as isize > self.index {
+      return Some(self.source[self.index as usize]);
+    } else {
+      None
+    };
+  }
+}
+
+impl std::ops::Deref for SourceCursor {
   type Target = u16;
   fn deref(&self) -> &Self::Target {
-    return &self.value;
+    return self.val_ref();
   }
 }
 
 pub struct ScannerRecord {
-  iter: IterVal,
+  iter: SourceCursor,
   token: Token,
   position: SourcePosition,
 }
@@ -257,7 +305,7 @@ enum Mode {
 pub struct Scanner<'a> {
   token: Token,
   lookahead_token: Token,
-  iter: IterVal,
+  iter: SourceCursor,
   source: FixedU16CodePointArray,
 
   numeric_value: [f64; 2],
@@ -295,11 +343,11 @@ impl<'a> Scanner<'a> {
     parser_state_stack: &'a ParserStateStack,
   ) -> Scanner<'a> {
     let u16_source = FixedU16CodePointArray::from_utf8(context, source);
-    let mut sc = Scanner::<'a> {
+    let mut scanner = Scanner::<'a> {
       token: Token::Invalid,
       lookahead_token: Token::Invalid,
       source: u16_source,
-      iter: IterVal::new(u16_source.into_iter().peekable().clone()),
+      iter: SourceCursor::new(u16_source),
 
       literal_buffer: [Vec::<u16>::new(), Vec::<u16>::new()],
 
@@ -318,8 +366,8 @@ impl<'a> Scanner<'a> {
 
       skipped: 0,
     };
-    sc.advance();
-    return sc;
+    scanner.advance();
+    return scanner;
   }
 
   pub fn record(&self) -> ScannerRecord {
@@ -380,7 +428,7 @@ impl<'a> Scanner<'a> {
 
   fn is_succeeding(&mut self, value: u16) -> bool {
     if let Some(next) = self.iter.peek() {
-      return *next == value;
+      return next == value;
     }
     return false;
   }
@@ -579,7 +627,6 @@ impl<'a> Scanner<'a> {
           self.skip_signleline_comment();
           return self.tokenize();
         }
-
         if self.iter.as_char() == '*' {
           self.advance();
           self.skip_multiline_comment();
@@ -718,10 +765,12 @@ impl<'a> Scanner<'a> {
         return OpXor;
       }
       '.' => {
-        self.advance();
-        if chars::is_decimal_digits(*self.iter) {
-          return self.tokenize_numeric_literal(true);
+        if let Some(p) = self.iter.peek() {
+          if chars::is_decimal_digits(p) {
+            return self.tokenize_numeric_literal(true);
+          }
         }
+        self.advance();
         if self.iter.as_char() == '.' {
           self.advance();
           if self.iter.as_char() == '.' {
@@ -774,7 +823,7 @@ impl<'a> Scanner<'a> {
       '$' => {
         if self.parser_state_stack.is_in_state(ParserState::InTemplateLiteral) {
           if let Some(peek) = self.iter.peek() {
-            if chars::ch(*peek) == '{' {
+            if chars::ch(peek) == '{' {
               self.advance();
               return TemplateSubstitution;
             }
@@ -789,7 +838,7 @@ impl<'a> Scanner<'a> {
         if chars::is_identifier_start(self.iter.uc32().code()) {
           return self.tokenize_identifier();
         }
-        return Invalid;
+        return if self.has_more() { Invalid } else { End };
       }
     }
   }
@@ -807,7 +856,7 @@ impl<'a> Scanner<'a> {
         '\\' => {
           if !is_escaped {
             if let Some(lookahead) = self.iter.peek() {
-              if chars::is_start_escape_sequence(*lookahead) {
+              if chars::is_start_escape_sequence(lookahead) {
                 if let Ok(ret) = self.decode_escape_sequence() {
                   if let Ok((hi, low)) = chars::uc32_to_uc16(ret) {
                     self.current_literal_buffer_mut().push(hi);
@@ -1003,8 +1052,16 @@ impl<'a> Scanner<'a> {
   }
 
   fn tokenize_numeric_literal(&mut self, is_period_seen: bool) -> Token {
+    self.iter.back();
     self.current_literal_buffer_mut().clear();
-    let result = chars::parse_numeric_value(self.iter.iter.by_ref(), is_period_seen);
+    let pos = self.iter.pos();
+    let mut clone = self.iter.clone();
+    let result = chars::parse_numeric_value(self.iter.by_ref(), &mut clone, is_period_seen);
+    if pos != self.iter.pos() {
+      self.iter.back();
+    }
+    let pos = self.iter.pos() as u32;
+    self.current_position_mut().set_end_col(pos);
     if let Ok((value, kind)) = result {
       self.set_current_numeric_value(value);
       if kind == chars::NumericValueKind::ImplicitOctal {
@@ -1021,7 +1078,7 @@ impl<'a> Scanner<'a> {
     let mut is_escaped = false;
     loop {
       if let Some(lookahead) = self.iter.peek() {
-        match chars::ch(*lookahead) {
+        match chars::ch(lookahead) {
           '\\' => is_escaped = !is_escaped,
           '/' => {
             if !is_escaped {
@@ -1052,7 +1109,7 @@ impl<'a> Scanner<'a> {
           let mut value = *self.iter;
           if !is_escaped {
             if let Some(lookahead) = self.iter.peek() {
-              if chars::is_start_escape_sequence(*lookahead) {
+              if chars::is_start_escape_sequence(lookahead) {
                 if let Ok(ret) = self.decode_hex_escape(4) {
                   if let Ok((hi, low)) = chars::uc32_to_uc16(ret) {
                     self.current_literal_buffer_mut().push(hi);
@@ -1079,7 +1136,7 @@ impl<'a> Scanner<'a> {
         '$' => {
           if !is_escaped {
             if let Some(lookahead) = self.iter.peek() {
-              if chars::ch(*lookahead) == '{' {
+              if chars::ch(lookahead) == '{' {
                 self.advance();
                 self.advance();
                 return Token::TemplateParts;
@@ -1183,13 +1240,15 @@ impl<'a> Scanner<'a> {
   fn skip_multiline_comment(&mut self) {
     loop {
       if chars::ch(*self.iter) == '*' {
-        let next = self.iter.peek().unwrap_or(&INVALID);
-        if chars::ch(*next) == '/' {
-          self.advance();
+        if let Some(next) = self.iter.peek() {
+          if chars::ch(next) == '/' {
+            self.advance();
+            self.advance();
+            return;
+          }
+        } else {
           return;
         }
-      } else if *self.iter == INVALID {
-        return;
       }
       self.advance();
     }

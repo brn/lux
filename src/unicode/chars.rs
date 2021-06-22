@@ -1,4 +1,5 @@
 use super::data::{ID_CONTINUE_DIFF, ID_CONTINUE_HASH_MOD, ID_START, ID_START_HASH_MOD};
+use std::iter::{Iterator, Peekable};
 
 pub const LF: u16 = 0x00A;
 pub const CR: u16 = 0x00D;
@@ -163,6 +164,7 @@ pub const fn ch(u: u16) -> char {
 }
 
 // http://www.ecma-international.org/ecma-262/9.0/index.html#sec-names-and-keywords
+#[inline]
 pub fn is_identifier_start(value: u32) -> bool {
   // [:ID_Start:] + $ + _ + \\ + <ZWNJ> + <ZWJ>
   if value == 36 || value == 95 || value == 92 || value == 0x200C || value == 0x200D {
@@ -178,6 +180,7 @@ pub fn is_identifier_start(value: u32) -> bool {
 }
 
 // http://www.ecma-international.org/ecma-262/9.0/index.html#sec-names-and-keywords
+#[inline]
 pub fn is_identifier_continue(value: u32, is_unicode_escape_seq: bool) -> bool {
   if is_unicode_escape_seq {
     return is_hex_digits(value as u16);
@@ -197,19 +200,22 @@ pub fn is_identifier_continue(value: u32, is_unicode_escape_seq: bool) -> bool {
   return false;
 }
 
+#[inline]
 pub fn to_utf8(chars: &std::vec::Vec<u16>) -> String {
   return std::char::decode_utf16(chars.iter().cloned())
     .map(|r| r.unwrap_or('#'))
     .collect::<String>();
 }
 
-pub fn parse_hex<'a>(mut iter: impl Iterator<Item = u16>) -> u64 {
+#[inline]
+pub fn parse_hex<'a>(start: &'a mut impl Iterator<Item = u16>) -> u64 {
   const DIGITS: u64 = 16;
+  let mut iter = start.by_ref().peekable();
   let mut value = 0_u64;
-  for u in iter {
-    if let Ok(hex) = to_hex(u) {
-      value *= DIGITS;
-      value += hex as u64;
+  while let Some(next) = iter.peek().cloned() {
+    if let Ok(hex) = to_hex(next) {
+      value = value * DIGITS + (hex as u64);
+      iter.next();
     } else {
       return value;
     }
@@ -217,13 +223,15 @@ pub fn parse_hex<'a>(mut iter: impl Iterator<Item = u16>) -> u64 {
   return value;
 }
 
-pub fn parse_binary<'a>(iter: &'a mut impl Iterator<Item = u16>) -> u64 {
+#[inline]
+pub fn parse_binary<'a>(start: &'a mut impl Iterator<Item = u16>) -> u64 {
   const DIGITS: u64 = 2;
+  let mut iter = start.by_ref().peekable();
   let mut value: u64 = 0;
-  for u in iter {
-    if let Ok(bin) = to_int_from_bin(u) {
-      value *= DIGITS;
-      value += bin as u64;
+  while let Some(next) = iter.peek().cloned() {
+    if let Ok(bin) = to_int_from_bin(next) {
+      value = value * DIGITS + (bin as u64);
+      iter.next();
     } else {
       return value;
     }
@@ -231,23 +239,86 @@ pub fn parse_binary<'a>(iter: &'a mut impl Iterator<Item = u16>) -> u64 {
   return value;
 }
 
-pub fn parse_octal<'a>(iter: &'a mut impl Iterator<Item = u16>) -> u64 {
+#[inline]
+pub fn parse_octal<'a>(start: &'a mut impl Iterator<Item = u16>) -> u64 {
   const DIGITS: u64 = 8;
+  let mut iter = start.by_ref().peekable();
   let mut value: u64 = 0;
-  for u in iter {
-    if let Ok(octal) = to_int_from_octal(u) {
-      value *= DIGITS;
-      value += octal as u64;
+  while let Some(next) = iter.peek().cloned() {
+    if let Ok(octal) = to_int_from_octal(next) {
+      value = value * DIGITS + (octal as u64);
+      iter.next();
     } else {
       return value;
     }
   }
+  return value;
+}
+
+#[inline]
+pub fn parse_uint32_without_exponents<'a>(start: &'a mut impl Iterator<Item = u16>) -> u32 {
+  const DIGITS: u32 = 10;
+  let mut iter = start.by_ref().peekable();
+  let mut value: u32 = 0;
+  while let Some(next) = iter.peek().cloned() {
+    if is_decimal_digits(next) {
+      value = value * DIGITS + to_int(next).unwrap();
+      iter.next();
+    } else {
+      break;
+    }
+  }
+
   return value;
 }
 
 const PARTIAL_MOD_LIMIT: u64 = 10000000000000000;
-pub fn parse_decimal<'a>(iter: &'a mut std::iter::Peekable<impl Iterator<Item = u16>>) -> f64 {
+const POW_LIMIT: u32 = 19;
+
+fn parse_exponents<'a>(mut value: f64, iter: &'a mut std::iter::Peekable<impl Iterator<Item = u16>>) -> f64 {
+  const DIGITS: u32 = 10;
+  let mut is_negative = false;
+  let mut exponents_value: u32 = 0;
+  while let Some(next) = iter.peek().cloned() {
+    if ch(next) == '-' {
+      is_negative = true;
+      iter.next();
+    } else if ch(next) == '+' {
+      iter.next();
+      continue;
+    } else if is_decimal_digits(next) {
+      exponents_value = exponents_value * DIGITS + (to_int(next).unwrap() as u32);
+      iter.next();
+    } else {
+      break;
+    }
+  }
+
+  if exponents_value >= POW_LIMIT {
+    while exponents_value > 0 {
+      let exp_val = if exponents_value < POW_LIMIT {
+        exponents_value
+      } else {
+        POW_LIMIT
+      };
+      exponents_value -= exp_val;
+      let p = u64::pow(10, exp_val) as f64;
+      if !is_negative {
+        value *= p;
+      } else {
+        value /= p;
+      }
+    }
+    return value;
+  } else {
+    let p = u64::pow(10, exponents_value) as f64;
+    return if !is_negative { value * p } else { value / p };
+  }
+}
+
+pub fn parse_decimal<'a>(start: &'a mut impl Iterator<Item = u16>) -> f64 {
   const DIGITS: f64 = 10.0;
+  let mut iter = start.by_ref().peekable();
 
   while let Some(peek) = iter.peek().cloned() {
     if ch(peek) == '0' {
@@ -259,25 +330,16 @@ pub fn parse_decimal<'a>(iter: &'a mut std::iter::Peekable<impl Iterator<Item = 
   let mut is_floating_point = false;
   let mut floating_digits = 1;
   let mut value = 0.0_f64;
-  let mut exponents = 0.0_f64;
-  let mut is_negative_exponents = false;
-  let mut start_exponents = false;
-  for u in iter.by_ref() {
-    if start_exponents {
-      if ch(u) == '-' {
-        is_negative_exponents = true;
-      } else if ch(u) == '+' {
-        continue;
-      }
-      exponents *= DIGITS;
-      exponents += to_int(u).unwrap() as f64;
-    } else if ch(u) == '.' {
+  let mut is_start_exponents = false;
+  while let Some(u) = iter.peek().cloned() {
+    if ch(u) == '.' {
       is_floating_point = true;
+      iter.next();
+    } else if ch(u) == 'e' || ch(u) == 'E' {
+      is_start_exponents = true;
+      iter.next();
+      break;
     } else if is_decimal_digits(u) {
-      if ch(u) == 'e' || ch(u) == 'E' {
-        start_exponents = true;
-        continue;
-      }
       if !is_floating_point {
         value = value.mul_add(DIGITS, to_int(u).unwrap() as f64);
       } else {
@@ -289,16 +351,14 @@ pub fn parse_decimal<'a>(iter: &'a mut std::iter::Peekable<impl Iterator<Item = 
           floating_digits *= 10;
         }
       }
+      iter.next();
     } else {
       break;
     }
   }
-  if start_exponents {
-    value *= if is_negative_exponents {
-      1.0 / (u64::pow(10, exponents as u32) as f64)
-    } else {
-      u64::pow(10, exponents as u32) as f64
-    };
+
+  if is_start_exponents {
+    value = parse_exponents(value, &mut iter);
   }
   return value / (floating_digits as f64);
 }
@@ -314,20 +374,23 @@ pub enum NumericValueKind {
 }
 
 pub fn parse_numeric_value<'a>(
-  iter: &'a mut std::iter::Peekable<impl Iterator<Item = u16>>,
+  origin: &'a mut impl Iterator<Item = u16>,
+  start: &'a mut impl Iterator<Item = u16>,
   is_double: bool,
 ) -> Result<(f64, NumericValueKind), &'static str> {
   use NumericValueKind::*;
   let mut kind = Decimal;
   let mut is_period_seen = is_double;
   let mut is_leading_zeros = false;
-  let mut buffer = Vec::<u16>::new();
+  let mut has_exponents_part = false;
+  let mut is_int32 = false;
+  let mut iter = start.peekable();
+  let mut digits_len = 0;
 
   if let Some(uc) = iter.peek() {
     if ch(*uc) == '.' {
       is_period_seen = true;
       iter.next();
-      buffer.push('.' as u16);
     }
   }
 
@@ -347,53 +410,55 @@ pub fn parse_numeric_value<'a>(
       if let Some(next) = iter.peek() {
         if ch(*next) == 'x' {
           iter.next();
-          return Ok((parse_hex(iter) as f64, NumericValueKind::Hex));
+          return Ok((parse_hex(start) as f64, NumericValueKind::Hex));
         } else if ch(*next) == 'b' {
           iter.next();
-          return Ok((parse_binary(iter) as f64, NumericValueKind::Binary));
+          return Ok((parse_binary(start) as f64, NumericValueKind::Binary));
         } else if ch(*next) == 'o' {
           iter.next();
-          return Ok((parse_octal(iter) as f64, NumericValueKind::Octal));
+          return Ok((parse_octal(start) as f64, NumericValueKind::Octal));
         } else if ch(*next) == '.' {
           iter.next();
           is_leading_zeros = false;
           is_period_seen = true;
           kind = Decimal;
-          buffer.push('.' as u16);
         }
       }
     }
 
     if let Some(next) = iter.peek().cloned() {
-      if is_leading_zeros && ch(next) >= '0' && ch(next) <= '7' {
-        kind = ImplicitOctal;
-        while let Some(u) = iter.peek().cloned() {
-          if !is_octal_digits(u) {
-            break;
-          }
-          buffer.push(u);
-          iter.next();
-        }
-      } else if ch(next) == '8' || ch(next) == '9' {
-        kind = if is_leading_zeros { DecimalLeadingZero } else { Decimal };
-        for u in iter.by_ref() {
-          if !is_decimal_digits(u) {
-            break;
-          }
-          buffer.push(u);
-        }
-      }
-
-      if kind == ImplicitOctal {
-        if let Some(next) = iter.peek().cloned() {
-          if is_decimal_digits(next) && ch(next) > '7' {
-            for u in iter.by_ref() {
-              if !is_decimal_digits(u) {
-                break;
-              }
-              buffer.push(u);
+      if is_decimal_digits(next) {
+        if is_leading_zeros && ch(next) >= '0' && ch(next) <= '7' {
+          kind = ImplicitOctal;
+          while let Some(u) = iter.peek().cloned() {
+            if !is_octal_digits(u) {
+              break;
             }
-            kind = DecimalLeadingZero;
+            iter.next();
+            digits_len += 1;
+          }
+        } else if ch(next) == '8' || ch(next) == '9' {
+          kind = if is_leading_zeros { DecimalLeadingZero } else { Decimal };
+          while let Some(u) = iter.peek().cloned() {
+            if !is_decimal_digits(u) {
+              break;
+            }
+            iter.next();
+            digits_len += 1;
+          }
+        }
+        if kind == ImplicitOctal {
+          if let Some(next) = iter.peek().cloned() {
+            if is_decimal_digits(next) && ch(next) > '7' {
+              while let Some(u) = iter.peek().cloned() {
+                if !is_decimal_digits(u) {
+                  break;
+                }
+                iter.next();
+                digits_len += 1;
+              }
+              kind = DecimalLeadingZero;
+            }
           }
         }
       }
@@ -402,56 +467,60 @@ pub fn parse_numeric_value<'a>(
         if kind == Decimal {
           is_period_seen = true;
           iter.next();
-          buffer.push('.' as u16);
         }
       }
 
-      for u in iter.by_ref() {
+      while let Some(u) = iter.peek().cloned() {
         if !is_period_seen && ch(u) == '.' && kind == Decimal {
           is_period_seen = true;
-          buffer.push('.' as u16);
+          iter.next();
           continue;
         }
         if !is_decimal_digits(u) {
           break;
         }
-        buffer.push(u);
+        iter.next();
+        digits_len += 1;
       }
 
-      if let Some(next) = iter.peek() {
-        if ch(*next) == 'e' || ch(*next) == 'E' {
+      if let Some(next) = iter.peek().cloned() {
+        if ch(next) == 'e' || ch(next) == 'E' {
+          has_exponents_part = true;
           if kind != Decimal && kind != DecimalLeadingZero {
             return Err("Unexpected token.");
           }
-          buffer.push(*next);
-          if let Some(next) = iter.peek() {
-            if ch(*next) == '+' || ch(*next) == '-' {
-              buffer.push(*next);
+          iter.next();
+          if let Some(next) = iter.peek().cloned() {
+            if ch(next) == '+' || ch(next) == '-' {
               iter.next();
             }
-            if let Some(next) = iter.peek() {
-              if !is_decimal_digits(*next) {
+            if let Some(next) = iter.peek().cloned() {
+              if !is_decimal_digits(next) {
                 return Err("Expected exponent digit.");
               }
-              buffer.push(*next);
               iter.next();
             } else {
               return Err("Expected exponent digit.");
             }
-            for u in iter.by_ref() {
+            while let Some(u) = iter.peek().cloned() {
               if !is_decimal_digits(u) {
                 break;
               }
-              buffer.push(u);
+              iter.next();
             }
           }
         }
       }
 
-      let mut buffer_iter = buffer.into_iter();
       return match kind {
-        Decimal | DecimalLeadingZero => Ok((parse_decimal(buffer_iter.peekable().by_ref()) as f64, kind)),
-        _ => Ok((parse_octal(buffer_iter.by_ref()) as f64, kind)),
+        Decimal | DecimalLeadingZero => {
+          if digits_len <= 9 && !has_exponents_part && !is_period_seen {
+            Ok((parse_uint32_without_exponents(origin) as f64, kind))
+          } else {
+            Ok((parse_decimal(origin) as f64, kind))
+          }
+        }
+        _ => Ok((parse_octal(origin) as f64, kind)),
       };
     }
   }
@@ -524,93 +593,69 @@ mod chars_test {
     assert_eq!(len, count);
   }
 
-  #[test]
-  fn parse_numeric_value_int_test() {
-    let buf = "120304374".encode_utf16().collect::<Vec<_>>();
-    let result = parse_numeric_value(buf.into_iter().peekable().by_ref(), false);
+  fn run_parse_numeric_value_test(value: &str, expected_value: f64, expected_kind: NumericValueKind) {
+    let buf = value.encode_utf16().collect::<Vec<_>>();
+    let mut iter = buf.into_iter().peekable();
+    let mut clone = iter.clone();
+    let result = parse_numeric_value(iter.by_ref(), &mut clone, false);
     assert!(result.is_ok());
     let (value, kind) = result.unwrap();
-    assert_eq!(value, 120304374.0);
-    assert_eq!(kind, NumericValueKind::Decimal);
+    assert_eq!(value, expected_value);
+    assert_eq!(kind, expected_kind);
+  }
+
+  #[test]
+  fn parse_numeric_value_int_test() {
+    run_parse_numeric_value_test("120304374", 120304374.0, NumericValueKind::Decimal);
   }
 
   #[test]
   fn parse_numeric_value_hex_test() {
-    let buf = "0xFFFF".encode_utf16().collect::<Vec<_>>();
-    let result = parse_numeric_value(buf.into_iter().peekable().by_ref(), false);
-    assert!(result.is_ok());
-    let (value, kind) = result.unwrap();
-    assert_eq!(value, 0xFFFF as f64);
-    assert_eq!(kind, NumericValueKind::Hex);
+    run_parse_numeric_value_test("0xFFFF", 0xFFFF as f64, NumericValueKind::Hex);
   }
 
   #[test]
   fn parse_numeric_value_binary_test() {
-    let buf = "0b010101".encode_utf16().collect::<Vec<_>>();
-    let result = parse_numeric_value(buf.into_iter().peekable().by_ref(), false);
-    assert!(result.is_ok());
-    let (value, kind) = result.unwrap();
-    assert_eq!(value, 0b010101 as f64);
-    assert_eq!(kind, NumericValueKind::Binary);
+    run_parse_numeric_value_test("0b010101", 0b010101 as f64, NumericValueKind::Binary);
   }
 
   #[test]
   fn parse_numeric_value_octal_test() {
-    let buf = "0o7766".encode_utf16().collect::<Vec<_>>();
-    let result = parse_numeric_value(buf.into_iter().peekable().by_ref(), false);
-    assert!(result.is_ok());
-    let (value, kind) = result.unwrap();
-    assert_eq!(value, 0o7766 as f64);
-    assert_eq!(kind, NumericValueKind::Octal);
+    run_parse_numeric_value_test("0o7766", 0o7766 as f64, NumericValueKind::Octal);
   }
 
   #[test]
   fn parse_numeric_value_implicit_octal_test() {
-    let buf = "07766".encode_utf16().collect::<Vec<_>>();
-    let result = parse_numeric_value(buf.into_iter().peekable().by_ref(), false);
-    assert!(result.is_ok());
-    let (value, kind) = result.unwrap();
-    assert_eq!(value, 0o7766 as f64);
-    assert_eq!(kind, NumericValueKind::ImplicitOctal);
+    run_parse_numeric_value_test("07766", 0o7766 as f64, NumericValueKind::ImplicitOctal);
   }
 
   #[test]
   fn parse_numeric_value_int_leading_zeros_octal_test() {
-    let buf = "07769837".encode_utf16().collect::<Vec<_>>();
-    let result = parse_numeric_value(buf.into_iter().peekable().by_ref(), false);
-    assert!(result.is_ok());
-    let (value, kind) = result.unwrap();
-    assert_eq!(value, 7769837 as f64);
-    assert_eq!(kind, NumericValueKind::DecimalLeadingZero);
+    run_parse_numeric_value_test("07769837", 7769837.0, NumericValueKind::DecimalLeadingZero);
   }
 
   #[test]
   fn parse_numeric_value_floating_point_test() {
-    let buf = "0.7769837".encode_utf16().collect::<Vec<_>>();
-    let result = parse_numeric_value(buf.into_iter().peekable().by_ref(), false);
-    assert!(result.is_ok());
-    let (value, kind) = result.unwrap();
-    assert_eq!(value, 0.7769837);
-    assert_eq!(kind, NumericValueKind::Decimal);
+    run_parse_numeric_value_test("0.7769837", 0.7769837, NumericValueKind::Decimal);
   }
 
   #[test]
   fn parse_numeric_value_floating_point_not_start_zeros_test() {
-    let buf = ".7769837".encode_utf16().collect::<Vec<_>>();
-    let result = parse_numeric_value(buf.into_iter().peekable().by_ref(), false);
-    assert!(result.is_ok());
-    let (value, kind) = result.unwrap();
-    assert_eq!(value, 0.7769837);
-    assert_eq!(kind, NumericValueKind::Decimal);
+    run_parse_numeric_value_test(".7769837", 0.7769837, NumericValueKind::Decimal);
   }
 
   #[test]
   fn parse_numeric_value_floating_point_intermeditate_test() {
-    let buf = "776.9837".encode_utf16().collect::<Vec<_>>();
-    let result = parse_numeric_value(buf.into_iter().peekable().by_ref(), false);
-    assert!(result.is_ok());
-    let (value, kind) = result.unwrap();
-    assert_eq!(value, 776.9837);
-    assert_eq!(kind, NumericValueKind::Decimal);
+    run_parse_numeric_value_test("776.9837", 776.9837, NumericValueKind::Decimal);
+  }
+
+  #[test]
+  fn parse_numeric_value_exponent() {
+    run_parse_numeric_value_test("120e+10", 120e+10, NumericValueKind::Decimal);
+  }
+
+  #[test]
+  fn parse_numeric_value_exponent2() {
+    run_parse_numeric_value_test("120e-200", 120e-200, NumericValueKind::Decimal);
   }
 }
