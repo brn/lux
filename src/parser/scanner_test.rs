@@ -1,8 +1,9 @@
 #[cfg(test)]
 mod scanner_test {
   use super::super::error_reporter::ReportSyntaxError;
-  use super::super::parser_state::ParserStateStack;
+  use super::super::parser_state::{ParserState, ParserStateStack};
   use super::super::scanner::*;
+  use super::super::token::*;
   use crate::context::LuxContext;
   use crate::unicode::chars;
   use itertools::Itertools;
@@ -369,5 +370,27 @@ mod scanner_test {
         assert_eq!(scanner.next(), Token::End);
       },
     );
+  }
+
+  #[test]
+  fn scanner_scan_template_literal() {
+    let mut state = ParserStateStack::new();
+    state.push_state(ParserState::InTemplateLiteral);
+    init_scanner("abcdefg`", Some(state), |mut scanner| {
+      assert_eq!(scanner.next(), Token::Template);
+      let mut value = chars::to_utf8(scanner.current_literal_buffer());
+      assert_eq!(&value, "abcdefg");
+    });
+  }
+
+  #[test]
+  fn scanner_scan_template_literal_substitution() {
+    let mut state = ParserStateStack::new();
+    state.push_state(ParserState::InTemplateLiteral);
+    init_scanner("abcdefg${`", Some(state), |mut scanner| {
+      assert_eq!(scanner.next(), Token::TemplateParts);
+      let mut value = chars::to_utf8(scanner.current_literal_buffer());
+      assert_eq!(&value, "abcdefg");
+    });
   }
 }

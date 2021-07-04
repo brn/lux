@@ -3,6 +3,7 @@ use std::vec::Vec;
 #[derive(PartialEq, Eq, Copy, Clone)]
 pub enum ParserState {
   InTemplateLiteral,
+  InTemplateSubstitution,
   RegexpExpected,
   _Sentinel,
 }

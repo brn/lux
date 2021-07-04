@@ -2,15 +2,15 @@ use property::Property;
 use std::cmp::{Eq, Ordering, PartialEq, PartialOrd};
 use std::fmt::{Debug, Formatter, Result as FmtResult};
 
-#[derive(PartialEq, Eq, Property, Clone)]
+#[derive(PartialEq, Eq, Property, Copy, Clone)]
 pub struct SourcePosition {
-  #[property(get(type = "copy"))]
+  #[property(get(type = "copy"), set(type = "none"))]
   start_col: u32,
-  #[property(get(type = "copy"))]
+  #[property(get(type = "copy"), set(type = "none"))]
   end_col: u32,
-  #[property(get(type = "copy"))]
+  #[property(get(type = "copy"), set(type = "none"))]
   start_line_number: u32,
-  #[property(get(type = "copy"))]
+  #[property(get(type = "copy"), set(type = "none"))]
   end_line_number: u32,
 }
 
