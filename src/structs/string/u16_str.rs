@@ -1,6 +1,7 @@
 use super::super::hash_map::{DefaultHasher, Hasher, PredefinedHash};
 use super::super::internal_array::{InternalArray, InternalArrayIterator, RefInternalArrayIterator};
 use crate::context::{AllocationOnlyContext, ObjectRecordsInitializedContext};
+use std::char::decode_utf16;
 use std::hash::Hash;
 
 pub type FixedU16CodePointArray = InternalArray<u16>;
@@ -19,6 +20,12 @@ pub fn from_utf8(context: impl ObjectRecordsInitializedContext, str: &str) -> Fi
 impl FixedU16CodePointArray {
   pub fn from_utf8(context: impl ObjectRecordsInitializedContext, str: &str) -> FixedU16CodePointArray {
     return from_utf8(context, str);
+  }
+
+  pub fn to_utf8(&self) -> String {
+    return decode_utf16(self.into_iter())
+      .map(|r| r.unwrap_or('#'))
+      .collect::<String>();
   }
 }
 

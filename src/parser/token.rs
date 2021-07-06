@@ -7,6 +7,12 @@ macro_rules! token_enum {
       )*
     }
 
+    impl std::fmt::Display for $name {
+      fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        return write!(f, "{:?}", self);
+      }
+    }
+
     impl $name {
       pub fn is_pseudo_token(&self) -> bool {
         match self {

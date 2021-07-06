@@ -215,6 +215,12 @@ impl<BitType: BitNum> Bitset<BitType> {
     }
   }
 
+  pub fn with(value: BitType) -> Bitset<BitType> {
+    Bitset {
+      bit_field: BitType::from(value).unwrap(),
+    }
+  }
+
   #[inline]
   pub fn mask_lower(&self, lower_index: usize) -> MaskedBitset<BitType> {
     debug_assert!(lower_index > 0, "lower_index must be greater than 1");

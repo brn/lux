@@ -61,6 +61,13 @@ impl SourcePosition {
   pub fn inc_end_line_number(&mut self) {
     self.end_line_number += 1;
   }
+
+  pub fn to_string(&self) -> String {
+    return format!(
+      "[{}, {}, {}, {}]",
+      self.start_col, self.end_col, self.start_line_number, self.end_line_number
+    );
+  }
 }
 
 impl Debug for SourcePosition {

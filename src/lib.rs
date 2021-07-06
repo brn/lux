@@ -33,3 +33,7 @@ pub mod context;
 pub mod heap;
 
 pub mod parser;
+
+#[cfg(test)]
+#[macro_use]
+extern crate indoc;
