@@ -40,4 +40,30 @@ impl ParserStateStack {
   pub fn is_in_state(&self, state: ParserState) -> bool {
     return self.state_count[state as usize] > 0;
   }
+
+  pub fn is_in_states(&self, state: &[ParserState]) -> bool {
+    for s in state.iter() {
+      if self.state_count[(*s) as usize] > 0 {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  pub fn match_state(&self, state: ParserState) -> bool {
+    return if let Some(s) = self.stack.last() {
+      *s == state
+    } else {
+      false
+    };
+  }
+
+  pub fn match_states(&self, state: &[ParserState]) -> bool {
+    for s in state.iter() {
+      if self.state_count[(*s) as usize] == 0 {
+        return false;
+      }
+    }
+    return true;
+  }
 }

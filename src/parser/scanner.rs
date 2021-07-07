@@ -4,7 +4,6 @@ use super::error_reporter::*;
 use super::parser_state::{ParserState, ParserStateStack};
 use super::source_position::SourcePosition;
 use super::token::Token;
-use crate::context::ObjectRecordsInitializedContext;
 use crate::utility::*;
 use std::boxed::Box;
 use std::cmp::{Eq, PartialEq};
@@ -14,7 +13,6 @@ use std::pin::Pin;
 use std::vec::Vec;
 
 enum ScannerState {
-  ImplicitOctal,
   HasLinebreakBefore,
   HasLinebreakAfter,
 }
@@ -161,7 +159,7 @@ enum Mode {
   Lookahead,
 }
 
-pub struct Scanner<'a> {
+pub struct Scanner {
   token: Token,
   lookahead_token: Token,
   iter: SourceCursor,
@@ -173,7 +171,7 @@ pub struct Scanner<'a> {
 
   scanner_state: [Bitset<u8>; 2],
 
-  parser_state_stack: &'a ParserStateStack,
+  parser_state_stack: Exotic<ParserStateStack>,
 
   previous_position: SourcePosition,
   position: [SourcePosition; 2],
@@ -185,7 +183,7 @@ pub struct Scanner<'a> {
   skipped: u32,
 }
 
-impl<'a> ReportSyntaxError for Scanner<'a> {
+impl ReportSyntaxError for Scanner {
   fn error_reporter(&mut self) -> &mut ErrorReporter {
     return &mut self.error_reporter;
   }
@@ -195,18 +193,13 @@ impl<'a> ReportSyntaxError for Scanner<'a> {
   }
 }
 
-impl<'a> Scanner<'a> {
-  pub fn new(
-    context: impl ObjectRecordsInitializedContext,
-    source: &str,
-    parser_state_stack: &'a ParserStateStack,
-  ) -> Scanner<'a> {
-    let u16_source = FixedU16CodePointArray::from_utf8(context, source);
-    let mut scanner = Scanner::<'a> {
+impl Scanner {
+  pub fn new(source: FixedU16CodePointArray, parser_state_stack: Exotic<ParserStateStack>) -> Scanner {
+    let mut scanner = Scanner {
       token: Token::Invalid,
       lookahead_token: Token::Invalid,
-      source: u16_source,
-      iter: SourceCursor::new(u16_source),
+      source,
+      iter: SourceCursor::new(source),
 
       literal_buffer: [Vec::<u16>::new(), Vec::<u16>::new()],
 
@@ -237,10 +230,54 @@ impl<'a> Scanner<'a> {
     };
   }
 
-  pub fn restore(&mut self, record: &'a ScannerRecord) {
+  pub fn restore(&mut self, record: &ScannerRecord) {
     self.iter = record.iter.clone();
     self.lookahead_token = record.token;
     self.position[Mode::Current as usize] = record.position.clone();
+  }
+
+  #[inline(always)]
+  pub fn has_line_break_before(&self) -> bool {
+    return self
+      .current_scanner_state()
+      .get(ScannerState::HasLinebreakBefore as usize);
+  }
+
+  #[inline(always)]
+  pub fn has_line_break_after(&self) -> bool {
+    return self
+      .current_scanner_state()
+      .get(ScannerState::HasLinebreakAfter as usize);
+  }
+
+  #[inline(always)]
+  pub fn has_more(&self) -> bool {
+    return *self.iter != INVALID && !self.error_reporter.has_pending_error();
+  }
+
+  #[inline(always)]
+  pub fn cur(&self) -> Token {
+    return self.token;
+  }
+
+  #[inline(always)]
+  pub fn peek_token(&self) -> Token {
+    return self.lookahead_token;
+  }
+
+  #[inline(always)]
+  pub fn value(&self) -> &Vec<u16> {
+    return &self.literal_buffer[Mode::Current as usize];
+  }
+
+  #[inline(always)]
+  pub fn peek_value(&self) -> &Vec<u16> {
+    return &self.literal_buffer[Mode::Lookahead as usize];
+  }
+
+  #[inline(always)]
+  pub fn prev_source_position(&self) -> &SourcePosition {
+    return &self.previous_position;
   }
 
   pub fn next(&mut self) -> Token {
@@ -1110,11 +1147,6 @@ impl<'a> Scanner<'a> {
       }
       self.advance();
     }
-  }
-
-  #[inline(always)]
-  fn has_more(&self) -> bool {
-    return *self.iter != INVALID && !self.error_reporter.has_pending_error();
   }
 
   #[inline(always)]

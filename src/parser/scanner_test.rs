@@ -5,23 +5,25 @@ mod scanner_test {
   use super::super::scanner::*;
   use super::super::token::*;
   use crate::context::LuxContext;
+  use crate::structs::FixedU16CodePointArray;
   use crate::unicode::chars;
   use itertools::Itertools;
   use std::char::decode_utf16;
   use std::vec::Vec;
 
-  fn init_scanner<'a, T>(
+  fn init_scanner<T>(
     source: &str,
     opt_parser_state_stack: Option<ParserStateStack>,
     mut cb: impl FnMut(Scanner) -> T,
   ) -> T {
     let context = LuxContext::new_until_internal_object_records();
-    let mut parser_state_stack = if opt_parser_state_stack.is_some() {
+    let mut parser_state_stack = Box::new(if opt_parser_state_stack.is_some() {
       opt_parser_state_stack.unwrap()
     } else {
       ParserStateStack::new()
-    };
-    let mut scanner = Scanner::new(context, source, &parser_state_stack);
+    });
+    let u16_source = FixedU16CodePointArray::from_utf8(context, source);
+    let mut scanner = Scanner::new(u16_source, parser_state_stack.into());
     return cb(scanner);
   }
 
