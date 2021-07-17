@@ -1,3 +1,5 @@
+#[macro_use]
+mod scoped;
 mod align;
 mod bitset;
 mod bitutil;
@@ -15,3 +17,4 @@ pub use self::compare_node::compare_node;
 pub use self::exotic::Exotic;
 pub use self::len::*;
 pub use self::regional_allocator::{Region, RegionalAllocator};
+pub use self::scoped::*;

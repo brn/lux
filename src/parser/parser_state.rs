@@ -5,6 +5,8 @@ pub enum ParserState {
   InTemplateLiteral,
   InTemplateSubstitution,
   RegexpExpected,
+  InGeneratorFunction,
+  InAsyncGeneratorFunction,
   _Sentinel,
 }
 

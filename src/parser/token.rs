@@ -22,7 +22,7 @@ macro_rules! token_enum {
         }
       }
 
-      pub fn symbol(&self) -> &str {
+      pub const fn symbol(&self) -> &'static str {
         match self {
           $(
             &$name::$item => $repr,
@@ -33,6 +33,29 @@ macro_rules! token_enum {
       pub fn values() -> std::slice::Iter<'static, $name> {
         static VALUES: &'static [$name] = &[$($name::$item),*];
         VALUES.into_iter()
+      }
+
+      pub fn is_assignment_operator(&self) -> bool {
+        use $name::*;
+        return match self {
+          OpMulAssign | OpDivAssign | OpPlusAssign | OpMinusAssign | OpShlAssign | OpShrAssign | OpUShrAssign | OpAndAssign | OpOrAssign | OpXorAssign | OpPowAssign |OpAssign | OpModAssign => true,
+          _ => false
+        }
+      }
+
+      pub fn one_of(&self, tokens: &[Token]) -> bool {
+        match self {
+          $(
+            &$name::$item => {
+              for p in tokens {
+                if *p == $name::$item {
+                  return true;
+                }
+              }
+              return false;
+            },
+          )*
+        }
       }
     }
   }

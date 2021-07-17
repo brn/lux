@@ -271,6 +271,11 @@ impl Scanner {
   }
 
   #[inline(always)]
+  pub fn numeric_value(&self) -> f64 {
+    return self.numeric_value[Mode::Current as usize];
+  }
+
+  #[inline(always)]
   pub fn peek_value(&self) -> &Vec<u16> {
     return &self.literal_buffer[Mode::Lookahead as usize];
   }

@@ -2,6 +2,9 @@
 extern crate bitflags;
 
 #[macro_use]
+extern crate const_format;
+
+#[macro_use]
 extern crate static_assertions;
 
 #[macro_use]

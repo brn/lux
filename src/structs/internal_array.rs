@@ -98,7 +98,7 @@ impl<T: Copy> InternalArray<T> {
     context: impl ObjectRecordsInitializedContext,
     capacity: usize,
     length: usize,
-    data: *mut T,
+    data: *const T,
   ) -> InternalArray<T> {
     let mut array = InternalArray::<T>::init(
       HeapLayout::<InternalArrayLayout>::new(

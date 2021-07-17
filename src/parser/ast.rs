@@ -1,10 +1,11 @@
 use super::source_position::SourcePosition;
 use super::token::Token;
 use crate::property::Property;
-use crate::structs::FixedU16CodePointArray;
+use crate::structs::{FixedU16CodePointArray, Repr};
 use crate::utility::*;
-use std::convert::TryFrom;
 use std::ops::{Deref, DerefMut};
+
+pub use std::convert::TryFrom;
 
 const EXPRESSION_BIT: usize = 1;
 const STATEMENT_BIT: usize = EXPRESSION_BIT + 1;
@@ -21,6 +22,7 @@ pub trait AstNode {
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_positon: &SourcePosition);
 }
 
+#[derive(Copy, Clone)]
 pub struct AstMetadata {
   flags: Bitset<u8>,
   source_position: SourcePosition,
@@ -63,14 +65,25 @@ pub trait AstMetaInfo {
 
   fn unset_valid_lhs(&mut self);
 
-  fn set_start_positon(&mut self, col: u32, line: u32) {
-    self.source_position_mut().set_start_col(col);
-    self.source_position_mut().set_start_line_number(line);
+  fn set_source_position(&mut self, pos: &SourcePosition) {
+    (*self.source_position_mut()) = *pos;
   }
 
-  fn set_end_positon(&mut self, col: u32, line: u32) {
-    self.source_position_mut().set_end_col(col);
-    self.source_position_mut().set_end_line_number(line);
+  fn set_start_position(&mut self, pos: &SourcePosition) {
+    self.source_position_mut().set_start_col(pos.start_col());
+    self
+      .source_position_mut()
+      .set_start_line_number(pos.start_line_number());
+  }
+
+  fn set_end_position(&mut self, pos: &SourcePosition) {
+    self.source_position_mut().set_end_col(pos.end_col());
+    self.source_position_mut().set_end_line_number(pos.end_line_number());
+  }
+
+  fn set_end_position_clone(&mut self, pos: SourcePosition) {
+    self.source_position_mut().set_end_col(pos.end_col());
+    self.source_position_mut().set_end_line_number(pos.end_line_number());
   }
 
   fn set_start_pos(&mut self, pos: u32) {
@@ -92,6 +105,7 @@ pub trait AstMetaInfo {
 
 macro_rules! _ast_enum {
   ($name:ident { $($item:ident(Node<$type:ty>),)* }) => {
+    #[derive(Copy, Clone)]
     pub enum $name {
       $(
         $item(Node<$type>),
@@ -188,6 +202,7 @@ macro_rules! _ast_enum {
 
 _ast_enum! {
   Expr {
+    Empty(Node<Empty>),
     FunctionExpression(Node<FunctionExpression>),
     BinaryExpression(Node<BinaryExpression>),
     Elision(Node<Elision>),
@@ -254,6 +269,7 @@ macro_rules! impl_expr {
 
 _ast_enum! {
   Stmt {
+    Empty(Node<Empty>),
     ImportDeclaration(Node<ImportDeclaration>),
     ExportDeclaration(Node<ExportDeclaration>),
     Statements(Node<Statements>),
@@ -272,26 +288,11 @@ _ast_enum! {
     VariableDeclaration(Node<VariableDeclaration>),
   }
 }
-macro_rules! impl_stmt {
-  ($name:tt, $to_string:item, $to_string_tree:item) => {
-    impl AstNode for $name {
-      fn is_expr(&self) -> bool {
-        return false;
-      }
-
-      $to_string
-
-      $to_string_tree
-    }
+macro_rules! impl_stmt_conv {
+  ($name:tt) => {
     impl From<Node<$name>> for Stmt {
       fn from(a: Node<$name>) -> Stmt {
         return Stmt::$name(a);
-      }
-    }
-
-    impl From<Node<$name>> for Ast {
-      fn from(a: Node<$name>) -> Ast {
-        return Ast::Stmt(Stmt::$name(a));
       }
     }
 
@@ -304,6 +305,24 @@ macro_rules! impl_stmt {
         }
       }
     }
+  };
+}
+macro_rules! impl_stmt {
+  ($name:tt, $to_string:item, $to_string_tree:item) => {
+    impl AstNode for $name {
+      fn is_expr(&self) -> bool {
+        return false;
+      }
+
+      $to_string
+
+      $to_string_tree
+    }
+    impl From<Node<$name>> for Ast {
+      fn from(a: Node<$name>) -> Ast {
+        return Ast::Stmt(Stmt::$name(a));
+      }
+    }
 
     impl TryFrom<Ast> for Node<$name> {
       type Error = ();
@@ -314,9 +333,11 @@ macro_rules! impl_stmt {
         }
       }
     }
+    impl_stmt_conv!($name);
   };
 }
 
+#[derive(Copy, Clone)]
 pub enum Ast {
   Expr(Expr),
   Stmt(Stmt),
@@ -425,6 +446,7 @@ impl std::convert::TryFrom<Ast> for Expr {
   }
 }
 
+#[derive(Copy, Clone)]
 pub struct AstLayout<T: AstNode> {
   meta: AstMetadata,
   kind: T,
@@ -442,6 +464,14 @@ impl<T: AstNode> DerefMut for AstLayout<T> {
 }
 
 pub struct Node<T: AstNode>(Exotic<AstLayout<T>>);
+impl<T: AstNode> Copy for Node<T> {}
+
+impl<T: AstNode> Clone for Node<T> {
+  fn clone(&self) -> Self {
+    *self
+  }
+}
+
 impl<T: AstNode> Node<T> {
   pub fn new(region: &mut Region, object: T) -> Node<T> {
     return Node(region.alloc(AstLayout {
@@ -523,7 +553,34 @@ fn to_string_list<T: AstStringifyInternal>(list: &Vec<T>, indent: &mut String, r
   }
 }
 
+pub struct Empty;
+impl_expr!(
+  Empty,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+    let str = format!("{}[Empty {}]\n", indent, source_position.to_string());
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+    self.to_string(indent, result, source_position);
+  }
+);
+impl_stmt_conv!(Empty);
+impl Empty {
+  #[inline]
+  pub fn new(region: &mut Region) -> Node<Empty> {
+    return Node::<Empty>::new(region, Empty);
+  }
+}
+
+bitflags! {
+  pub struct ExpressionsType: u8 {
+    const None = 0;
+    const Arguments = 1;
+  }
+}
+
 pub struct Expressions {
+  expr_type: ExpressionsType,
   items: Vec<Expr>,
 }
 impl_expr!(
@@ -544,9 +601,18 @@ impl Expressions {
     return Node::<Expressions>::new(
       region,
       Expressions {
+        expr_type: ExpressionsType::None,
         items: Vec::<Expr>::new(),
       },
     );
+  }
+
+  pub fn at(&self, index: usize) -> Option<&Expr> {
+    return self.items.get(index);
+  }
+
+  pub fn at_mut(&mut self, index: usize) -> Option<&mut Expr> {
+    return self.items.get_mut(index);
   }
 
   pub fn push(&mut self, expr: Expr) {
@@ -555,6 +621,14 @@ impl Expressions {
 
   pub fn iter(&self) -> std::slice::Iter<Expr> {
     return self.items.iter();
+  }
+
+  pub fn as_arguments(&mut self) {
+    self.expr_type |= ExpressionsType::Arguments;
+  }
+
+  pub fn is_arguments(&self) -> bool {
+    return self.expr_type.contains(ExpressionsType::Arguments);
   }
 }
 
@@ -600,18 +674,30 @@ impl Statements {
     );
   }
 
+  #[inline]
   pub fn push(&mut self, expr: Stmt) {
     self.items.push(expr);
   }
 
+  #[inline]
+  pub fn last(&self) -> Option<&Stmt> {
+    return self.items.last();
+  }
+
+  #[inline]
   pub fn iter(&self) -> std::slice::Iter<Stmt> {
     return self.items.iter();
+  }
+
+  #[inline]
+  pub fn len(&self) -> usize {
+    return self.items.len();
   }
 }
 
 #[derive(Property)]
 pub struct Statement {
-  #[property(get(type = "ref"))]
+  #[property(get(type = "copy"))]
   expr: Expr,
 }
 impl_stmt!(
@@ -639,10 +725,10 @@ pub struct BinaryExpression {
   #[property(get(type = "copy"))]
   op: Token,
 
-  #[property(get(type = "ref"), set(type = "own"))]
+  #[property(get(type = "copy"), set(type = "ref"))]
   lhs: Expr,
 
-  #[property(get(type = "ref"), set(type = "own"))]
+  #[property(get(type = "copy"), set(type = "ref"))]
   rhs: Expr,
 }
 impl_expr!(
@@ -682,10 +768,10 @@ pub struct UnaryExpression {
   #[property(get(type = "copy"))]
   position: UnaryExpressionOperandPosition,
 
-  #[property(get(type = "copy"), set(type = "own"))]
+  #[property(get(type = "copy"), set(type = "ref"))]
   op: Token,
 
-  #[property(get(type = "ref"), set(type = "own"))]
+  #[property(get(type = "copy"), set(type = "ref"))]
   target: Expr,
 }
 impl_expr!(
@@ -721,13 +807,13 @@ impl UnaryExpression {
 
 #[derive(Property)]
 pub struct ConditionalExpression {
-  #[property(get(type = "ref"), set(type = "own"))]
+  #[property(get(type = "copy"), set(type = "ref"))]
   condition: Expr,
 
-  #[property(get(type = "ref"), set(type = "own"))]
+  #[property(get(type = "copy"), set(type = "ref"))]
   then_expr: Expr,
 
-  #[property(get(type = "ref"), set(type = "own"))]
+  #[property(get(type = "copy"), set(type = "ref"))]
   else_expr: Expr,
 }
 impl_expr!(
@@ -761,7 +847,7 @@ impl ConditionalExpression {
 
 #[derive(Property)]
 pub struct NewExpression {
-  #[property(get(type = "ref"), set(type = "own"))]
+  #[property(get(type = "copy"), set(type = "ref"))]
   callee: Expr,
 }
 impl_expr!(
@@ -784,13 +870,14 @@ impl NewExpression {
   }
 }
 
-#[derive(Debug)]
-pub enum CallReceiverType {
-  Expr = 0,
-  New = 0x4,
-  Super = 0x8,
-  Template = 0x10,
-  None = 0x20,
+bitflags! {
+  pub struct CallReceiverType: u8 {
+   const Expr = 0;
+   const New = 4;
+   const Super = 8;
+   const Template = 10;
+   const None = 20;
+  }
 }
 
 pub struct CallExpression {
@@ -822,8 +909,8 @@ impl CallExpression {
   #[inline]
   pub fn new(
     region: &mut Region,
-    callee: Expr,
     receiver: CallReceiverType,
+    callee: Expr,
     parameters: Option<Node<Expressions>>,
   ) -> Node<CallExpression> {
     return Node::<CallExpression>::new(
@@ -837,9 +924,11 @@ impl CallExpression {
   }
 }
 
-pub enum PropertyAccessType {
-  Dot = 1,
-  Element,
+bitflags! {
+pub struct PropertyAccessType: u8 {
+  const Dot = 1;
+  const Element = 2;
+}
 }
 
 pub struct PropertyAccessExpression {
@@ -882,14 +971,15 @@ impl PropertyAccessExpression {
   #[inline]
   pub fn new(
     region: &mut Region,
-    callee: Expr,
+    property_access_type: PropertyAccessType,
+    receiver_type: CallReceiverType,
     receiver: Option<Expr>,
     property: Option<Expr>,
   ) -> Node<PropertyAccessExpression> {
     return Node::<PropertyAccessExpression>::new(
       region,
       PropertyAccessExpression {
-        flags: Bitset::<u8>::new(),
+        flags: Bitset::<u8>::with(property_access_type.bits() | receiver_type.bits()),
         receiver,
         property,
       },
@@ -898,22 +988,22 @@ impl PropertyAccessExpression {
 
   #[inline(always)]
   pub fn is_dot_access(&self) -> bool {
-    return self.flags.get(PropertyAccessType::Dot as usize);
+    return self.flags.get(PropertyAccessType::Dot.bits() as usize);
   }
 
   #[inline(always)]
   pub fn is_element_access(&self) -> bool {
-    return self.flags.get(PropertyAccessType::Element as usize);
+    return self.flags.get(PropertyAccessType::Element.bits() as usize);
   }
 
   #[inline(always)]
   pub fn is_meta_property(&self) -> bool {
-    return self.flags.get(CallReceiverType::New as usize);
+    return self.flags.get(CallReceiverType::New.bits() as usize);
   }
 
   #[inline(always)]
   pub fn is_super_property(&self) -> bool {
-    return self.flags.get(CallReceiverType::Super as usize);
+    return self.flags.get(CallReceiverType::Super.bits() as usize);
   }
 }
 
@@ -999,10 +1089,10 @@ impl FunctionExpression {
 
 #[derive(Property)]
 pub struct ObjectPropertyExpression {
-  #[property(get(type = "ref"))]
+  #[property(get(type = "copy"))]
   key: Expr,
 
-  #[property(get(type = "ref"))]
+  #[property(get(type = "copy"))]
   value: Expr,
   #[property(skip)]
   init: Option<Expr>,
@@ -1149,13 +1239,20 @@ impl StructuralLiteral {
   }
 }
 
+#[derive(Copy, Clone)]
+pub enum LiteralValue {
+  None,
+  String(FixedU16CodePointArray),
+  Number(f64),
+}
+
 #[derive(Property)]
 pub struct Literal {
   #[property(get(type = "copy"))]
   literal_type: Token,
 
   #[property(get(type = "copy"))]
-  value: FixedU16CodePointArray,
+  value: LiteralValue,
 }
 impl_expr!(
   Literal,
@@ -1164,7 +1261,11 @@ impl_expr!(
       "{}[Literal type = {:?} value = {} {}]\n",
       indent,
       self.literal_type,
-      self.value.to_utf8(),
+      match self.value {
+        LiteralValue::None => self.literal_type.symbol().to_string(),
+        LiteralValue::String(s) => s.to_utf8(),
+        LiteralValue::Number(f) => f.to_string(),
+      },
       source_position.to_string()
     );
     result.push_str(&str);
@@ -1175,7 +1276,7 @@ impl_expr!(
 );
 
 impl Literal {
-  pub fn new(region: &mut Region, literal_type: Token, value: FixedU16CodePointArray) -> Node<Literal> {
+  pub fn new(region: &mut Region, literal_type: Token, value: LiteralValue) -> Node<Literal> {
     return Node::new(region, Literal { literal_type, value });
   }
 }
@@ -1330,7 +1431,7 @@ pub struct ImportDeclaration {
   #[property(skip)]
   import_binding: Option<Expr>,
 
-  #[property(get(type = "ref"))]
+  #[property(get(type = "copy"))]
   module_specifier: Expr,
 }
 impl_stmt!(

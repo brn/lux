@@ -1,5 +1,6 @@
 use super::super::hash_map::{DefaultHasher, Hasher, PredefinedHash};
 use super::super::internal_array::{InternalArray, InternalArrayIterator, RefInternalArrayIterator};
+use super::super::repr::Repr;
 use crate::context::{AllocationOnlyContext, ObjectRecordsInitializedContext};
 use std::char::decode_utf16;
 use std::hash::Hash;
@@ -18,6 +19,14 @@ pub fn from_utf8(context: impl ObjectRecordsInitializedContext, str: &str) -> Fi
 }
 
 impl FixedU16CodePointArray {
+  pub fn null() -> Self {
+    return FixedU16CodePointArray::from(Repr::invalid());
+  }
+
+  pub fn from_u16_vec(context: impl ObjectRecordsInitializedContext, vec: &Vec<u16>) -> Self {
+    return FixedU16CodePointArray::copy_construct(context, vec.len(), vec.len(), vec.as_ptr());
+  }
+
   pub fn from_utf8(context: impl ObjectRecordsInitializedContext, str: &str) -> FixedU16CodePointArray {
     return from_utf8(context, str);
   }

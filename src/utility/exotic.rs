@@ -2,6 +2,12 @@ use std::marker::PhantomData;
 use std::mem::transmute;
 
 pub struct Exotic<T>(usize, PhantomData<T>);
+impl<T> Copy for Exotic<T> {}
+impl<T> Clone for Exotic<T> {
+  fn clone(&self) -> Self {
+    *self
+  }
+}
 
 impl<T> std::ops::Deref for Exotic<T> {
   type Target = T;
@@ -46,34 +52,9 @@ impl<T> Exotic<T> {
     return Err("Value that stored in Exotic was not from the Box.");
   }
 
-  #[inline]
-  pub fn copy(&self) -> Result<Exotic<T>, &'static str> {
-    if Exotic::<T>::is_copyable(self) {
-      return Ok(Exotic::<T>(self.0, PhantomData));
-    }
-    return Err("Cannot copy pointer from box");
-  }
-
-  #[inline]
-  pub fn copy_unchecked(&self) -> Exotic<T> {
-    return self.copy().unwrap();
-  }
-
   #[inline(always)]
   fn from_box(b: Box<T>) -> Exotic<T> {
     return Exotic(unsafe { transmute::<*mut T, usize>(Box::leak(b)) } | 1, PhantomData);
-  }
-
-  #[inline(always)]
-  fn is_copyable(this: &Self) -> bool {
-    return this.0 & 1 == 0;
-  }
-}
-
-impl<T> std::ops::Drop for Exotic<T> {
-  #[inline(always)]
-  fn drop(&mut self) {
-    let _ = self.to_box();
   }
 }
 
