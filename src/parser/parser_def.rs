@@ -77,7 +77,7 @@ pub trait ParserDef {
   fn parse_element_list(&mut self) -> ParseResult<Expr>;
   fn parse_spread_element(&mut self) -> ParseResult<Expr>;
   fn parse_object_literal(&mut self, constraints: ParserConstraints) -> ParseResult<Expr>;
-  fn parse_object_literal_property(&mut self) -> ParseResult<Expr>;
+  fn parse_object_literal_property(&mut self, constraints: ParserConstraints) -> ParseResult<Expr>;
   fn parse_property_definition_list(&mut self) -> ParseResult<Expr>;
   fn parse_property_definition(&mut self) -> ParseResult<Expr>;
   fn parse_property_name(&mut self) -> ParseResult<Expr>;
@@ -171,7 +171,7 @@ pub trait ParserDef {
   fn parse_function_expression(&mut self, is_async: bool) -> ParseResult<Expr>;
   fn parse_formal_parameters(&mut self) -> ParseResult<Expr>;
   fn parse_formal_parameter_list(&mut self) -> ParseResult<Expr>;
-  fn parse_function_reste_parameter(&mut self) -> ParseResult<Expr>;
+  fn parse_function_rest_parameter(&mut self) -> ParseResult<Expr>;
   fn parse_function_body(&mut self) -> ParseResult<Expr>;
   fn parse_arrow_function(&mut self) -> ParseResult<Expr>;
   fn parse_arrow_parameter(&mut self) -> ParseResult<Expr>;

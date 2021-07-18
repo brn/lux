@@ -572,6 +572,35 @@ impl Empty {
   }
 }
 
+pub trait NodeCollection<T> {
+  fn list(&self) -> &Vec<T>;
+  fn list_mut(&mut self) -> &mut Vec<T>;
+
+  fn at(&self, index: usize) -> Option<&T> {
+    return self.list().get(index);
+  }
+
+  fn at_mut(&mut self, index: usize) -> Option<&mut T> {
+    return self.list_mut().get_mut(index);
+  }
+
+  fn push(&mut self, expr: T) {
+    self.list_mut().push(expr);
+  }
+
+  fn last(&self) -> Option<&T> {
+    return self.list().last();
+  }
+
+  fn last_mut(&mut self) -> Option<&mut T> {
+    return self.list_mut().last_mut();
+  }
+
+  fn iter(&self) -> std::slice::Iter<T> {
+    return self.list().iter();
+  }
+}
+
 bitflags! {
   pub struct ExpressionsType: u8 {
     const None = 0;
@@ -607,20 +636,8 @@ impl Expressions {
     );
   }
 
-  pub fn at(&self, index: usize) -> Option<&Expr> {
-    return self.items.get(index);
-  }
-
-  pub fn at_mut(&mut self, index: usize) -> Option<&mut Expr> {
-    return self.items.get_mut(index);
-  }
-
-  pub fn push(&mut self, expr: Expr) {
-    self.items.push(expr);
-  }
-
-  pub fn iter(&self) -> std::slice::Iter<Expr> {
-    return self.items.iter();
+  pub fn len(&self) -> usize {
+    return self.items.len();
   }
 
   pub fn as_arguments(&mut self) {
@@ -629,6 +646,15 @@ impl Expressions {
 
   pub fn is_arguments(&self) -> bool {
     return self.expr_type.contains(ExpressionsType::Arguments);
+  }
+}
+
+impl NodeCollection<Expr> for Expressions {
+  fn list(&self) -> &Vec<Expr> {
+    return &self.items;
+  }
+  fn list_mut(&mut self) -> &mut Vec<Expr> {
+    return &mut self.items;
   }
 }
 
@@ -675,16 +701,6 @@ impl Statements {
   }
 
   #[inline]
-  pub fn push(&mut self, expr: Stmt) {
-    self.items.push(expr);
-  }
-
-  #[inline]
-  pub fn last(&self) -> Option<&Stmt> {
-    return self.items.last();
-  }
-
-  #[inline]
   pub fn iter(&self) -> std::slice::Iter<Stmt> {
     return self.items.iter();
   }
@@ -692,6 +708,15 @@ impl Statements {
   #[inline]
   pub fn len(&self) -> usize {
     return self.items.len();
+  }
+}
+
+impl NodeCollection<Stmt> for Statements {
+  fn list(&self) -> &Vec<Stmt> {
+    return &self.items;
+  }
+  fn list_mut(&mut self) -> &mut Vec<Stmt> {
+    return &mut self.items;
   }
 }
 
@@ -1007,24 +1032,39 @@ impl PropertyAccessExpression {
   }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Copy, Clone)]
 pub enum FunctionType {
   Scoped,
   NonScoped,
   Generator,
 }
 
+#[derive(PartialEq, Copy, Clone)]
+pub enum FunctionAccessor {
+  None,
+  Getter,
+  Setter,
+}
+
 #[derive(Property)]
 pub struct FunctionExpression {
+  #[property(get(type = "copy"))]
   name: Option<Node<Literal>>,
+
+  #[property(get(type = "copy"))]
   function_type: FunctionType,
+
+  #[property(get(type = "copy"))]
+  accessor: FunctionAccessor,
+
+  #[property(get(type = "copy"))]
   formal_parameters: Node<Expressions>,
 
   #[property(get(type = "copy"))]
-  source_start_index: u32,
+  source_start_index: isize,
 
   #[property(get(type = "copy"))]
-  source_end_index: u32,
+  source_end_index: isize,
 }
 impl_expr!(
   FunctionExpression,
@@ -1060,15 +1100,17 @@ impl FunctionExpression {
     region: &mut Region,
     name: Option<Node<Literal>>,
     function_type: FunctionType,
+    accessor: FunctionAccessor,
     formal_parameters: Node<Expressions>,
-    source_start_index: u32,
-    source_end_index: u32,
+    source_start_index: isize,
+    source_end_index: isize,
   ) -> Node<FunctionExpression> {
     return Node::new(
       region,
       FunctionExpression {
         name,
         function_type,
+        accessor,
         formal_parameters,
         source_start_index,
         source_end_index,
@@ -1093,8 +1135,9 @@ pub struct ObjectPropertyExpression {
   key: Expr,
 
   #[property(get(type = "copy"))]
-  value: Expr,
-  #[property(skip)]
+  value: Option<Expr>,
+
+  #[property(get(type = "copy"))]
   init: Option<Expr>,
 }
 impl_expr!(
@@ -1107,21 +1150,23 @@ impl_expr!(
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.key.to_string_tree_internal(&mut ni, result);
-    self.value.to_string_tree_internal(&mut ni, result);
-    if let Some(ref init) = self.init {
+    if let Some(val) = self.value {
+      val.to_string_tree_internal(&mut ni, result);
+    }
+    if let Some(init) = self.init {
       init.to_string_tree_internal(&mut ni, result);
     }
   }
 );
 
 impl ObjectPropertyExpression {
-  pub fn new(region: &mut Region, key: Expr, value: Expr, init: Option<Expr>) -> Node<ObjectPropertyExpression> {
+  pub fn new(
+    region: &mut Region,
+    key: Expr,
+    value: Option<Expr>,
+    init: Option<Expr>,
+  ) -> Node<ObjectPropertyExpression> {
     return Node::new(region, ObjectPropertyExpression { key, value, init });
-  }
-
-  #[inline(always)]
-  pub fn init(&self) -> Option<&Expr> {
-    return self.init.as_ref();
   }
 }
 
@@ -1143,20 +1188,24 @@ impl Elision {
   }
 }
 
-pub enum StructuralLiteralType {
-  Array = 0x1,
-  Object = 0x2,
+bitflags! {
+  pub struct StructuralLiteralType: u8 {
+    const Array = 1;
+    const Object = 2;
+  }
 }
 
-pub enum StructuralLiteralTrait {
-  HasAccessor = 0x4,
-  HasGenerator = 0x8,
-  HasSpread = 0x10,
+bitflags! {
+  pub struct StructuralLiteralTrait: u8 {
+    const HasAccessor = 4;
+    const HasGenerator = 8;
+    const HasSpread = 16;
+  }
 }
 
 pub struct StructuralLiteral {
   flag: Bitset<u8>,
-  properties: Node<Expressions>,
+  properties: Vec<Expr>,
 }
 impl_expr!(
   StructuralLiteral,
@@ -1182,60 +1231,70 @@ impl_expr!(
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
-    self.properties.to_string_tree_internal(&mut ni, result);
+    to_string_list(self.list(), indent, result);
   }
 );
 
+impl NodeCollection<Expr> for StructuralLiteral {
+  fn list(&self) -> &Vec<Expr> {
+    return &self.properties;
+  }
+
+  fn list_mut(&mut self) -> &mut Vec<Expr> {
+    return &mut self.properties;
+  }
+}
+
 impl StructuralLiteral {
   #[inline]
-  pub fn new(region: &mut Region, properties: Node<Expressions>) -> Node<StructuralLiteral> {
+  pub fn new(region: &mut Region, literal_type: StructuralLiteralType) -> Node<StructuralLiteral> {
     return Node::<StructuralLiteral>::new(
       region,
       StructuralLiteral {
-        flag: Bitset::<u8>::new(),
-        properties,
+        flag: Bitset::<u8>::with(literal_type.bits()),
+        properties: Vec::new(),
       },
     );
   }
 
   #[inline(always)]
   pub fn is_array_literal(&self) -> bool {
-    return self.flag.get(StructuralLiteralType::Array as usize);
+    return self.flag.get(StructuralLiteralType::Array.bits() as usize);
   }
 
   #[inline(always)]
   pub fn is_object_literal(&self) -> bool {
-    return self.flag.get(StructuralLiteralType::Object as usize);
+    return self.flag.get(StructuralLiteralType::Object.bits() as usize);
   }
 
   #[inline(always)]
   pub fn set_accessor(&mut self) {
-    return self.flag.set(StructuralLiteralTrait::HasAccessor as usize);
+    return self.flag.set(StructuralLiteralTrait::HasAccessor.bits() as usize);
   }
 
   #[inline(always)]
   pub fn has_accessor(&self) -> bool {
-    return self.flag.get(StructuralLiteralTrait::HasAccessor as usize);
+    return self.flag.get(StructuralLiteralTrait::HasAccessor.bits() as usize);
   }
 
   #[inline(always)]
   pub fn set_generator(&mut self) {
-    return self.flag.set(StructuralLiteralTrait::HasGenerator as usize);
+    return self.flag.set(StructuralLiteralTrait::HasGenerator.bits() as usize);
   }
 
   #[inline(always)]
   pub fn has_generator(&self) -> bool {
-    return self.flag.get(StructuralLiteralTrait::HasGenerator as usize);
+    return self.flag.get(StructuralLiteralTrait::HasGenerator.bits() as usize);
   }
 
   #[inline(always)]
   pub fn set_spread(&mut self) {
-    return self.flag.set(StructuralLiteralTrait::HasSpread as usize);
+    return self.flag.set(StructuralLiteralTrait::HasSpread.bits() as usize);
   }
 
   #[inline(always)]
   pub fn has_spread(&self) -> bool {
-    return self.flag.get(StructuralLiteralTrait::HasSpread as usize);
+    return self.flag.get(StructuralLiteralTrait::HasSpread.bits() as usize);
   }
 }
 
@@ -1278,6 +1337,10 @@ impl_expr!(
 impl Literal {
   pub fn new(region: &mut Region, literal_type: Token, value: LiteralValue) -> Node<Literal> {
     return Node::new(region, Literal { literal_type, value });
+  }
+
+  pub fn is_identifier(&self) -> bool {
+    return self.literal_type == Token::Identifier;
   }
 }
 

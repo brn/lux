@@ -75,6 +75,11 @@ impl SourceCursor {
     return Uc32::new(self.val());
   }
 
+  #[inline]
+  fn index(&self) -> isize {
+    return self.index;
+  }
+
   fn back(&mut self) -> Option<u16> {
     if self.source.len() == 0 {
       return None;
@@ -90,26 +95,32 @@ impl SourceCursor {
     return Some(self.source[0]);
   }
 
+  #[inline]
   fn pos(&self) -> isize {
     return self.index;
   }
 
+  #[inline]
   fn val(&self) -> u16 {
     return self.get_val(self.index).cloned().unwrap_or(INVALID);
   }
 
+  #[inline]
   fn val_ref(&self) -> &u16 {
     return self.get_val(self.index).unwrap_or(&INVALID);
   }
 
+  #[inline]
   fn as_char(&self) -> char {
     return chars::ch(self.val());
   }
 
+  #[inline]
   fn peek(&self) -> Option<u16> {
     return self.get_val(self.index + 1).cloned();
   }
 
+  #[inline]
   fn peek_as_char(&self) -> Option<char> {
     return match self.get_val(self.index + 1).cloned() {
       Some(uc) => Some(chars::ch(uc)),
@@ -117,6 +128,7 @@ impl SourceCursor {
     };
   }
 
+  #[inline]
   fn get_val(&self, i: isize) -> Option<&u16> {
     return if i >= 0 && self.source.len() as isize > i {
       Some(&self.source[i as usize])
@@ -268,6 +280,11 @@ impl Scanner {
   #[inline(always)]
   pub fn value(&self) -> &Vec<u16> {
     return &self.literal_buffer[Mode::Current as usize];
+  }
+
+  #[inline(always)]
+  pub fn source_index(&self) -> isize {
+    return self.iter.index();
   }
 
   #[inline(always)]

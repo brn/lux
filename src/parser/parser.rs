@@ -53,7 +53,6 @@ impl ParserDebugger {
     }
   }
   fn enter(&mut self, next_parse: &'static str, current_token: Token, position: &SourcePosition, has_error: bool) {
-    self.indent = format!("  {}", self.indent);
     self.next_parse = next_parse;
     self.current_token = current_token;
     self.position = *position;
@@ -63,12 +62,14 @@ impl ParserDebugger {
       "{}\n{}Enter {}: CurrentToken = {} {:?}",
       self.buffer, self.indent, self.next_parse, self.current_token, self.position
     );
+    self.indent = format!("  {}", self.indent);
   }
 
   fn leave<T>(&mut self, result: &ParseResult<T>) {
     self.indent = self.indent.chars().take(self.indent.len() - 2).collect::<String>();
     self.buffer = format!(
-      "{}\nExit {} {} CurrentToken = {:?}{} {:?}",
+      "{}\n{}Exit {} {} CurrentToken = {:?}{} {:?}",
+      self.buffer,
       self.indent,
       self.next_parse,
       if result.is_ok() { "Success" } else { "Failure" },
@@ -487,19 +488,203 @@ impl ParserDef for Parser {
     return Err("".to_string());
   }
   fn parse_array_literal(&mut self, constraints: ParserConstraints) -> ParseResult<Expr> {
-    return Err("".to_string());
+    debug_assert!(self.cur() == Token::LeftBracket);
+    let mut array = new_node!(self, StructuralLiteral, StructuralLiteralType::Array);
+    array.set_source_position(self.source_position());
+    self.advance();
+    while !self.cur().one_of(&[Token::RightBracket, Token::Invalid, Token::End]) {
+      if self.cur() == Token::Comma {
+        let start_pos = self.source_position().clone();
+        self.advance();
+        match self.cur() {
+          Token::Comma | Token::RightBracket => {
+            array.push(new_node_with_pos!(self, Elision, start_pos).into());
+          }
+          _ => {
+            let pos = self.source_position().clone();
+            array.push(new_node_with_pos!(self, Elision, pos).into());
+          }
+        }
+      } else {
+        if self.cur() == Token::Spread {
+          let a = next_parse!(self, self.parse_spread_element())?;
+          array.push(a);
+        } else {
+          let mut expr = next_parse!(self, self.parse_assignment_expression())?;
+          match expr {
+            Expr::Literal(lit) => {
+              if lit.is_identifier() {
+                expr.set_valid_lhs();
+              } else {
+                expr.unset_valid_lhs();
+              }
+            }
+            _ => expr.unset_valid_lhs(),
+          };
+          array.push(expr);
+        }
+      }
+    }
+    array.set_end_position(self.source_position());
+    expect!(self, self.cur(), Token::RightBracket);
+    return Ok(array.into());
   }
   fn parse_element_list(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
   fn parse_spread_element(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
+    let start_pos = self.source_position().clone();
+    debug_assert!(self.cur() == Token::Spread);
+    self.advance();
+    let expr = next_parse!(self, self.parse_assignment_expression())?;
+    let mut node = new_node_with_pos!(
+      self,
+      UnaryExpression,
+      start_pos,
+      UnaryExpressionOperandPosition::Pre,
+      Token::Spread,
+      expr
+    );
+    node.set_end_position(expr.source_position());
+    return Ok(node.into());
   }
   fn parse_object_literal(&mut self, constraints: ParserConstraints) -> ParseResult<Expr> {
-    return Err("".to_string());
+    let start = self.source_position().clone();
+    debug_assert!(self.cur() == Token::LeftBrace);
+    self.advance();
+    let mut object = new_node_with_pos!(self, StructuralLiteral, start, StructuralLiteralType::Object);
+    if self.cur() == Token::RightBrace {
+      self.advance();
+      return Ok(object.into());
+    }
+
+    while !self.cur().one_of(&[Token::RightBrace, Token::Invalid, Token::End]) {
+      let prop = next_parse!(self, self.parse_object_literal_property(constraints))?;
+      object.push(prop);
+      if self.cur() == Token::Comma {
+        self.advance();
+      }
+    }
+
+    object.set_end_position(self.source_position());
+    expect!(self, self.cur(), Token::RightBrace);
+    return Ok(object.into());
   }
-  fn parse_object_literal_property(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
+  fn parse_object_literal_property(&mut self, constraints: ParserConstraints) -> ParseResult<Expr> {
+    let mut key: ParseResult<Expr> = Err("".to_string());
+    let mut is_computed_property_name = false;
+    let start = self.source_position().clone();
+
+    if self.cur().one_of(&[
+      Token::NumericLiteral,
+      Token::ImplicitOctalLiteral,
+      Token::Identifier,
+      Token::StringLiteral,
+      Token::LeftBracket,
+    ]) {
+      if self.peek() == Token::LeftParen {
+        return next_parse!(self, self.parse_method_definition());
+      }
+
+      key = if self.cur() == Token::Identifier {
+        next_parse!(self, self.parse_identifier_reference())
+      } else {
+        next_parse!(self, self.parse_property_name())
+      };
+
+      if self.cur() == Token::OpAssign {
+        if constraints.is_binding_pattern_allowed() || is_computed_property_name {
+          return Err("Unexpected '=' detected".to_string());
+        }
+        let ident = next_parse!(self, self.parse_identifier_reference())?;
+        let value = next_parse!(self, self.parse_assignment_expression())?;
+        return Ok(
+          new_node_with_positions!(
+            self,
+            ObjectPropertyExpression,
+            start,
+            value.source_position(),
+            ident,
+            None,
+            Some(value)
+          )
+          .into(),
+        );
+      } else if self.cur().one_of(&[Token::Comma, Token::RightBrace]) {
+        let key_node = key?;
+        return Ok(
+          new_node_with_positions!(
+            self,
+            ObjectPropertyExpression,
+            start,
+            key_node.source_position().clone(),
+            key_node,
+            Some(key_node),
+            None
+          )
+          .into(),
+        );
+      }
+    } else {
+      return Err(format!("Property name must be one of 'identifier', 'string literal', 'numeric literal' or 'computed property' but got {}", self.cur().symbol()));
+    }
+
+    if key.is_err() {
+      return Err("Expression expected".to_string());
+    }
+
+    let key_node = key.unwrap();
+
+    if self.cur() == Token::Colon {
+      match key_node {
+        Expr::Literal(lit) => {
+          if lit.is_identifier() {
+            return Ok(
+              new_node_with_positions!(
+                self,
+                ObjectPropertyExpression,
+                start,
+                key_node.source_position().clone(),
+                key_node,
+                Some(key_node),
+                None
+              )
+              .into(),
+            );
+          }
+        }
+        _ => {}
+      }
+    }
+
+    expect!(self, self.cur(), Token::Colon);
+    let value = next_parse!(self, self.parse_assignment_expression())?;
+    if constraints.is_binding_pattern_allowed() {
+      match value {
+        Expr::Literal(node) => {
+          if !node.is_identifier() {
+            return Err("Identifier expected".to_string());
+          }
+        }
+        Expr::StructuralLiteral(_) => {}
+        _ => {
+          return Err("Identifier expected".to_string());
+        }
+      }
+    }
+
+    return Ok(
+      new_node_with_positions!(
+        self,
+        ObjectPropertyExpression,
+        start,
+        value.source_position().clone(),
+        key_node,
+        Some(value),
+        None
+      )
+      .into(),
+    );
   }
   fn parse_property_definition_list(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
@@ -508,7 +693,34 @@ impl ParserDef for Parser {
     return Err("".to_string());
   }
   fn parse_property_name(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
+    match self.cur() {
+      Token::Identifier => {
+        return next_parse!(self, self.parse_identifier());
+      }
+      Token::StringLiteral | Token::NumericLiteral | Token::ImplicitOctalLiteral => {
+        return next_parse!(self, self.parse_literal());
+      }
+      _ => {
+        let start = self.source_position().clone();
+        expect!(self, self.cur(), Token::LeftBracket);
+        let ret = next_parse!(self, self.parse_assignment_expression())?;
+        let end = self.source_position().clone();
+        expect!(self, self.cur(), Token::RightBracket);
+        return Ok(
+          new_node_with_positions!(
+            self,
+            PropertyAccessExpression,
+            start,
+            end,
+            PropertyAccessType::Element,
+            CallReceiverType::None,
+            None,
+            Some(ret)
+          )
+          .into(),
+        );
+      }
+    };
   }
   fn parse_cover_initialized_name(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
@@ -1263,15 +1475,42 @@ impl ParserDef for Parser {
   fn parse_binding_pattern(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_binding_element(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
+    match self.cur() {
+      Token::LeftBracket | Token::LeftBrace => {
+        return next_parse!(self, self.parse_binding_pattern());
+      }
+      _ => return next_parse!(self, self.parse_single_name_binding(ParserConstraints::Initializer)),
+    };
   }
+
   fn parse_single_name_binding(&mut self, constraints: ParserConstraints) -> ParseResult<Expr> {
-    return Err("".to_string());
+    let mut identifier: Expr = self.empty.into();
+    match self.cur() {
+      Token::Identifier | Token::Yield | Token::Await => {
+        let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
+        identifier = new_node!(self, Literal, Token::Identifier, val).into();
+      }
+      _ => return Err("Identifier expected".to_string()),
+    };
+
+    debug_assert!(match identifier {
+      Expr::Empty(_) => false,
+      _ => true,
+    });
+    if constraints.is_initializer_allowed() && self.cur() == Token::OpAssign {
+      self.advance();
+      let expr = next_parse!(self, self.parse_assignment_expression())?;
+      return Ok(new_node!(self, BinaryExpression, Token::OpAssign, identifier, expr).into());
+    }
+    return Ok(identifier);
   }
+
   fn parse_binding_rest_element(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_expression_statement(&mut self) -> ParseResult<Stmt> {
     let expr = next_parse!(self, self.parse_expression())?;
     let mut stmt = new_node!(self, Statement, expr);
@@ -1350,13 +1589,45 @@ impl ParserDef for Parser {
     return Err("".to_string());
   }
   fn parse_formal_parameters(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
+    if self.cur() == Token::Spread {
+      return next_parse!(self, self.parse_function_rest_parameter());
+    }
+    let p = next_parse!(self, self.parse_formal_parameter_list())?;
+    let mut exprs = Node::<Expressions>::try_from(p).unwrap();
+    if self.cur() == Token::Comma {
+      self.advance();
+      if self.cur() == Token::Spread {
+        let rp = next_parse!(self, self.parse_function_rest_parameter())?;
+        exprs.push(rp);
+      }
+    }
+    return Ok(exprs.into());
   }
   fn parse_formal_parameter_list(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
+    let mut exprs = new_node!(self, Expressions);
+    loop {
+      match self.cur() {
+        Token::Identifier | Token::LeftBrace | Token::LeftBracket => {
+          let be = next_parse!(self, self.parse_binding_element())?;
+          exprs.push(be);
+        }
+        Token::Comma => {
+          self.advance();
+        }
+        _ => return Ok(exprs.into()),
+      };
+    }
+    unreachable!();
   }
-  fn parse_function_reste_parameter(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
+  fn parse_function_rest_parameter(&mut self) -> ParseResult<Expr> {
+    expect!(self, self.cur(), Token::Spread);
+    self.advance();
+    match self.cur() {
+      Token::LeftBrace | Token::LeftBracket => {
+        return next_parse!(self, self.parse_binding_pattern());
+      }
+      _ => return next_parse!(self, self.parse_single_name_binding(ParserConstraints::Initializer)),
+    }
   }
   fn parse_function_body(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
@@ -1374,7 +1645,77 @@ impl ParserDef for Parser {
     return Err("".to_string());
   }
   fn parse_method_definition(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
+    let is_getter = self.is_value_match_with("get");
+    let is_setter = self.is_value_match_with("set");
+    if (is_getter || is_setter) && self.cur().one_of(&[Token::Identifier, Token::LeftBracket]) {
+      self.advance();
+    }
+
+    match self.cur() {
+      Token::OpMul => {
+        return next_parse!(self, self.parse_generator_method());
+      }
+      Token::NumericLiteral
+      | Token::ImplicitOctalLiteral
+      | Token::StringLiteral
+      | Token::LeftBracket
+      | Token::Identifier => {
+        let mut maybe_name = Err("".to_string());
+        let mut formal_parameters = Err("".to_string());
+
+        if self.cur() == Token::Identifier && self.is_value_match_with("async") {
+          return next_parse!(self, self.parse_async_method());
+        }
+        maybe_name = next_parse!(self, self.parse_property_name());
+
+        expect!(self, self.cur(), Token::LeftParen);
+        if is_getter {
+          if self.cur() != Token::RightParen {
+            return Err("Getter must not have any formal parameters".to_string());
+          }
+          self.advance();
+          formal_parameters = Ok(new_node!(self, Expressions).into());
+        } else if is_setter {
+          if self.cur() == Token::RightParen {
+            return Err("Setter must have exactly one formal parameter".to_string());
+          }
+          formal_parameters = next_parse!(self, self.parse_property_set_parameter_list());
+          if self.cur() != Token::RightParen {
+            return Err("Setter must have exactly one formal parameter".to_string());
+          }
+          self.advance();
+        } else {
+          formal_parameters = next_parse!(self, self.parse_formal_parameters());
+        }
+
+        expect!(self, self.cur(), Token::LeftBrace);
+        let name = maybe_name?;
+        let formal_params = formal_parameters?;
+        let start = self.scanner.source_index();
+        let _ = next_parse!(self, self.parse_function_body())?;
+        let end = self.scanner.source_index();
+        expect!(self, self.cur(), Token::RightBrace);
+        let accessor_type = if is_getter {
+          FunctionAccessor::Getter
+        } else if is_setter {
+          FunctionAccessor::Setter
+        } else {
+          FunctionAccessor::None
+        };
+        let function = new_node!(
+          self,
+          FunctionExpression,
+          Some(Node::<Literal>::try_from(name).unwrap()),
+          FunctionType::Scoped,
+          accessor_type,
+          Node::<Expressions>::try_from(formal_params).unwrap(),
+          start,
+          end
+        );
+        return Ok(new_node!(self, ObjectPropertyExpression, name, Some(function.into()), None).into());
+      }
+      _ => unreachable!(),
+    };
   }
   fn parse_property_set_parameter_list(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
