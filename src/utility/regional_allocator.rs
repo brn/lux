@@ -24,15 +24,18 @@ impl Block {
     })
   }
 
-  fn alloc<T>(&mut self, object: &T, layout: &Layout) -> Result<*mut T, usize> {
+  fn alloc<T>(&mut self, object: T, layout: &Layout) -> Result<*mut T, (usize, T)> {
     let size = layout.size();
     if self.used + size < self.layout.size() {
       let h = unsafe { self.heap.offset(self.used as isize) as *mut T };
       self.used += size;
-      unsafe { ptr::copy_nonoverlapping(object as *const T, h, 1) };
+      unsafe {
+        ptr::copy_nonoverlapping(&object as *const T, h, 1);
+      };
+      std::mem::forget(object);
       return Ok(h as *mut T);
     }
-    return Err(size);
+    return Err((size, object));
   }
 }
 impl Drop for Block {
@@ -41,6 +44,7 @@ impl Drop for Block {
   }
 }
 
+#[derive(Copy, Clone)]
 pub struct RawBlock {
   ptr: *mut Block,
 }
@@ -87,17 +91,18 @@ impl RegionalAllocator {
     };
   }
 
-  pub fn alloc<T>(&mut self, obj: &T) -> *mut T {
+  pub fn alloc<T>(&mut self, obj: T) -> *mut T {
     let block = self.tail.as_mut();
-    let layout = Layout::for_value(obj);
+    let layout = Layout::for_value(&obj);
     let alloc_result = block.alloc(obj, &layout);
     if let Ok(result) = alloc_result {
       self.alloc_count += 1;
       self.sum_size += layout.size() as f64;
       return result;
     }
-    self.grow(alloc_result.unwrap_err());
-    return self.tail.as_mut().alloc(obj, &layout).unwrap();
+    let (size, object) = alloc_result.unwrap_err();
+    self.grow(size);
+    return self.alloc(object);
   }
 
   pub fn grow(&mut self, failed_size: usize) {
@@ -124,7 +129,7 @@ impl Region {
   }
 
   pub fn alloc<O>(&mut self, object: O) -> Exotic<O> {
-    return Exotic::new(self.0.alloc(&object));
+    return Exotic::new(self.0.alloc(object));
   }
 }
 

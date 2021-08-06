@@ -1,9 +1,9 @@
 use std::vec::Vec;
 
-#[derive(PartialEq, Eq, Copy, Clone)]
+#[derive(PartialEq, Eq, Copy, Clone, Debug)]
 pub enum ParserState {
-  InTemplateLiteral,
-  InTemplateSubstitution,
+  InTemplateLiteral = 0,
+  InTemplateInterpolation,
   RegexpExpected,
   InGeneratorFunction,
   InAsyncGeneratorFunction,
@@ -11,6 +11,7 @@ pub enum ParserState {
 }
 
 pub struct ParserStateStack {
+  pub val: Vec<u32>,
   stack: Vec<ParserState>,
   state_count: Vec<u32>,
 }
@@ -19,6 +20,7 @@ impl ParserStateStack {
   pub fn new() -> ParserStateStack {
     let mut state_count = vec![0; ParserState::_Sentinel as usize];
     return ParserStateStack {
+      val: vec![0; 10],
       stack: Vec::<ParserState>::new(),
       state_count,
     };

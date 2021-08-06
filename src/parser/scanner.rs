@@ -13,7 +13,7 @@ use std::pin::Pin;
 use std::vec::Vec;
 
 enum ScannerState {
-  HasLinebreakBefore,
+  HasLinebreakBefore = 1,
   HasLinebreakAfter,
 }
 
@@ -167,7 +167,7 @@ pub struct ScannerRecord {
 
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum Mode {
-  Current,
+  Current = 0,
   Lookahead,
 }
 
@@ -231,6 +231,7 @@ impl Scanner {
       skipped: 0,
     };
     scanner.advance();
+    scanner.current_position_mut().set_end_col(0_u32);
     return scanner;
   }
 
@@ -306,6 +307,7 @@ impl Scanner {
     self.mode = Mode::Current;
     if !self.has_more() {
       self.position[Mode::Lookahead as usize] = self.position[Mode::Current as usize].clone();
+      self.token = Token::End;
       self.lookahead_token = Token::End;
       return self.lookahead_token;
     }
@@ -328,20 +330,24 @@ impl Scanner {
   }
 
   pub fn peek(&mut self) -> Token {
-    self.mode = Mode::Lookahead;
-    if !self.has_more() {
-      self.position[Mode::Lookahead as usize] = self.position[Mode::Current as usize].clone();
-      self.lookahead_token = Token::End;
-      return self.lookahead_token;
+    let mut this = scoped!(self, |this| { this.mode = Mode::Current });
+    this.mode = Mode::Lookahead;
+    if !this.has_more() {
+      this.position[Mode::Lookahead as usize] = this.position[Mode::Current as usize].clone();
+      this.lookahead_token = Token::End;
+      this.mode = Mode::Current;
+      return this.lookahead_token;
     }
-    if self.lookahead_token != Token::Invalid {
-      return self.lookahead_token;
+    if this.lookahead_token != Token::Invalid {
+      this.mode = Mode::Current;
+      return this.lookahead_token;
     }
-    self.position[Mode::Lookahead as usize] = self.position[Mode::Current as usize].clone();
-    self.prologue();
-    self.lookahead_token = self.tokenize();
-    self.epilogue();
-    return self.lookahead_token;
+    this.position[Mode::Lookahead as usize] = this.position[Mode::Current as usize].clone();
+    this.prologue();
+    this.lookahead_token = this.tokenize();
+    this.epilogue();
+    this.mode = Mode::Current;
+    return this.lookahead_token;
   }
 
   fn is_succeeding(&mut self, value: u16) -> bool {
@@ -415,22 +421,25 @@ impl Scanner {
       let cur = self.current_position_mut();
       cur.set_start_col(cur.end_col());
     }
-    let skipped = self.skipped;
     loop {
       if self.skip_line_break() {
         {
-          let current_position = self.current_position_mut();
-          current_position.set_start_line_number(current_position.end_line_number() + skipped);
-          current_position.set_end_col(0_u32);
-          current_position.set_start_col(0_u32);
-          current_position.set_end_col(0_u32);
+          let skipped = self.skipped;
+          let end_line_number = self.current_position().end_line_number();
+          self
+            .current_position_mut()
+            .set_start_line_number(end_line_number + skipped);
+          self.current_position_mut().set_end_col(0_u32);
+          self.current_position_mut().set_start_col(0_u32);
+          self.current_position_mut().set_end_col(0_u32);
         }
         self.set_linebreak_before();
       } else if self.skip_whitespace() {
         {
-          let current_position = self.current_position_mut();
-          current_position.add_start_col(skipped);
-          current_position.set_end_col(current_position.start_col());
+          let skipped = self.skipped;
+          self.current_position_mut().add_start_col(skipped);
+          let start_col = self.current_position().start_col();
+          self.current_position_mut().set_end_col(start_col);
         }
         self.unset_linebreak_before();
       } else {
@@ -980,6 +989,7 @@ impl Scanner {
     }
     let pos = self.iter.pos() as u32;
     self.current_position_mut().set_end_col(pos);
+    self.advance();
     if let Ok((value, kind)) = result {
       self.set_current_numeric_value(value);
       if kind == chars::NumericValueKind::ImplicitOctal {

@@ -78,14 +78,9 @@ pub trait ParserDef {
   fn parse_spread_element(&mut self) -> ParseResult<Expr>;
   fn parse_object_literal(&mut self, constraints: ParserConstraints) -> ParseResult<Expr>;
   fn parse_object_literal_property(&mut self, constraints: ParserConstraints) -> ParseResult<Expr>;
-  fn parse_property_definition_list(&mut self) -> ParseResult<Expr>;
-  fn parse_property_definition(&mut self) -> ParseResult<Expr>;
   fn parse_property_name(&mut self) -> ParseResult<Expr>;
-  fn parse_cover_initialized_name(&mut self) -> ParseResult<Expr>;
-  fn parse_initializer(&mut self) -> ParseResult<Expr>;
   fn parse_template_literal(&mut self) -> ParseResult<Expr>;
-  fn parse_template_spans(&mut self) -> ParseResult<Expr>;
-  fn parse_template_middle_list(&mut self) -> ParseResult<Expr>;
+  fn parse_cover_parenthesized_expression_and_arrow_parameter_list(&mut self) -> ParseResult<Expr>;
   fn parse_member_expression(&mut self) -> ParseResult<Expr>;
   fn parse_post_member_expression(
     &mut self,
@@ -95,12 +90,9 @@ pub trait ParserDef {
     constraints: ParserConstraints,
     error_if_default: bool,
   ) -> ParseResult<Expr>;
-  fn parse_super_property(&mut self) -> ParseResult<Expr>;
-  fn parse_new_target(&mut self) -> ParseResult<Expr>;
   fn parse_new_expression(&mut self) -> ParseResult<Expr>;
   fn parse_call_expression(&mut self) -> ParseResult<Expr>;
   fn parse_cover_call_expression_and_async_arrow_head(&mut self) -> ParseResult<Expr>;
-  fn parse_call_member_expression(&mut self) -> ParseResult<Expr>;
   fn parse_super_call(&mut self) -> ParseResult<Expr>;
   fn parse_arguments(&mut self) -> ParseResult<Expr>;
   fn parse_arguments_list(&mut self) -> ParseResult<Expr>;
@@ -130,17 +122,17 @@ pub trait ParserDef {
   fn parse_expression(&mut self) -> ParseResult<Expr>;
   fn parse_statement(&mut self) -> ParseResult<Stmt>;
   fn parse_declaration(&mut self) -> ParseResult<Stmt>;
-  fn parse_hoistable_declaration(&mut self) -> ParseResult<Expr>;
+  fn parse_hoistable_declaration(&mut self) -> ParseResult<Stmt>;
   fn parse_breakable_statement(&mut self) -> ParseResult<Expr>;
   fn parse_block_statement(&mut self) -> ParseResult<Stmt>;
   fn parse_block(&mut self) -> ParseResult<Stmt>;
-  fn parse_statement_list<T>(&mut self, a: fn(Token) -> bool) -> ParseResult<Stmt>;
+  fn parse_statement_list<T: Fn(Token) -> bool>(&mut self, a: T) -> ParseResult<Stmt>;
   fn parse_statement_list_item(&mut self) -> ParseResult<Stmt>;
   fn parse_lexical_declaration(&mut self) -> ParseResult<Stmt>;
   fn parse_lexical_binding(&mut self) -> ParseResult<Expr>;
   fn parse_variable_statement(&mut self) -> ParseResult<Stmt>;
-  fn parse_variable_declaration_list(&mut self) -> ParseResult<Expr>;
-  fn parse_variable_declaration(&mut self) -> ParseResult<Expr>;
+  fn parse_variable_declaration_list(&mut self) -> ParseResult<Stmt>;
+  fn parse_variable_declaration(&mut self) -> ParseResult<Stmt>;
   fn parse_binding_pattern(&mut self) -> ParseResult<Expr>;
   fn parse_binding_element(&mut self) -> ParseResult<Expr>;
   fn parse_single_name_binding(&mut self, constraints: ParserConstraints) -> ParseResult<Expr>;
@@ -148,7 +140,7 @@ pub trait ParserDef {
   fn parse_expression_statement(&mut self) -> ParseResult<Stmt>;
   fn parse_if_statement(&mut self) -> ParseResult<Stmt>;
   fn parse_iteration_statement(&mut self) -> ParseResult<Expr>;
-  fn parse_for_declaration(&mut self) -> ParseResult<Expr>;
+  fn parse_for_declaration(&mut self) -> ParseResult<Stmt>;
   fn parse_for_binding(&mut self) -> ParseResult<Expr>;
   fn parse_continue_statement(&mut self) -> ParseResult<Stmt>;
   fn parse_break_statement(&mut self) -> ParseResult<Stmt>;
@@ -167,14 +159,15 @@ pub trait ParserDef {
   fn parse_finally(&mut self) -> ParseResult<Expr>;
   fn parse_catch_parameter(&mut self) -> ParseResult<Expr>;
   fn parse_debugger_statement(&mut self) -> ParseResult<Stmt>;
-  fn parse_function_declaration(&mut self, is_async: bool) -> ParseResult<Stmt>;
-  fn parse_function_expression(&mut self, is_async: bool) -> ParseResult<Expr>;
+  fn parse_function_declaration(&mut self, is_async: bool, is_default: bool) -> ParseResult<Stmt>;
+  fn parse_function_expression(&mut self, is_async: bool, is_default: bool) -> ParseResult<Expr>;
   fn parse_formal_parameters(&mut self) -> ParseResult<Expr>;
   fn parse_formal_parameter_list(&mut self) -> ParseResult<Expr>;
   fn parse_function_rest_parameter(&mut self) -> ParseResult<Expr>;
-  fn parse_function_body(&mut self) -> ParseResult<Expr>;
+  fn parse_function_body(&mut self) -> ParseResult<Stmt>;
   fn parse_arrow_function(&mut self) -> ParseResult<Expr>;
   fn parse_arrow_parameter(&mut self) -> ParseResult<Expr>;
+  fn parse_concise_body(&mut self) -> ParseResult<Ast>;
   fn parse_async_concise_body(&mut self) -> ParseResult<Expr>;
   fn parse_async_arrow_head(&mut self) -> ParseResult<Expr>;
   fn parse_method_definition(&mut self) -> ParseResult<Expr>;
@@ -188,8 +181,9 @@ pub trait ParserDef {
   fn parse_async_function_declaration(&mut self) -> ParseResult<Stmt>;
   fn parse_async_function_expression(&mut self) -> ParseResult<Expr>;
   fn parse_async_function_body(&mut self) -> ParseResult<Expr>;
+  fn parse_async_arrow_function(&mut self) -> ParseResult<Expr>;
   fn parse_await_expression(&mut self) -> ParseResult<Expr>;
-  fn parse_class_declaration(&mut self) -> ParseResult<Expr>;
+  fn parse_class_declaration(&mut self) -> ParseResult<Stmt>;
   fn parse_class_expression(&mut self) -> ParseResult<Expr>;
   fn parse_class_tail(&mut self) -> ParseResult<Expr>;
   fn parse_class_heritage(&mut self) -> ParseResult<Expr>;
@@ -197,14 +191,13 @@ pub trait ParserDef {
   fn parse_class_element_list(&mut self) -> ParseResult<Expr>;
   fn parse_class_element(&mut self) -> ParseResult<Expr>;
   fn parse_script(&mut self) -> ParseResult<Ast>;
-  fn parse_script_body(&mut self) -> ParseResult<Stmt>;
   fn parse_module(&mut self) -> ParseResult<Ast>;
   fn parse_module_body(&mut self) -> ParseResult<Stmt>;
   fn parse_module_item(&mut self) -> ParseResult<Stmt>;
-  fn parse_import_declaration(&mut self) -> ParseResult<Expr>;
+  fn parse_import_declaration(&mut self) -> ParseResult<Stmt>;
   fn parse_name_space_import(&mut self) -> ParseResult<Expr>;
   fn parse_named_import(&mut self) -> ParseResult<Expr>;
-  fn parse_export_declaration(&mut self) -> ParseResult<Expr>;
+  fn parse_export_declaration(&mut self) -> ParseResult<Stmt>;
   fn parse_export_clause(&mut self) -> ParseResult<Expr>;
   fn parse_named_list(&mut self) -> ParseResult<Expr>;
 }

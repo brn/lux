@@ -74,12 +74,7 @@ impl Debug for SourcePosition {
   fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
     return write!(
       f,
-      "SourcePosition: {{
-  start_col: {},
-  end_col: {},
-  start_line_number: {},
-  end_line_number: {}
-}}",
+      "SourcePosition: {{start_col: {}, end_col: {}, start_line_number: {}, end_line_number: {}}}",
       self.start_col, self.end_col, self.start_line_number, self.end_line_number
     );
   }

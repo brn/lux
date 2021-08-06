@@ -576,28 +576,39 @@ pub trait NodeCollection<T> {
   fn list(&self) -> &Vec<T>;
   fn list_mut(&mut self) -> &mut Vec<T>;
 
+  #[inline]
   fn at(&self, index: usize) -> Option<&T> {
     return self.list().get(index);
   }
 
+  #[inline]
   fn at_mut(&mut self, index: usize) -> Option<&mut T> {
     return self.list_mut().get_mut(index);
   }
 
+  #[inline]
   fn push(&mut self, expr: T) {
     self.list_mut().push(expr);
   }
 
+  #[inline]
   fn last(&self) -> Option<&T> {
     return self.list().last();
   }
 
+  #[inline]
   fn last_mut(&mut self) -> Option<&mut T> {
     return self.list_mut().last_mut();
   }
 
+  #[inline]
   fn iter(&self) -> std::slice::Iter<T> {
     return self.list().iter();
+  }
+
+  #[inline]
+  fn len(&self) -> usize {
+    return self.list().len();
   }
 }
 
@@ -636,11 +647,7 @@ impl Expressions {
     );
   }
 
-  pub fn len(&self) -> usize {
-    return self.items.len();
-  }
-
-  pub fn as_arguments(&mut self) {
+  pub fn mark_as_arguments(&mut self) {
     self.expr_type |= ExpressionsType::Arguments;
   }
 
@@ -703,11 +710,6 @@ impl Statements {
   #[inline]
   pub fn iter(&self) -> std::slice::Iter<Stmt> {
     return self.items.iter();
-  }
-
-  #[inline]
-  pub fn len(&self) -> usize {
-    return self.items.len();
   }
 }
 
@@ -906,7 +908,7 @@ bitflags! {
 }
 
 pub struct CallExpression {
-  callee: Expr,
+  callee: Option<Expr>,
   receiver: CallReceiverType,
   parameters: Option<Node<Expressions>>,
 }
@@ -923,8 +925,10 @@ impl_expr!(
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
-    self.callee.to_string_tree_internal(&mut ni, result);
-    if let Some(ref node) = self.parameters {
+    if let Some(callee) = self.callee {
+      callee.to_string_tree_internal(&mut ni, result);
+    }
+    if let Some(node) = self.parameters {
       node.to_string_tree_internal(&mut ni, result);
     }
   }
@@ -935,7 +939,7 @@ impl CallExpression {
   pub fn new(
     region: &mut Region,
     receiver: CallReceiverType,
-    callee: Expr,
+    callee: Option<Expr>,
     parameters: Option<Node<Expressions>>,
   ) -> Node<CallExpression> {
     return Node::<CallExpression>::new(
@@ -1052,6 +1056,9 @@ pub struct FunctionExpression {
   name: Option<Node<Literal>>,
 
   #[property(get(type = "copy"))]
+  is_async: bool,
+
+  #[property(get(type = "copy"))]
   function_type: FunctionType,
 
   #[property(get(type = "copy"))]
@@ -1061,16 +1068,13 @@ pub struct FunctionExpression {
   formal_parameters: Node<Expressions>,
 
   #[property(get(type = "copy"))]
-  source_start_index: isize,
-
-  #[property(get(type = "copy"))]
-  source_end_index: isize,
+  function_body: Ast,
 }
 impl_expr!(
   FunctionExpression,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
     let str = format!(
-      "{}[FunctionExpression type = {} start = {} end = {} {}]\n",
+      "{}[FunctionExpression type = {} {}]\n",
       indent,
       if self.is_arrow_function() {
         "ArrowFunction"
@@ -1079,8 +1083,6 @@ impl_expr!(
       } else {
         "Function"
       },
-      self.source_start_index,
-      self.source_end_index,
       source_position.to_string()
     );
     result.push_str(&str);
@@ -1092,28 +1094,29 @@ impl_expr!(
       name.to_string_tree_internal(&mut ni, result);
     }
     self.formal_parameters.to_string_tree_internal(&mut ni, result);
+    self.function_body.to_string_tree_internal(&mut ni, result);
   }
 );
 
 impl FunctionExpression {
   pub fn new(
     region: &mut Region,
+    is_async: bool,
     name: Option<Node<Literal>>,
     function_type: FunctionType,
     accessor: FunctionAccessor,
     formal_parameters: Node<Expressions>,
-    source_start_index: isize,
-    source_end_index: isize,
+    function_body: Ast,
   ) -> Node<FunctionExpression> {
     return Node::new(
       region,
       FunctionExpression {
         name,
+        is_async,
         function_type,
         accessor,
         formal_parameters,
-        source_start_index,
-        source_end_index,
+        function_body,
       },
     );
   }
@@ -1345,7 +1348,7 @@ impl Literal {
 }
 
 pub struct TemplateLiteral {
-  parts: Node<Expressions>,
+  parts: Vec<Expr>,
 }
 impl_expr!(
   TemplateLiteral,
@@ -1356,12 +1359,23 @@ impl_expr!(
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
-    self.parts.to_string_tree_internal(&mut ni, result);
+    to_string_list(&self.parts, &mut ni, result);
   }
 );
+
+impl NodeCollection<Expr> for TemplateLiteral {
+  fn list(&self) -> &Vec<Expr> {
+    return &self.parts;
+  }
+
+  fn list_mut(&mut self) -> &mut Vec<Expr> {
+    return &mut self.parts;
+  }
+}
+
 impl TemplateLiteral {
-  pub fn new(region: &mut Region, parts: Node<Expressions>) -> Node<TemplateLiteral> {
-    return Node::new(region, TemplateLiteral { parts });
+  pub fn new(region: &mut Region) -> Node<TemplateLiteral> {
+    return Node::new(region, TemplateLiteral { parts: Vec::new() });
   }
 }
 
@@ -1411,7 +1425,7 @@ impl ImportSpecifier {
 }
 
 pub struct NamedImportList {
-  list: Node<Expressions>,
+  list: Vec<Expr>,
 }
 impl_expr!(
   NamedImportList,
@@ -1422,18 +1436,35 @@ impl_expr!(
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
-    self.list.to_string_tree_internal(&mut ni, result);
+    to_string_list(&self.list, &mut ni, result);
   }
 );
-impl NamedImportList {
-  pub fn new(region: &mut Region, list: Node<Expressions>) -> Node<NamedImportList> {
-    return Node::new(region, NamedImportList { list });
+
+impl NodeCollection<Expr> for NamedImportList {
+  fn list(&self) -> &Vec<Expr> {
+    return &self.list;
+  }
+
+  fn list_mut(&mut self) -> &mut Vec<Expr> {
+    return &mut self.list;
   }
 }
 
+impl NamedImportList {
+  pub fn new(region: &mut Region) -> Node<NamedImportList> {
+    return Node::new(region, NamedImportList { list: Vec::new() });
+  }
+}
+
+#[derive(Property)]
 pub struct ImportBinding {
+  #[property(get(type = "copy"), set(type = "ref"))]
   default_binding: Option<Expr>,
+
+  #[property(get(type = "copy"), set(type = "ref"))]
   namespace_import: Option<Expr>,
+
+  #[property(get(type = "copy"), set(type = "ref"))]
   named_import_list: Option<Expr>,
 }
 impl_expr!(
@@ -1471,21 +1502,6 @@ impl ImportBinding {
         named_import_list,
       },
     );
-  }
-
-  #[inline(always)]
-  pub fn default_binding(&self) -> Option<&Expr> {
-    return self.default_binding.as_ref();
-  }
-
-  #[inline(always)]
-  pub fn namespace_import(&self) -> Option<&Expr> {
-    return self.namespace_import.as_ref();
-  }
-
-  #[inline(always)]
-  pub fn named_import_list(&self) -> Option<&Expr> {
-    return self.named_import_list.as_ref();
   }
 }
 

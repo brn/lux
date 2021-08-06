@@ -1,17 +1,29 @@
-pub struct _Scoped<T: FnMut()>(T);
-impl<T: FnMut()> _Scoped<T> {
-  pub fn new(a: T) -> Self {
-    return _Scoped(a);
+pub struct _Scoped<C, T: FnMut(&mut C)>(C, T);
+impl<C, T: FnMut(&mut C)> _Scoped<C, T> {
+  pub fn new(context: C, a: T) -> Self {
+    return _Scoped(context, a);
   }
 }
-impl<T: FnMut()> Drop for _Scoped<T> {
+impl<C, T: FnMut(&mut C)> std::ops::Deref for _Scoped<C, T> {
+  type Target = C;
+  fn deref(&self) -> &Self::Target {
+    return &self.0;
+  }
+}
+impl<C, T: FnMut(&mut C)> std::ops::DerefMut for _Scoped<C, T> {
+  fn deref_mut(&mut self) -> &mut Self::Target {
+    return &mut self.0;
+  }
+}
+impl<C, T: FnMut(&mut C)> Drop for _Scoped<C, T> {
   fn drop(&mut self) {
-    self.0();
+    self.1(&mut self.0);
   }
 }
 
 macro_rules! scoped {
-  ($fn:expr) => {
-    let _ = _Scoped::new($fn);
-  };
+  ($self:tt, $fn:expr) => {{
+    let __scoped_var__ = _Scoped::new($self, $fn);
+    __scoped_var__
+  }};
 }
