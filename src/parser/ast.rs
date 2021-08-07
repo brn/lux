@@ -105,7 +105,7 @@ pub trait AstMetaInfo {
 
 macro_rules! _ast_enum {
   ($name:ident { $($item:ident(Node<$type:ty>),)* }) => {
-    #[derive(Copy, Clone)]
+    #[derive(Copy, Clone, Debug)]
     pub enum $name {
       $(
         $item(Node<$type>),
@@ -337,7 +337,7 @@ macro_rules! impl_stmt {
   };
 }
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum Ast {
   Expr(Expr),
   Stmt(Stmt),
@@ -464,6 +464,11 @@ impl<T: AstNode> DerefMut for AstLayout<T> {
 }
 
 pub struct Node<T: AstNode>(Exotic<AstLayout<T>>);
+impl<T: AstNode> std::fmt::Debug for Node<T> {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    return writeln!(f, "Node<{}>", std::any::type_name::<T>());
+  }
+}
 impl<T: AstNode> Copy for Node<T> {}
 
 impl<T: AstNode> Clone for Node<T> {
@@ -1233,7 +1238,6 @@ impl_expr!(
   },
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
     self.to_string(indent, result, source_position);
-    let mut ni = format!("  {}", indent);
     to_string_list(self.list(), indent, result);
   }
 );
@@ -1358,8 +1362,7 @@ impl_expr!(
   },
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
     self.to_string(indent, result, source_position);
-    let mut ni = format!("  {}", indent);
-    to_string_list(&self.parts, &mut ni, result);
+    to_string_list(&self.parts, indent, result);
   }
 );
 
@@ -1435,8 +1438,7 @@ impl_expr!(
   },
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
     self.to_string(indent, result, source_position);
-    let mut ni = format!("  {}", indent);
-    to_string_list(&self.list, &mut ni, result);
+    to_string_list(&self.list, indent, result);
   }
 );
 
@@ -1873,7 +1875,7 @@ mod ast_test {
     let elision2 = Elision::new(&mut region);
     expressions.push(elision.into());
     expressions.push(elision2.into());
-    compare_node(
+    match compare_node(
       "Expressions",
       &expressions.to_string_tree(),
       indoc! {"
@@ -1881,6 +1883,11 @@ mod ast_test {
           [Elision [0, 0, 0, 0]]
           [Elision [0, 0, 0, 0]]
       "},
-    );
+    ) {
+      Err(em) => {
+        println!("{}", em);
+      }
+      _ => {}
+    }
   }
 }

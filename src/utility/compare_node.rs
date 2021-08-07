@@ -1,3 +1,5 @@
+use crate::parser::SourcePosition;
+
 #[cfg(test)]
 #[inline]
 pub fn join(pos: u32, v: &Vec<&str>) -> String {
@@ -34,7 +36,7 @@ pub fn join(pos: u32, v: &Vec<&str>) -> String {
 
 #[cfg(test)]
 #[inline]
-pub fn compare_node(code: &str, value: &str, expected: &str) {
+pub fn compare_node(code: &str, value: &str, expected: &str) -> Result<(), String> {
   let mut v = value.split('\n').collect::<Vec<_>>();
   let mut e = expected.split('\n').collect::<Vec<_>>();
   let line_number = e.len();
@@ -55,8 +57,7 @@ pub fn compare_node(code: &str, value: &str, expected: &str) {
             join(index, &mut e),
             code
           );
-          assert!(a == b, em);
-          return;
+          return Err(em);
         }
       }
     }
@@ -71,7 +72,7 @@ pub fn compare_node(code: &str, value: &str, expected: &str) {
           join(index, &mut e),
           code
         );
-        assert!(false, em);
+        return Err(em);
       }
       break;
     } else if en.is_none() {
@@ -83,9 +84,48 @@ pub fn compare_node(code: &str, value: &str, expected: &str) {
           join(index, &mut e),
           code
         );
-        assert!(false, em);
+        return Err(em);
       }
       break;
     }
   }
+
+  return Ok(());
+}
+
+#[cfg(test)]
+pub fn compare_position(actual: &SourcePosition, expected: &SourcePosition) -> Result<(), String> {
+  if actual.start_col() != expected.start_col() {
+    return Err(format!(
+      "start_col => actual: {} expected: {}",
+      actual.start_col(),
+      expected.start_col()
+    ));
+  }
+
+  if actual.end_col() != expected.end_col() {
+    return Err(format!(
+      "end_col => actual: {} expected: {}",
+      actual.end_col(),
+      expected.end_col(),
+    ));
+  }
+
+  if actual.start_line_number() != expected.start_line_number() {
+    return Err(format!(
+      "start_line_number => actual: {} expected: {}",
+      actual.start_line_number(),
+      expected.start_line_number(),
+    ));
+  }
+
+  if actual.end_line_number() != expected.end_line_number() {
+    return Err(format!(
+      "end_line_number => actual: {} expected: {}",
+      actual.end_line_number(),
+      expected.end_line_number(),
+    ));
+  }
+
+  return Ok(());
 }

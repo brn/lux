@@ -303,6 +303,10 @@ impl Scanner {
     return &self.previous_position;
   }
 
+  pub fn clear_peek(&mut self) {
+    self.lookahead_token = Token::Invalid;
+  }
+
   pub fn next(&mut self) -> Token {
     self.mode = Mode::Current;
     if !self.has_more() {
@@ -742,6 +746,7 @@ impl Scanner {
       }
       '`' => {
         self.advance();
+        self.parser_state_stack.push_state(ParserState::InTemplateLiteral);
         return BackQuote;
       }
       '\'' | '"' => {
@@ -798,7 +803,7 @@ impl Scanner {
                 }
               } else {
                 is_escaped = true;
-                self.advance_and_push_buffer();
+                self.advance();
               }
             } else {
               report_syntax_error!(self, "Unterminated string literal", Token::Invalid);
@@ -987,8 +992,12 @@ impl Scanner {
     if pos != self.iter.pos() {
       self.iter.back();
     }
-    let pos = self.iter.pos() as u32;
-    self.current_position_mut().set_end_col(pos);
+    let next_pos = if self.iter.pos() >= 0 {
+      self.iter.pos() as u32
+    } else {
+      0_u32
+    };
+    self.current_position_mut().set_end_col(next_pos);
     self.advance();
     if let Ok((value, kind)) = result {
       self.set_current_numeric_value(value);
@@ -1084,8 +1093,13 @@ impl Scanner {
           }
         }
         chars::CR_CHAR => {
-          if chars::is_lf(*self.iter) {
-            self.advance();
+          if let Some(next) = self.iter.peek() {
+            if chars::is_lf(next) {
+              self.advance_and_push_buffer();
+              self.advance_and_push_buffer();
+              self.current_position_mut().set_end_col(0_u32);
+              self.current_position_mut().inc_end_line_number();
+            }
           }
         }
         chars::LF_CHAR => {

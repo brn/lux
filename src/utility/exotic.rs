@@ -1,6 +1,7 @@
 use std::marker::PhantomData;
 use std::mem::transmute;
 
+#[derive(Debug)]
 pub struct Exotic<T>(usize, PhantomData<T>);
 impl<T> Copy for Exotic<T> {}
 impl<T> Clone for Exotic<T> {

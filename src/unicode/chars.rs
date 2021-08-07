@@ -410,13 +410,19 @@ pub fn parse_numeric_value<'a>(
       if let Some(next) = iter.peek() {
         if ch(*next) == 'x' {
           iter.next();
-          return Ok((parse_hex(start) as f64, NumericValueKind::Hex));
+          origin.next();
+          origin.next();
+          return Ok((parse_hex(origin) as f64, NumericValueKind::Hex));
         } else if ch(*next) == 'b' {
           iter.next();
-          return Ok((parse_binary(start) as f64, NumericValueKind::Binary));
+          origin.next();
+          origin.next();
+          return Ok((parse_binary(origin) as f64, NumericValueKind::Binary));
         } else if ch(*next) == 'o' {
           iter.next();
-          return Ok((parse_octal(start) as f64, NumericValueKind::Octal));
+          origin.next();
+          origin.next();
+          return Ok((parse_octal(origin) as f64, NumericValueKind::Octal));
         } else if ch(*next) == '.' {
           iter.next();
           is_leading_zeros = false;

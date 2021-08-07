@@ -222,6 +222,10 @@ impl Parser {
     self.scanner.next();
     self.parser_type = parser_type;
     self.parse_program();
+    if self.result.is_err() {
+      let m = self.result.as_ref().unwrap_err().clone();
+      report_syntax_error!(noreturn self, m);
+    }
     return self.result.clone();
   }
 
@@ -737,11 +741,14 @@ impl ParserDef for Parser {
   }
 
   fn parse_template_literal(&mut self) -> ParseResult<Expr> {
-    self.parser_state.push_state(ParserState::InTemplateLiteral);
     let mut template_literal = new_node_with_pos!(self, TemplateLiteral, self.source_position().clone());
     expect!(self, self.cur(), Token::BackQuote);
 
     let mut buffer = Vec::<Expr>::new();
+    if self.value().len() > 0 {
+      let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
+      buffer.push(new_node_with_pos!(self, Literal, self.source_position().clone(), Token::StringLiteral, val).into());
+    }
 
     while self.cur() != Token::Template {
       if self.value().len() > 0 {

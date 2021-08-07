@@ -11,3 +11,6 @@ mod scanner;
 mod scanner_test;
 mod source_position;
 mod token;
+
+pub use parser::*;
+pub use source_position::*;

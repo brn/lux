@@ -56,7 +56,9 @@ impl<'a> std::ops::Shl<String> for ErrorDescriptorMessageContainer<'a> {
   }
 }
 
+#[derive(Property)]
 pub struct ErrorReporter {
+  #[property(get(type = "ref"))]
   pending_errors: Vec<Box<ErrorDescriptor>>,
 }
 

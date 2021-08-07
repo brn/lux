@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod parser_test {
   use super::super::ast::*;
+  use super::super::error_reporter::*;
   use super::super::parser::*;
   use super::super::source_position::*;
   use super::*;
@@ -207,10 +208,17 @@ mod parser_test {
     }};
   }
 
+  macro_rules! octal {
+    ($val:expr, $pos:expr) => {{
+      let attr = format!("type = ImplicitOctalLiteral value = {}", $val);
+      ast!("Literal", &attr, $pos)
+    }};
+  }
+
   macro_rules! str {
     ($val:expr, $pos:expr) => {{
       let attr = format!("type = StringLiteral value = {}", $val);
-      ast_with_children!("Literal", $attr, $pos, $($asts,)*)
+      ast!("Literal", &attr, $pos)
     }};
   }
 
@@ -241,16 +249,25 @@ mod parser_test {
 
   type Expectations<'a> = [&'a str; 3];
 
-  fn parse_test<'a>(env_list: &[[&'a str; 2]; 3], code: &str, expectations: &'a Expectations) {
+  fn parse_test<'a>(env_list: &[(Option<&'a str>, &'a str); 3], code: &str, expectations: &'a Expectations) {
     for i in 0..3 {
       let env = env_list[i];
-      let str = format!("{}{}{};PARSER_SENTINEL", env[0], code, env[1]);
+      if env.0.is_none() {
+        continue;
+      }
+      let str = format!("{}{}{};PARSER_SENTINEL", env.0.unwrap(), code, env.1);
       let context = LuxContext::new_until_internal_object_records();
       let mut parser = Parser::new(context, &str);
       match parser.parse(ParserType::Script) {
         Ok(ast) => {
           let tree = ast.to_string_tree();
-          compare_node(&str, &tree, expectations[i]);
+          match compare_node(&str, &tree, expectations[i]) {
+            Err(em) => {
+              println!("{}", em);
+              parser.print_stack_trace();
+            }
+            _ => {}
+          }
         }
         Err(err) => {
           parser.print_stack_trace();
@@ -261,16 +278,28 @@ mod parser_test {
     }
   }
 
-  fn syntax_error_test<'a>(env_list: &[[&'a str; 2]; 3], code: &str, show_error: bool) {
+  fn syntax_error_test<'a>(
+    env_list: &[(Option<&str>, &str); 3],
+    code: &str,
+    source_positions: &[&SourcePosition],
+    show_error: bool,
+  ) {
     for i in 0..3 {
       let env = env_list[i];
-      if !env[0].is_empty() {
-        let str = format!("{}{}{};PARSER_SENTINEL", env[0], code, env[1]);
+      if env.0.is_some() {
+        let str = format!("{}{}{};PARSER_SENTINEL", env.0.unwrap(), code, env.1);
         let context = LuxContext::new_until_internal_object_records();
         let mut parser = Parser::new(context, &str);
         let ast = parser.parse(ParserType::Script);
         let m = format!("Code {} not generate error", code);
         assert!(ast.is_err(), m);
+        assert!(parser.error_reporter().has_pending_error());
+        for (i, ed) in parser.error_reporter().pending_errors().iter().enumerate() {
+          compare_position(ed.source_position(), source_positions[i]);
+        }
+        if show_error {
+          parser.error_reporter().print_errors();
+        }
       }
     }
   }
@@ -348,10 +377,17 @@ mod parser_test {
     end_line_number: u32,
     before_line_break_count: u32,
   ) {
-    let env: [[&str; 2]; 3] = [
-      ["", ""],
-      [if is_skip_strict_mode { "" } else { "'use strict';" }, ""],
-      ["function X() {", "}"],
+    let env: [(Option<&str>, &str); 3] = [
+      (Some(""), ""),
+      (
+        if is_skip_strict_mode {
+          None
+        } else {
+          Some("'use strict';")
+        },
+        "",
+      ),
+      (Some("function X() {"), "}"),
     ];
 
     let size = value.len() as u32;
@@ -399,6 +435,239 @@ mod parser_test {
         return number!("1", pos!(start, end, 0, 0));
       },
       "1",
+    );
+  }
+
+  #[test]
+  fn parse_multi_decimal_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return number!("1024", pos!(start, end, 0, 0));
+      },
+      "1024",
+    );
+  }
+
+  #[test]
+  fn parse_multi_decimal_exponent_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return number!("130000000000", pos!(start, end, 0, 0));
+      },
+      "13e+10",
+    );
+  }
+
+  #[test]
+  fn parse_float_leading_zero_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return number!("0.12", pos!(start, end, 0, 0));
+      },
+      "0.12",
+    );
+  }
+
+  #[test]
+  fn parse_float_not_leading_zero_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return number!("0.12", pos!(start, end, 0, 0));
+      },
+      ".12",
+    );
+  }
+
+  #[test]
+  fn parse_hex_decimal_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return number!("12379813812177893000", pos!(start, end, 0, 0));
+      },
+      "0xabcdef1234567890",
+    );
+  }
+
+  #[test]
+  fn parse_binary_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return number!("21", pos!(start, end, 0, 0));
+      },
+      "0b010101",
+    );
+  }
+
+  #[test]
+  fn parse_octal_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return number!("511", pos!(start, end, 0, 0));
+      },
+      "0o777",
+    );
+  }
+
+  #[test]
+  fn parse_implicit_octal_literal_test() {
+    single_expression_test_with_options(
+      |(start, end)| {
+        return octal!("511", pos!(start, end, 0, 0));
+      },
+      "0777",
+      true,
+      0,
+      0,
+    );
+  }
+
+  #[test]
+  fn parse_decimal_leading_zero_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return number!("7778", pos!(start, end, 0, 0));
+      },
+      "07778",
+    );
+  }
+
+  #[test]
+  fn numeric_literal_error_test() {
+    let env = [(Some(""), ""), (Some("'use strict"), ""), (Some("function X() {"), "")];
+    syntax_error_test(
+      &env,
+      "0x_",
+      &[&pos!(0, 2, 0, 0), &pos!(13, 15, 0, 0), &pos!(14, 16, 0, 0)],
+      false,
+    );
+
+    syntax_error_test(
+      &env,
+      "0b_",
+      &[&pos!(0, 2, 0, 0), &pos!(13, 15, 0, 0), &pos!(14, 16, 0, 0)],
+      false,
+    );
+
+    syntax_error_test(
+      &env,
+      "0o_",
+      &[&pos!(0, 2, 0, 0), &pos!(13, 15, 0, 0), &pos!(14, 16, 0, 0)],
+      false,
+    );
+
+    syntax_error_test(
+      &env,
+      "13e",
+      &[&pos!(0, 3, 0, 0), &pos!(13, 16, 0, 0), &pos!(14, 17, 0, 0)],
+      false,
+    );
+
+    syntax_error_test(
+      &env,
+      "13e+",
+      &[&pos!(0, 4, 0, 0), &pos!(13, 17, 0, 0), &pos!(14, 18, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn parse_implicit_octal_error_test() {
+    let env = [(None, ""), (None, ""), (Some("'use strict';"), "")];
+    syntax_error_test(
+      &env,
+      "0777",
+      &[&pos!(0, 0, 0, 0), &pos!(0, 0, 0, 0), &pos!(13, 17, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn parse_single_quote_string_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return str!("test", pos!(start, end, 0, 0));
+      },
+      "'test'",
+    );
+  }
+
+  #[test]
+  fn parse_double_quote_string_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return str!("test", pos!(start, end, 0, 0));
+      },
+      "\"test\"",
+    );
+  }
+
+  #[test]
+  fn parse_single_quote_escaped_string_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return str!("test 'value", pos!(start, end, 0, 0));
+      },
+      "'test \\'value'",
+    );
+  }
+
+  #[test]
+  fn parse_double_quote_escaped_string_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return str!("test \"value", pos!(start, end, 0, 0));
+      },
+      "\"test \\\"value\"",
+    );
+  }
+
+  #[test]
+  fn parse_single_quote_backslash_escaped_string_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return str!("test\\ value", pos!(start, end, 0, 0));
+      },
+      "'test\\\\ value'",
+    );
+  }
+
+  #[test]
+  fn parse_double_quote_backslash_escaped_string_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return str!("test\\ value", pos!(start, end, 0, 0));
+      },
+      "\"test\\\\ value\"",
+    );
+  }
+
+  #[test]
+  fn parse_string_literal_unicode_escape_sequence_test() {
+    single_expression_test(
+      |(start, end)| {
+        return str!("A_B_C_D", pos!(start, end, 0, 0));
+      },
+      "'\\u0041_\\u0042_\\u0043_\\u0044'",
+    );
+  }
+
+  #[test]
+  fn parse_string_literal_ascii_escape_sequence_test() {
+    single_expression_test(
+      |(start, end)| {
+        return str!("A_B_C_D", pos!(start, end, 0, 0));
+      },
+      "'\\x41_\\x42_\\x43_\\x44'",
+    );
+  }
+
+  #[test]
+  fn parse_template_literal_without_interpolation_test() {
+    single_expression_test(
+      |(start, end)| {
+        return tmpl!(pos!(start, end, 0, 0), str!("test", pos!(start + 1, end, 0, 0)));
+      },
+      "`test`",
     );
   }
 }
