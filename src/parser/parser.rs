@@ -743,42 +743,29 @@ impl ParserDef for Parser {
   fn parse_template_literal(&mut self) -> ParseResult<Expr> {
     let mut template_literal = new_node_with_pos!(self, TemplateLiteral, self.source_position().clone());
     expect!(self, self.cur(), Token::BackQuote);
-
-    let mut buffer = Vec::<Expr>::new();
-    if self.value().len() > 0 {
-      let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
-      buffer.push(new_node_with_pos!(self, Literal, self.source_position().clone(), Token::StringLiteral, val).into());
-    }
-
     while self.cur() != Token::Template {
-      if self.value().len() > 0 {
-        let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
-        buffer
-          .push(new_node_with_pos!(self, Literal, self.source_position().clone(), Token::StringLiteral, val).into());
-      }
-      if self.cur() == Token::TemplateSubstitution {
-        self.advance();
-        self.parser_state.push_state(ParserState::InTemplateInterpolation);
-        let expr = next_parse!(self, self.parse_expression())?;
-        template_literal.push(expr.into());
-        self.parser_state.pop_state(ParserState::InTemplateInterpolation);
-        expect!(self, self.cur(), Token::RightBrace);
-      } else {
-        self.advance();
-      }
+      match self.cur() {
+        Token::StringLiteral => {
+          let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
+          template_literal
+            .push(new_node_with_pos!(self, Literal, self.source_position().clone(), Token::StringLiteral, val).into());
+          self.advance();
+        }
+        Token::TemplateSubstitution => {
+          self.parser_state.push_state(ParserState::InTemplateInterpolation);
+          self.advance();
+          let expr = next_parse!(self, self.parse_expression())?;
+          template_literal.push(expr.into());
+          self.parser_state.pop_state(ParserState::InTemplateInterpolation);
+          expect!(self, self.cur(), Token::RightBrace);
+        }
+        _ => {
+          self.advance();
+        }
+      };
     }
 
-    if self.value().len() > 0 {
-      let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
-      template_literal
-        .push(new_node_with_pos!(self, Literal, self.source_position().clone(), Token::StringLiteral, val).into());
-    }
-
-    if let Some(last) = template_literal.last().cloned() {
-      template_literal.set_end_position(last.source_position());
-    } else {
-      template_literal.set_end_position(self.source_position());
-    }
+    template_literal.set_end_position(self.source_position());
     self.parser_state.pop_state(ParserState::InTemplateLiteral);
     self.advance();
     return Ok(template_literal.into());

@@ -408,18 +408,28 @@ mod parser_test {
     )
     .to_string();
 
-    exit = 29 + size;
-    let expr_stmt_exit = (13 + size) - before_line_break_count;
+    exit = if before_line_break_count > 0 {
+      size - before_line_break_count + 16
+    } else {
+      29 + size
+    };
+    let expr_stmt_exit = if before_line_break_count > 0 {
+      size - before_line_break_count
+    } else {
+      (13 + size) - before_line_break_count
+    };
+    let sentinel_start_col = if before_line_break_count > 0 {
+      size - before_line_break_count + 1
+    } else {
+      (size + 14) - before_line_break_count
+    };
     let product2 = ast_b((13, expr_stmt_exit));
     let strict = stmts!(
       pos!(13, exit, 0, end_line_number),
       stmt!(pos!(13, expr_stmt_exit, 0, end_line_number), product2),
       stmt!(
-        pos!((size + 14) - before_line_break_count, exit, 0, end_line_number),
-        ident!(
-          "PARSER_SENTINEL",
-          pos!((size + 14) - before_line_break_count, exit, 0, end_line_number)
-        )
+        pos!(sentinel_start_col, exit, 0, end_line_number),
+        ident!("PARSER_SENTINEL", pos!(sentinel_start_col, exit, 0, end_line_number))
       )
     )
     .to_string();
@@ -668,6 +678,43 @@ mod parser_test {
         return tmpl!(pos!(start, end, 0, 0), str!("test", pos!(start + 1, end, 0, 0)));
       },
       "`test`",
+    );
+  }
+
+  #[test]
+  fn parse_template_literal_escaped_without_interpolation_test() {
+    single_expression_test(
+      |(start, end)| {
+        return tmpl!(pos!(start, end, 0, 0), str!("test${aaa}", pos!(start + 1, end, 0, 0)));
+      },
+      "`test\\${aaa}`",
+    );
+  }
+
+  #[test]
+  fn parse_template_literal_linebreak_without_interpolation_test() {
+    single_expression_test_with_options(
+      |(start, end)| {
+        return tmpl!(pos!(start, end, 0, 1), str!("test\ntest", pos!(start + 1, 4, 0, 1)));
+      },
+      "`test\ntest`",
+      false,
+      1,
+      6,
+    );
+  }
+
+  #[test]
+  fn parse_template_literal_with_empty_suffix_interpolation_test() {
+    single_expression_test(
+      |(start, end)| {
+        return tmpl!(
+          pos!(start, end, 0, 0),
+          str!("test", pos!(start + 1, end - 8, 0, 0)),
+          ident!("test", pos!(start + 7, end - 2, 0, 0))
+        );
+      },
+      "`test${test}`",
     );
   }
 }

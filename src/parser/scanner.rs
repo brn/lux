@@ -499,7 +499,11 @@ impl Scanner {
   }
 
   fn tokenize(&mut self) -> Token {
-    if self.parser_state_stack.is_in_state(ParserState::InTemplateLiteral) {
+    if self.parser_state_stack.is_in_state(ParserState::InTemplateLiteral)
+      && !self
+        .parser_state_stack
+        .is_in_state(ParserState::InTemplateInterpolation)
+    {
       return self.tokenize_template_literal_characters();
     } else if self.parser_state_stack.is_in_state(ParserState::RegexpExpected) {
       return self.tokenize_regexp_characters();
@@ -1060,7 +1064,7 @@ impl Scanner {
                 }
               } else {
                 is_escaped = true;
-                self.advance_and_push_buffer();
+                self.advance();
               }
             } else {
               report_syntax_error!(self, "Unexpected end of input.", Token::Invalid);
@@ -1073,36 +1077,45 @@ impl Scanner {
           if !is_escaped {
             if let Some(lookahead) = self.iter.peek() {
               if chars::ch(lookahead) == '{' {
+                if self.current_literal_buffer().len() > 0 {
+                  return Token::StringLiteral;
+                }
                 self.advance();
                 self.advance();
-                return Token::TemplateParts;
+                return Token::TemplateSubstitution;
               }
             } else {
               report_syntax_error!(self, "Unexpected end of input.", Token::Invalid);
             }
-            self.advance_and_push_buffer();
-            is_escaped = false;
           } else {
-            report_syntax_error!(self, "Unexpected end of input.", Token::Invalid);
+            is_escaped = false;
+            self.advance_and_push_buffer();
           }
         }
         '`' => {
           if !is_escaped {
+            if self.current_literal_buffer().len() > 0 {
+              return Token::StringLiteral;
+            }
             self.advance();
             return Token::Template;
+          } else {
+            is_escaped = false;
+            self.advance_and_push_buffer();
           }
         }
         chars::CR_CHAR => {
           if let Some(next) = self.iter.peek() {
             if chars::is_lf(next) {
               self.advance_and_push_buffer();
-              self.advance_and_push_buffer();
-              self.current_position_mut().set_end_col(0_u32);
-              self.current_position_mut().inc_end_line_number();
             }
+            self.advance_and_push_buffer();
+            self.current_position_mut().set_end_col(0_u32);
+            self.current_position_mut().inc_end_line_number();
           }
         }
         chars::LF_CHAR => {
+          self.advance_and_push_buffer();
           self.current_position_mut().set_end_col(0_u32);
           self.current_position_mut().inc_end_line_number();
         }
