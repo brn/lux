@@ -207,79 +207,137 @@ pub fn to_utf8(chars: &std::vec::Vec<u16>) -> String {
     .collect::<String>();
 }
 
+#[derive(Debug, Copy, Clone, PartialEq)]
+pub enum NumericConvertionError {
+  UnexpectedTokenFound,
+  NotANumber,
+  ExponentsExpectedNumber,
+  UnexpectedEndOfInput,
+}
+
 #[inline]
-pub fn parse_hex<'a>(start: &'a mut impl Iterator<Item = u16>) -> u64 {
+pub fn parse_hex<'a>(
+  start: &'a mut impl Iterator<Item = u16>,
+  should_stop_if_invalid_token_found: bool,
+) -> Result<u64, NumericConvertionError> {
   const DIGITS: u64 = 16;
   let mut iter = start.by_ref().peekable();
   let mut value = 0_u64;
+  let mut digits = 0;
   while let Some(next) = iter.peek().cloned() {
     if let Ok(hex) = to_hex(next) {
       value = value * DIGITS + (hex as u64);
       iter.next();
     } else {
-      return value;
+      if should_stop_if_invalid_token_found {
+        return Err(NumericConvertionError::UnexpectedTokenFound);
+      }
+      break;
     }
+    digits += 1;
   }
-  return value;
+  if digits == 0 {
+    return Err(NumericConvertionError::NotANumber);
+  }
+  return Ok(value);
 }
 
 #[inline]
-pub fn parse_binary<'a>(start: &'a mut impl Iterator<Item = u16>) -> u64 {
+pub fn parse_binary<'a>(
+  start: &'a mut impl Iterator<Item = u16>,
+  should_stop_if_invalid_token_found: bool,
+) -> Result<u64, NumericConvertionError> {
   const DIGITS: u64 = 2;
   let mut iter = start.by_ref().peekable();
   let mut value: u64 = 0;
+  let mut digits = 0;
   while let Some(next) = iter.peek().cloned() {
     if let Ok(bin) = to_int_from_bin(next) {
       value = value * DIGITS + (bin as u64);
       iter.next();
     } else {
-      return value;
+      if should_stop_if_invalid_token_found {
+        return Err(NumericConvertionError::UnexpectedTokenFound);
+      }
+      return Ok(value);
     }
+    digits += 1;
   }
-  return value;
+  if digits == 0 {
+    return Err(NumericConvertionError::NotANumber);
+  }
+  return Ok(value);
 }
 
 #[inline]
-pub fn parse_octal<'a>(start: &'a mut impl Iterator<Item = u16>) -> u64 {
+pub fn parse_octal<'a>(
+  start: &'a mut impl Iterator<Item = u16>,
+  should_stop_if_invalid_token_found: bool,
+) -> Result<u64, NumericConvertionError> {
   const DIGITS: u64 = 8;
   let mut iter = start.by_ref().peekable();
   let mut value: u64 = 0;
+  let mut digits = 0;
   while let Some(next) = iter.peek().cloned() {
     if let Ok(octal) = to_int_from_octal(next) {
       value = value * DIGITS + (octal as u64);
       iter.next();
     } else {
-      return value;
+      if should_stop_if_invalid_token_found {
+        return Err(NumericConvertionError::UnexpectedTokenFound);
+      }
+      break;
     }
+    digits += 1;
   }
-  return value;
+  if digits == 0 {
+    return Err(NumericConvertionError::NotANumber);
+  }
+  return Ok(value);
 }
 
 #[inline]
-pub fn parse_uint32_without_exponents<'a>(start: &'a mut impl Iterator<Item = u16>) -> u32 {
+pub fn parse_uint32_without_exponents<'a>(
+  start: &'a mut impl Iterator<Item = u16>,
+  should_stop_if_invalid_token_found: bool,
+) -> Result<u32, NumericConvertionError> {
   const DIGITS: u32 = 10;
   let mut iter = start.by_ref().peekable();
   let mut value: u32 = 0;
+  let mut digits = 0;
   while let Some(next) = iter.peek().cloned() {
     if is_decimal_digits(next) {
       value = value * DIGITS + to_int(next).unwrap();
       iter.next();
     } else {
+      if should_stop_if_invalid_token_found {
+        return Err(NumericConvertionError::UnexpectedTokenFound);
+      }
       break;
     }
+    digits += 1;
   }
-
-  return value;
+  if digits == 0 {
+    return Err(NumericConvertionError::NotANumber);
+  }
+  return Ok(value);
 }
 
 const PARTIAL_MOD_LIMIT: u64 = 10000000000000000;
 const POW_LIMIT: u32 = 19;
 
-fn parse_exponents<'a>(mut value: f64, iter: &'a mut std::iter::Peekable<impl Iterator<Item = u16>>) -> f64 {
+fn parse_exponents<'a>(
+  mut value: f64,
+  iter: &'a mut std::iter::Peekable<impl Iterator<Item = u16>>,
+  should_stop_if_invalid_token_found: bool,
+) -> Result<f64, NumericConvertionError> {
   const DIGITS: u32 = 10;
   let mut is_negative = false;
   let mut exponents_value: u32 = 0;
+  let mut digits = 0;
+  let mut last_ch: char = '0';
   while let Some(next) = iter.peek().cloned() {
+    last_ch = ch(next);
     if ch(next) == '-' {
       is_negative = true;
       iter.next();
@@ -290,8 +348,19 @@ fn parse_exponents<'a>(mut value: f64, iter: &'a mut std::iter::Peekable<impl It
       exponents_value = exponents_value * DIGITS + (to_int(next).unwrap() as u32);
       iter.next();
     } else {
+      if should_stop_if_invalid_token_found {
+        return Err(NumericConvertionError::UnexpectedTokenFound);
+      }
       break;
     }
+    digits += 1;
+  }
+
+  if digits == 0 {
+    return Err(NumericConvertionError::NotANumber);
+  }
+  if last_ch == '-' || last_ch == '+' {
+    return Err(NumericConvertionError::ExponentsExpectedNumber);
   }
 
   if exponents_value >= POW_LIMIT {
@@ -309,14 +378,17 @@ fn parse_exponents<'a>(mut value: f64, iter: &'a mut std::iter::Peekable<impl It
         value /= p;
       }
     }
-    return value;
+    return Ok(value);
   } else {
     let p = u64::pow(10, exponents_value) as f64;
-    return if !is_negative { value * p } else { value / p };
+    return Ok(if !is_negative { value * p } else { value / p });
   }
 }
 
-pub fn parse_decimal<'a>(start: &'a mut impl Iterator<Item = u16>) -> f64 {
+pub fn parse_decimal<'a>(
+  start: &'a mut impl Iterator<Item = u16>,
+  should_stop_if_invalid_token_found: bool,
+) -> Result<f64, NumericConvertionError> {
   const DIGITS: f64 = 10.0;
   let mut iter = start.by_ref().peekable();
 
@@ -331,6 +403,7 @@ pub fn parse_decimal<'a>(start: &'a mut impl Iterator<Item = u16>) -> f64 {
   let mut floating_digits = 1;
   let mut value = 0.0_f64;
   let mut is_start_exponents = false;
+  let mut digits = 0;
   while let Some(u) = iter.peek().cloned() {
     if ch(u) == '.' {
       is_floating_point = true;
@@ -353,14 +426,29 @@ pub fn parse_decimal<'a>(start: &'a mut impl Iterator<Item = u16>) -> f64 {
       }
       iter.next();
     } else {
+      if should_stop_if_invalid_token_found {
+        return Err(NumericConvertionError::UnexpectedTokenFound);
+      }
       break;
     }
+    digits += 1;
+  }
+
+  if digits == 0 {
+    return Err(NumericConvertionError::NotANumber);
   }
 
   if is_start_exponents {
-    value = parse_exponents(value, &mut iter);
+    match parse_exponents(value, &mut iter, should_stop_if_invalid_token_found) {
+      Ok(val) => {
+        value = val;
+      }
+      Err(e) => {
+        return Err(e);
+      }
+    };
   }
-  return value / (floating_digits as f64);
+  return Ok(value / (floating_digits as f64));
 }
 
 #[derive(Debug, PartialEq, Copy, Clone)]
@@ -377,7 +465,8 @@ pub fn parse_numeric_value<'a>(
   origin: &'a mut impl Iterator<Item = u16>,
   start: &'a mut impl Iterator<Item = u16>,
   is_double: bool,
-) -> Result<(f64, NumericValueKind), &'static str> {
+  should_stop_if_invalid_token_found: bool,
+) -> Result<(f64, NumericValueKind), NumericConvertionError> {
   use NumericValueKind::*;
   let mut kind = Decimal;
   let mut is_period_seen = is_double;
@@ -386,19 +475,13 @@ pub fn parse_numeric_value<'a>(
   let mut is_int32 = false;
   let mut iter = start.peekable();
   let mut digits_len = 0;
+  let mut char_count = 0;
 
   if let Some(uc) = iter.peek() {
     if ch(*uc) == '.' {
       is_period_seen = true;
       iter.next();
-    }
-  }
-
-  if is_period_seen {
-    if let Some(next) = iter.peek() {
-      if !is_decimal_digits(*next) {
-        return Err("Number expected");
-      }
+      char_count += 1;
     }
   }
 
@@ -409,25 +492,32 @@ pub fn parse_numeric_value<'a>(
       kind = DecimalLeadingZero;
       if let Some(next) = iter.peek() {
         if ch(*next) == 'x' {
-          iter.next();
           origin.next();
           origin.next();
-          return Ok((parse_hex(origin) as f64, NumericValueKind::Hex));
+          return match parse_hex(origin, should_stop_if_invalid_token_found) {
+            Ok(val) => Ok((val as f64, NumericValueKind::Hex)),
+            Err(e) => Err(e),
+          };
         } else if ch(*next) == 'b' {
-          iter.next();
           origin.next();
           origin.next();
-          return Ok((parse_binary(origin) as f64, NumericValueKind::Binary));
+          return match parse_binary(origin, should_stop_if_invalid_token_found) {
+            Ok(val) => Ok((val as f64, NumericValueKind::Binary)),
+            Err(e) => Err(e),
+          };
         } else if ch(*next) == 'o' {
-          iter.next();
           origin.next();
           origin.next();
-          return Ok((parse_octal(origin) as f64, NumericValueKind::Octal));
+          return match parse_octal(origin, should_stop_if_invalid_token_found) {
+            Ok(val) => Ok((val as f64, NumericValueKind::Octal)),
+            Err(e) => Err(e),
+          };
         } else if ch(*next) == '.' {
           iter.next();
           is_leading_zeros = false;
           is_period_seen = true;
           kind = Decimal;
+          char_count += 1;
         }
       }
     }
@@ -441,6 +531,7 @@ pub fn parse_numeric_value<'a>(
               break;
             }
             iter.next();
+            char_count += 1;
             digits_len += 1;
           }
         } else if ch(next) == '8' || ch(next) == '9' {
@@ -450,6 +541,7 @@ pub fn parse_numeric_value<'a>(
               break;
             }
             iter.next();
+            char_count += 1;
             digits_len += 1;
           }
         }
@@ -461,6 +553,7 @@ pub fn parse_numeric_value<'a>(
                   break;
                 }
                 iter.next();
+                char_count += 1;
                 digits_len += 1;
               }
               kind = DecimalLeadingZero;
@@ -473,6 +566,7 @@ pub fn parse_numeric_value<'a>(
         if kind == Decimal {
           is_period_seen = true;
           iter.next();
+          char_count += 1;
         }
       }
 
@@ -486,6 +580,7 @@ pub fn parse_numeric_value<'a>(
           break;
         }
         iter.next();
+        char_count += 1;
         digits_len += 1;
       }
 
@@ -493,26 +588,38 @@ pub fn parse_numeric_value<'a>(
         if ch(next) == 'e' || ch(next) == 'E' {
           has_exponents_part = true;
           if kind != Decimal && kind != DecimalLeadingZero {
-            return Err("Unexpected token.");
+            for _ in 0..char_count {
+              origin.next();
+            }
+            return Err(NumericConvertionError::UnexpectedTokenFound);
           }
           iter.next();
           if let Some(next) = iter.peek().cloned() {
             if ch(next) == '+' || ch(next) == '-' {
               iter.next();
+              char_count += 1;
             }
             if let Some(next) = iter.peek().cloned() {
               if !is_decimal_digits(next) {
-                return Err("Expected exponent digit.");
+                for _ in 0..char_count {
+                  origin.next();
+                }
+                return Err(NumericConvertionError::ExponentsExpectedNumber);
               }
               iter.next();
+              char_count += 1;
             } else {
-              return Err("Expected exponent digit.");
+              for _ in 0..char_count {
+                origin.next();
+              }
+              return Err(NumericConvertionError::ExponentsExpectedNumber);
             }
             while let Some(u) = iter.peek().cloned() {
               if !is_decimal_digits(u) {
                 break;
               }
               iter.next();
+              char_count += 1;
             }
           }
         }
@@ -521,17 +628,26 @@ pub fn parse_numeric_value<'a>(
       return match kind {
         Decimal | DecimalLeadingZero => {
           if digits_len <= 9 && !has_exponents_part && !is_period_seen {
-            Ok((parse_uint32_without_exponents(origin) as f64, kind))
+            match parse_uint32_without_exponents(origin, should_stop_if_invalid_token_found) {
+              Ok(val) => Ok((val as f64, kind)),
+              Err(e) => Err(e),
+            }
           } else {
-            Ok((parse_decimal(origin) as f64, kind))
+            match parse_decimal(origin, should_stop_if_invalid_token_found) {
+              Ok(val) => Ok((val as f64, kind)),
+              Err(e) => Err(e),
+            }
           }
         }
-        _ => Ok((parse_octal(origin) as f64, kind)),
+        _ => match parse_octal(origin, should_stop_if_invalid_token_found) {
+          Ok(val) => Ok((val as f64, kind)),
+          Err(e) => Err(e),
+        },
       };
     }
   }
 
-  return Err("Unexpected end of input");
+  return Err(NumericConvertionError::UnexpectedEndOfInput);
 }
 
 #[cfg(test)]
@@ -603,7 +719,7 @@ mod chars_test {
     let buf = value.encode_utf16().collect::<Vec<_>>();
     let mut iter = buf.into_iter().peekable();
     let mut clone = iter.clone();
-    let result = parse_numeric_value(iter.by_ref(), &mut clone, false);
+    let result = parse_numeric_value(iter.by_ref(), &mut clone, false, true);
     assert!(result.is_ok());
     let (value, kind) = result.unwrap();
     assert_eq!(value, expected_value);

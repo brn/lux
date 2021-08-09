@@ -130,7 +130,7 @@ pub struct Parser {
   result: Result<Ast, String>,
   source: FixedU16CodePointArray,
   scanner_record: Option<ScannerRecord>,
-  error_reporter: ErrorReporter,
+  error_reporter: Exotic<ErrorReporter>,
   is_strict_mode: bool,
   debugger: ParserDebugger,
   empty: Node<Empty>,
@@ -208,13 +208,16 @@ impl Parser {
       result: Err("Unparsed".to_string()),
       source: FixedU16CodePointArray::from_utf8(context, source),
       scanner_record: None,
-      error_reporter: ErrorReporter::new(),
+      error_reporter: Exotic::new(std::ptr::null_mut()),
       is_strict_mode: false,
       debugger: ParserDebugger::new(),
       empty,
     };
+    parser.error_reporter = parser.region.alloc(ErrorReporter::new());
     parser.parser_state = parser.region.alloc(ParserStateStack::new());
-    parser.scanner = parser.region.alloc(Scanner::new(parser.source, parser.parser_state));
+    parser.scanner = parser
+      .region
+      .alloc(Scanner::new(parser.source, parser.parser_state, parser.error_reporter));
     return parser;
   }
 
@@ -369,6 +372,7 @@ impl ParserDef for Parser {
   fn parse_program(&mut self) {
     self.parse_directive_prologue();
     if self.error_reporter.has_pending_error() {
+      self.result = Err(self.error_reporter.last_error().unwrap().clone());
       return;
     }
     self.result = if self.parser_type == ParserType::Script {
@@ -1367,6 +1371,7 @@ impl ParserDef for Parser {
     }
     return Ok(bin_expr);
   }
+
   fn parse_assignment_expression(&mut self) -> ParseResult<Expr> {
     match self.cur() {
       Token::Yield => {
@@ -1392,11 +1397,11 @@ impl ParserDef for Parser {
           }
         }
         let expr = next_parse!(self, self.parse_conditional_expression())?;
-        if !expr.is_valid_lhs() {
-          return Err("Invalid left-hand-side-expression".to_string());
-        }
 
         if self.cur().is_assignment_operator() {
+          if !expr.is_valid_lhs() {
+            return Err("Invalid left-hand-side-expression".to_string());
+          }
           let op = self.cur();
           self.advance();
           let assignment = next_parse!(self, self.parse_assignment_expression())?;

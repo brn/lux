@@ -1,12 +1,13 @@
 #[cfg(test)]
 mod scanner_test {
-  use super::super::error_reporter::ReportSyntaxError;
+  use super::super::error_reporter::{ErrorReporter, ReportSyntaxError};
   use super::super::parser_state::{ParserState, ParserStateStack};
   use super::super::scanner::*;
   use super::super::token::*;
   use crate::context::LuxContext;
   use crate::structs::FixedU16CodePointArray;
   use crate::unicode::chars;
+  use crate::utility::Exotic;
   use itertools::Itertools;
   use std::char::decode_utf16;
   use std::vec::Vec;
@@ -23,7 +24,8 @@ mod scanner_test {
       ParserStateStack::new()
     });
     let u16_source = FixedU16CodePointArray::from_utf8(context, source);
-    let mut scanner = Scanner::new(u16_source, parser_state_stack.into());
+    let error_reporter = Exotic::from(Box::new(ErrorReporter::new()));
+    let mut scanner = Scanner::new(u16_source, parser_state_stack.into(), error_reporter);
     return cb(scanner);
   }
 

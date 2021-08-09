@@ -33,6 +33,14 @@ const _MAX_SAFE_INTEGER: u64 = 0x1fffffffffffff;
 pub struct Repr(f64);
 
 impl Repr {
+  pub fn nan_f64() -> f64 {
+    return f64::from_bits(NAN_BIT);
+  }
+
+  pub fn nan_u64() -> u64 {
+    return NAN_BIT;
+  }
+
   #[inline(always)]
   pub fn new(heap: Addr) -> Repr {
     return Repr(f64::from_bits(heap as u64 | NAN_BIT));

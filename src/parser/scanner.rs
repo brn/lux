@@ -188,7 +188,7 @@ pub struct Scanner {
   previous_position: SourcePosition,
   position: [SourcePosition; 2],
 
-  error_reporter: ErrorReporter,
+  error_reporter: Exotic<ErrorReporter>,
 
   mode: Mode,
 
@@ -206,7 +206,11 @@ impl ReportSyntaxError for Scanner {
 }
 
 impl Scanner {
-  pub fn new(source: FixedU16CodePointArray, parser_state_stack: Exotic<ParserStateStack>) -> Scanner {
+  pub fn new(
+    source: FixedU16CodePointArray,
+    parser_state_stack: Exotic<ParserStateStack>,
+    error_reporter: Exotic<ErrorReporter>,
+  ) -> Scanner {
     let mut scanner = Scanner {
       token: Token::Invalid,
       lookahead_token: Token::Invalid,
@@ -224,7 +228,7 @@ impl Scanner {
       previous_position: SourcePosition::new(),
       position: [SourcePosition::new(), SourcePosition::new()],
 
-      error_reporter: ErrorReporter::new(),
+      error_reporter,
 
       mode: Mode::Current,
 
@@ -499,11 +503,7 @@ impl Scanner {
   }
 
   fn tokenize(&mut self) -> Token {
-    if self.parser_state_stack.is_in_state(ParserState::InTemplateLiteral)
-      && !self
-        .parser_state_stack
-        .is_in_state(ParserState::InTemplateInterpolation)
-    {
+    if self.parser_state_stack.match_state(ParserState::InTemplateLiteral) {
       return self.tokenize_template_literal_characters();
     } else if self.parser_state_stack.is_in_state(ParserState::RegexpExpected) {
       return self.tokenize_regexp_characters();
@@ -992,7 +992,7 @@ impl Scanner {
     self.current_literal_buffer_mut().clear();
     let pos = self.iter.pos();
     let mut clone = self.iter.clone();
-    let result = chars::parse_numeric_value(self.iter.by_ref(), &mut clone, is_period_seen);
+    let result = chars::parse_numeric_value(self.iter.by_ref(), &mut clone, is_period_seen, true);
     if pos != self.iter.pos() {
       self.iter.back();
     }
@@ -1011,7 +1011,17 @@ impl Scanner {
       return Token::NumericLiteral;
     }
     let err = result.unwrap_err();
-    report_syntax_error!(self, err, Token::Invalid);
+    match err {
+      chars::NumericConvertionError::UnexpectedTokenFound | chars::NumericConvertionError::NotANumber => {
+        report_syntax_error!(self, "Unexpected token found", Token::Invalid);
+      }
+      chars::NumericConvertionError::ExponentsExpectedNumber => {
+        report_syntax_error!(self, "Number expected after exponents", Token::Invalid);
+      }
+      chars::NumericConvertionError::UnexpectedEndOfInput => {
+        report_syntax_error!(self, "Unexpected end of input", Token::Invalid);
+      }
+    };
   }
 
   fn tokenize_regexp_characters(&mut self) -> Token {

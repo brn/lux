@@ -292,10 +292,23 @@ mod parser_test {
         let mut parser = Parser::new(context, &str);
         let ast = parser.parse(ParserType::Script);
         let m = format!("Code {} not generate error", code);
-        assert!(ast.is_err(), m);
+        if !ast.is_err() {
+          parser.print_stack_trace();
+          println!("code is {}", str);
+          assert!(ast.is_err(), m);
+        }
         assert!(parser.error_reporter().has_pending_error());
-        for (i, ed) in parser.error_reporter().pending_errors().iter().enumerate() {
-          compare_position(ed.source_position(), source_positions[i]);
+        for ed in parser.error_reporter().pending_errors().iter() {
+          match compare_position(ed.source_position(), source_positions[i]) {
+            Err(err) => {
+              let e = ed.clone();
+              parser.print_stack_trace();
+              println!("error is {:?}", e);
+              println!("code is {}", str);
+              panic!(err);
+            }
+            _ => {}
+          };
         }
         if show_error {
           parser.error_reporter().print_errors();
@@ -543,25 +556,25 @@ mod parser_test {
 
   #[test]
   fn numeric_literal_error_test() {
-    let env = [(Some(""), ""), (Some("'use strict"), ""), (Some("function X() {"), "")];
+    let env = [(Some(""), ""), (Some("'use strict'"), ""), (Some("function X() {"), "")];
     syntax_error_test(
       &env,
       "0x_",
-      &[&pos!(0, 2, 0, 0), &pos!(13, 15, 0, 0), &pos!(14, 16, 0, 0)],
+      &[&pos!(0, 2, 0, 0), &pos!(12, 14, 0, 0), &pos!(14, 16, 0, 0)],
       false,
     );
 
     syntax_error_test(
       &env,
       "0b_",
-      &[&pos!(0, 2, 0, 0), &pos!(13, 15, 0, 0), &pos!(14, 16, 0, 0)],
+      &[&pos!(0, 2, 0, 0), &pos!(12, 14, 0, 0), &pos!(14, 16, 0, 0)],
       false,
     );
 
     syntax_error_test(
       &env,
       "0o_",
-      &[&pos!(0, 2, 0, 0), &pos!(13, 15, 0, 0), &pos!(14, 16, 0, 0)],
+      &[&pos!(0, 2, 0, 0), &pos!(12, 14, 0, 0), &pos!(14, 16, 0, 0)],
       false,
     );
 
@@ -675,7 +688,7 @@ mod parser_test {
   fn parse_template_literal_without_interpolation_test() {
     single_expression_test(
       |(start, end)| {
-        return tmpl!(pos!(start, end, 0, 0), str!("test", pos!(start + 1, end, 0, 0)));
+        return tmpl!(pos!(start, end, 0, 0), str!("test", pos!(start + 1, end - 1, 0, 0)));
       },
       "`test`",
     );
@@ -685,7 +698,10 @@ mod parser_test {
   fn parse_template_literal_escaped_without_interpolation_test() {
     single_expression_test(
       |(start, end)| {
-        return tmpl!(pos!(start, end, 0, 0), str!("test${aaa}", pos!(start + 1, end, 0, 0)));
+        return tmpl!(
+          pos!(start, end, 0, 0),
+          str!("test${aaa}", pos!(start + 1, end - 1, 0, 0))
+        );
       },
       "`test\\${aaa}`",
     );
@@ -716,5 +732,90 @@ mod parser_test {
       },
       "`test${test}`",
     );
+  }
+
+  #[test]
+  fn parse_template_literal_with_suffix_interpolation_test() {
+    single_expression_test(
+      |(start, end)| {
+        return tmpl!(
+          pos!(start, end, 0, 0),
+          str!("foo", pos!(start + 1, end - 10, 0, 0)),
+          ident!("bar", pos!(start + 6, end - 5, 0, 0)),
+          str!("baz", pos!(start + 10, end - 1, 0, 0)),
+        );
+      },
+      "`foo${bar}baz`",
+    );
+  }
+
+  #[test]
+  fn parse_template_literal_with_many_suffix_interpolation_test() {
+    single_expression_test(
+      |(start, end)| {
+        return tmpl!(
+          pos!(start, end, 0, 0),
+          str!("foo", pos!(start + 1, end - 23, 0, 0)),
+          ident!("bar", pos!(start + 6, end - 18, 0, 0)),
+          str!("baz", pos!(start + 10, end - 14, 0, 0)),
+          number!("100", pos!(start + 15, end - 9, 0, 0)),
+          unary!(
+            "OpPlus",
+            "Pre",
+            pos!(start + 21, end - 2, 0, 0),
+            ident!("foo", pos!(start + 22, end - 2, 0, 0))
+          )
+        );
+      },
+      "`foo${bar}baz${100}${+foo}`",
+    );
+  }
+
+  #[test]
+  fn parse_nested_template_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return tmpl!(
+          pos!(start, end, 0, 0),
+          str!("foo", pos!(start + 1, end - 15, 0, 0)),
+          tmpl!(
+            pos!(start + 6, end - 2, 0, 0),
+            str!("foo", pos!(start + 7, end - 9, 0, 0)),
+            ident!("bar", pos!(start + 12, end - 4, 0, 0)),
+          ),
+        );
+      },
+      "`foo${`foo${bar}`}`",
+    );
+  }
+
+  #[test]
+  fn parse_unterminated_string_error_test() {
+    let env = [
+      (Some(""), ""),
+      (Some("'use strict';"), ""),
+      (Some("function X() {"), ""),
+    ];
+    syntax_error_test(
+      &env,
+      "'test",
+      &[&pos!(0, 21, 0, 0), &pos!(13, 34, 0, 0), &pos!(14, 36, 0, 0)],
+      false,
+    )
+  }
+
+  #[test]
+  fn parse_unterminated_string_error_with_linebreak_test() {
+    let env = [
+      (Some(""), ""),
+      (Some("'use strict';"), ""),
+      (Some("function X() {"), ""),
+    ];
+    syntax_error_test(
+      &env,
+      "'test\\n",
+      &[&pos!(0, 23, 0, 0), &pos!(13, 36, 0, 0), &pos!(14, 38, 0, 0)],
+      false,
+    )
   }
 }

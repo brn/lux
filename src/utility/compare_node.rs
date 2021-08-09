@@ -97,33 +97,41 @@ pub fn compare_node(code: &str, value: &str, expected: &str) -> Result<(), Strin
 pub fn compare_position(actual: &SourcePosition, expected: &SourcePosition) -> Result<(), String> {
   if actual.start_col() != expected.start_col() {
     return Err(format!(
-      "start_col => actual: {} expected: {}",
+      "start_col => actual: {} expected: {}\nactual: {:?}\nexpected: {:?}",
       actual.start_col(),
-      expected.start_col()
+      expected.start_col(),
+      actual,
+      expected
     ));
   }
 
   if actual.end_col() != expected.end_col() {
     return Err(format!(
-      "end_col => actual: {} expected: {}",
+      "end_col => actual: {} expected: {}\nactual: {:?}\nexpected: {:?}",
       actual.end_col(),
       expected.end_col(),
+      actual,
+      expected
     ));
   }
 
   if actual.start_line_number() != expected.start_line_number() {
     return Err(format!(
-      "start_line_number => actual: {} expected: {}",
+      "start_line_number => actual: {} expected: {}\nactual: {:?}\nexpected: {:?}",
       actual.start_line_number(),
       expected.start_line_number(),
+      actual,
+      expected
     ));
   }
 
   if actual.end_line_number() != expected.end_line_number() {
     return Err(format!(
-      "end_line_number => actual: {} expected: {}",
+      "end_line_number => actual: {} expected: {}\nactual: {:?}\nexpected: {:?}",
       actual.end_line_number(),
       expected.end_line_number(),
+      actual,
+      expected
     ));
   }
 

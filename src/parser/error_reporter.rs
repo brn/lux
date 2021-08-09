@@ -24,6 +24,12 @@ impl ErrorDescriptor {
   }
 }
 
+impl std::fmt::Debug for ErrorDescriptor {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    return write!(f, "Error: {} at: {:?}", self.error_message, self.source_position);
+  }
+}
+
 impl<'a> std::ops::Shl<&str> for &'a mut Box<ErrorDescriptor> {
   type Output = ErrorDescriptorMessageContainer<'a>;
   fn shl(self, message: &str) -> Self::Output {
@@ -113,15 +119,15 @@ macro_rules! _base_report_syntax_error {
 
 #[cfg(debug_assertions)]
 macro_rules! report_syntax_error {
-  (noreturn $parser:tt, $message:expr) => {
+  (noreturn $parser:tt, $message:expr) => {{
     debug_log!("===SYNTAX ERROR FOUND===");
     _base_report_syntax_error!($parser) << "[Debug] line: " << line!().to_string() << "\n" << $message
-  };
-  ($parser:tt, $message:expr, $return_value:expr) => {
+  }};
+  ($parser:tt, $message:expr, $return_value:expr) => {{
     debug_log!("===SYNTAX ERROR FOUND===");
     report_syntax_error!(noreturn $parser, $message);
     return $return_value;
-  };
+  }};
 }
 
 #[cfg(not(debug_assertions))]
@@ -129,8 +135,8 @@ macro_rules! report_syntax_error {
   (noreturn $parser:tt, $message:expr) => {
     _base_report_syntax_error!($parser) << $message
   };
-  ($parser:tt, $message:expr, $return_value:expr) => {
+  ($parser:tt, $message:expr, $return_value:expr) => {{
     report_syntax_error!(noreturn $parser, $message);
     return $return_value;
-  };
+  }};
 }
