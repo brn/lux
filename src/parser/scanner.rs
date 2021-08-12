@@ -165,7 +165,7 @@ pub struct ScannerRecord {
   position: SourcePosition,
 }
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 enum Mode {
   Current = 0,
   Lookahead,
@@ -326,6 +326,7 @@ impl Scanner {
       self.lookahead_token = Token::Invalid;
       self.literal_buffer[Mode::Current as usize] = self.literal_buffer[Mode::Lookahead as usize].clone();
       self.position[Mode::Current as usize] = self.position[Mode::Lookahead as usize].clone();
+      self.numeric_value[Mode::Current as usize] = self.numeric_value[Mode::Lookahead as usize];
       self.scanner_state[Mode::Current as usize] = self.scanner_state[Mode::Lookahead as usize];
       return self.token;
     }
@@ -338,23 +339,22 @@ impl Scanner {
   }
 
   pub fn peek(&mut self) -> Token {
-    let mut this = scoped!(self, |this| { this.mode = Mode::Current });
+    let mut this = scoped!(self, |this| {
+      this.mode = Mode::Current;
+    });
     this.mode = Mode::Lookahead;
     if !this.has_more() {
       this.position[Mode::Lookahead as usize] = this.position[Mode::Current as usize].clone();
       this.lookahead_token = Token::End;
-      this.mode = Mode::Current;
       return this.lookahead_token;
     }
     if this.lookahead_token != Token::Invalid {
-      this.mode = Mode::Current;
       return this.lookahead_token;
     }
     this.position[Mode::Lookahead as usize] = this.position[Mode::Current as usize].clone();
     this.prologue();
     this.lookahead_token = this.tokenize();
     this.epilogue();
-    this.mode = Mode::Current;
     return this.lookahead_token;
   }
 
@@ -989,7 +989,7 @@ impl Scanner {
 
   fn tokenize_numeric_literal(&mut self, is_period_seen: bool) -> Token {
     self.iter.back();
-    self.current_literal_buffer_mut().clear();
+    self.set_current_numeric_value(0.0);
     let pos = self.iter.pos();
     let mut clone = self.iter.clone();
     let result = chars::parse_numeric_value(self.iter.by_ref(), &mut clone, is_period_seen, true);

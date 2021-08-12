@@ -482,7 +482,7 @@ impl ParserDef for Parser {
         return next_parse!(self, self.parse_cover_call_expression_and_async_arrow_head());
       }
       _ => {
-        return Err("".to_string());
+        return Err("Unexpected token found".to_string());
       }
     }
   }
@@ -867,7 +867,7 @@ impl ParserDef for Parser {
       }
       let start_call = self.source_position().clone();
       let m = next_parse!(self, self.parse_member_expression())?;
-      if self.cur() == Token::LeftParen {
+      if self.cur() != Token::LeftParen {
         let mut expr = new_node_with_pos!(self, NewExpression, &start, m);
         expr.set_end_position(m.source_position());
         return Ok(expr.into());
@@ -949,7 +949,7 @@ impl ParserDef for Parser {
         Token::Dot => {
           self.advance();
           let ident = next_parse!(self, self.parse_identifier_reference())?;
-          let expr = new_node_with_pos!(
+          let mut expr = new_node_with_pos!(
             self,
             PropertyAccessExpression,
             source_position,
@@ -958,6 +958,7 @@ impl ParserDef for Parser {
             Some(current),
             Some(ident)
           );
+          expr.set_end_position(ident.source_position());
           current = expr.into();
         }
         Token::BackQuote => {
@@ -1092,6 +1093,8 @@ impl ParserDef for Parser {
           expr
         );
         exprs.push(u.into());
+      } else if self.cur() == Token::RightParen {
+        break;
       } else {
         let expr = next_parse!(self, self.parse_assignment_expression())?;
         exprs.push(expr);

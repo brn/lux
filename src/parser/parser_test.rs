@@ -130,7 +130,7 @@ mod parser_test {
   }
 
   macro_rules! callexpr {
-    ($receiver:expr, $pos:expr, $callee:expr, $($asts:expr),*$(,)*) => {{
+    ($receiver:expr, $pos:expr, $($asts:expr),*$(,)*) => {{
       let attr = format!("receiver = {}", $receiver);
       ast_with_children!("CallExpression", &attr, $pos, $($asts,)*)
     }};
@@ -581,14 +581,14 @@ mod parser_test {
     syntax_error_test(
       &env,
       "13e",
-      &[&pos!(0, 3, 0, 0), &pos!(13, 16, 0, 0), &pos!(14, 17, 0, 0)],
+      &[&pos!(0, 3, 0, 0), &pos!(12, 15, 0, 0), &pos!(14, 17, 0, 0)],
       false,
     );
 
     syntax_error_test(
       &env,
       "13e+",
-      &[&pos!(0, 4, 0, 0), &pos!(13, 17, 0, 0), &pos!(14, 18, 0, 0)],
+      &[&pos!(0, 4, 0, 0), &pos!(12, 16, 0, 0), &pos!(14, 18, 0, 0)],
       false,
     );
   }
@@ -799,7 +799,7 @@ mod parser_test {
     syntax_error_test(
       &env,
       "'test",
-      &[&pos!(0, 21, 0, 0), &pos!(13, 34, 0, 0), &pos!(14, 36, 0, 0)],
+      &[&pos!(0, 21, 0, 0), &pos!(13, 34, 0, 0), &pos!(14, 35, 0, 0)],
       false,
     )
   }
@@ -814,8 +814,293 @@ mod parser_test {
     syntax_error_test(
       &env,
       "'test\\n",
-      &[&pos!(0, 23, 0, 0), &pos!(13, 36, 0, 0), &pos!(14, 38, 0, 0)],
+      &[&pos!(0, 23, 0, 0), &pos!(13, 36, 0, 0), &pos!(14, 37, 0, 0)],
       false,
     )
+  }
+
+  #[test]
+  fn parse_invalid_unicode_sequence_error_test() {
+    let env = [
+      (Some(""), ""),
+      (Some("'use strict';"), ""),
+      (Some("function X() {"), ""),
+    ];
+    syntax_error_test(
+      &env,
+      "'\\u0041_\\u0042_\\u043_\\u0044'",
+      &[&pos!(0, 20, 0, 0), &pos!(13, 33, 0, 0), &pos!(14, 34, 0, 0)],
+      false,
+    )
+  }
+
+  #[test]
+  fn parse_unary_expression_plus_pre_test() {
+    single_expression_test(
+      |(start, end)| {
+        return unary!(
+          "OpPlus",
+          "Pre",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start + 1, end, 0, 0))
+        );
+      },
+      "+1",
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_minus_pre_test() {
+    single_expression_test(
+      |(start, end)| {
+        return unary!(
+          "OpMinus",
+          "Pre",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start + 1, end, 0, 0))
+        );
+      },
+      "-1",
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_not_pre_test() {
+    single_expression_test(
+      |(start, end)| {
+        return unary!(
+          "OpNot",
+          "Pre",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start + 1, end, 0, 0))
+        );
+      },
+      "!1",
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_tilde_pre_test() {
+    single_expression_test(
+      |(start, end)| {
+        return unary!(
+          "OpTilde",
+          "Pre",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start + 1, end, 0, 0))
+        );
+      },
+      "~1",
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_delete_pre_test() {
+    single_expression_test(
+      |(start, end)| {
+        return unary!(
+          "Delete",
+          "Pre",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start + 7, end, 0, 0))
+        );
+      },
+      "delete 1",
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_typeof_pre_test() {
+    single_expression_test(
+      |(start, end)| {
+        return unary!(
+          "Typeof",
+          "Pre",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start + 7, end, 0, 0))
+        );
+      },
+      "typeof 1",
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_void_pre_test() {
+    single_expression_test(
+      |(start, end)| {
+        return unary!(
+          "Void",
+          "Pre",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start + 5, end, 0, 0))
+        );
+      },
+      "void 1",
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_increments_pre_test() {
+    single_expression_test(
+      |(start, end)| {
+        return unary!(
+          "OpIncrement",
+          "Pre",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start + 2, end, 0, 0))
+        );
+      },
+      "++1",
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_decrements_pre_test() {
+    single_expression_test(
+      |(start, end)| {
+        return unary!(
+          "OpDecrement",
+          "Pre",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start + 2, end, 0, 0))
+        );
+      },
+      "--1",
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_increments_post_test() {
+    single_expression_test(
+      |(start, end)| {
+        return unary!(
+          "OpIncrement",
+          "Post",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, end - 2, 0, 0))
+        );
+      },
+      "1++",
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_decrements_post_test() {
+    single_expression_test(
+      |(start, end)| {
+        return unary!(
+          "OpDecrement",
+          "Post",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, end - 2, 0, 0))
+        );
+      },
+      "1--",
+    );
+  }
+
+  #[test]
+  fn parse_new_expression_no_args_test() {
+    single_expression_test(
+      |(start, end)| {
+        return newexpr!(pos!(start, end, 0, 0), ident!("X", pos!(start + 4, end, 0, 0)));
+      },
+      "new X",
+    );
+  }
+
+  #[test]
+  fn parse_new_expression_with_args_test() {
+    single_expression_test(
+      |(start, end)| {
+        return newexpr!(
+          pos!(start, end, 0, 0),
+          callexpr!(
+            "Expr",
+            pos!(start + 4, end, 0, 0),
+            ident!("X", pos!(start + 4, end - 3, 0, 0)),
+            exprs!(pos!(start + 5, end, 0, 0), number!("1", pos!(start + 6, end - 1, 0, 0)))
+          )
+        );
+      },
+      "new X(1)",
+    );
+  }
+
+  #[test]
+  fn parse_new_expression_with_props_call_test() {
+    single_expression_test(
+      |(start, end)| {
+        return newexpr!(
+          pos!(start, end, 0, 0),
+          callexpr!(
+            "Expr",
+            pos!(start + 4, end, 0, 0),
+            prop!(
+              "dot",
+              pos!(start + 4, end - 3, 0, 0),
+              ident!("X", pos!(start + 4, end - 5, 0, 0)),
+              ident!("a", pos!(start + 6, end - 3, 0, 0))
+            ),
+            exprs!(pos!(start + 7, end, 0, 0), number!("1", pos!(start + 8, end - 1, 0, 0)))
+          )
+        );
+      },
+      "new X.a(1)",
+    );
+  }
+
+  #[test]
+  fn parse_new_expression_with_element_call_test() {
+    single_expression_test(
+      |(start, end)| {
+        return newexpr!(
+          pos!(start, end, 0, 0),
+          callexpr!(
+            "Expr",
+            pos!(start + 4, end, 0, 0),
+            prop!(
+              "element",
+              pos!(start + 4, end - 3, 0, 0),
+              ident!("X", pos!(start + 4, end - 8, 0, 0)),
+              str!("a", pos!(start + 6, end - 4, 0, 0))
+            ),
+            exprs!(
+              pos!(start + 10, end, 0, 0),
+              number!("1", pos!(start + 11, end - 1, 0, 0))
+            )
+          )
+        );
+      },
+      "new X['a'](1)",
+    );
+  }
+
+  #[test]
+  fn parse_new_expression_with_props_chain_test() {
+    single_expression_test(
+      |(start, end)| {
+        return newexpr!(
+          pos!(start, end, 0, 0),
+          callexpr!(
+            "Expr",
+            pos!(start + 4, end, 0, 0),
+            prop!(
+              "dot",
+              pos!(start + 4, end - 2, 0, 0),
+              prop!(
+                "dot",
+                pos!(start + 4, end - 4, 0, 0),
+                ident!("a", pos!(start + 4, end - 6, 0, 0)),
+                ident!("b", pos!(start + 6, end - 4, 0, 0))
+              ),
+              ident!("c", pos!(start + 8, end - 2, 0, 0))
+            ),
+            exprs!(pos!(start + 9, end, 0, 0),)
+          )
+        );
+      },
+      "new a.b.c()",
+    );
   }
 }

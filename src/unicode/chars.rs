@@ -229,7 +229,7 @@ pub fn parse_hex<'a>(
       value = value * DIGITS + (hex as u64);
       iter.next();
     } else {
-      if should_stop_if_invalid_token_found {
+      if digits == 0 && should_stop_if_invalid_token_found {
         return Err(NumericConvertionError::UnexpectedTokenFound);
       }
       break;
@@ -256,7 +256,7 @@ pub fn parse_binary<'a>(
       value = value * DIGITS + (bin as u64);
       iter.next();
     } else {
-      if should_stop_if_invalid_token_found {
+      if digits == 0 && should_stop_if_invalid_token_found {
         return Err(NumericConvertionError::UnexpectedTokenFound);
       }
       return Ok(value);
@@ -283,7 +283,7 @@ pub fn parse_octal<'a>(
       value = value * DIGITS + (octal as u64);
       iter.next();
     } else {
-      if should_stop_if_invalid_token_found {
+      if digits == 0 && should_stop_if_invalid_token_found {
         return Err(NumericConvertionError::UnexpectedTokenFound);
       }
       break;
@@ -310,7 +310,7 @@ pub fn parse_uint32_without_exponents<'a>(
       value = value * DIGITS + to_int(next).unwrap();
       iter.next();
     } else {
-      if should_stop_if_invalid_token_found {
+      if digits == 0 && should_stop_if_invalid_token_found {
         return Err(NumericConvertionError::UnexpectedTokenFound);
       }
       break;
@@ -348,7 +348,7 @@ fn parse_exponents<'a>(
       exponents_value = exponents_value * DIGITS + (to_int(next).unwrap() as u32);
       iter.next();
     } else {
-      if should_stop_if_invalid_token_found {
+      if digits == 0 && should_stop_if_invalid_token_found {
         return Err(NumericConvertionError::UnexpectedTokenFound);
       }
       break;
@@ -356,10 +356,7 @@ fn parse_exponents<'a>(
     digits += 1;
   }
 
-  if digits == 0 {
-    return Err(NumericConvertionError::NotANumber);
-  }
-  if last_ch == '-' || last_ch == '+' {
+  if digits == 0 || last_ch == '-' || last_ch == '+' {
     return Err(NumericConvertionError::ExponentsExpectedNumber);
   }
 
@@ -426,7 +423,7 @@ pub fn parse_decimal<'a>(
       }
       iter.next();
     } else {
-      if should_stop_if_invalid_token_found {
+      if digits == 0 && should_stop_if_invalid_token_found {
         return Err(NumericConvertionError::UnexpectedTokenFound);
       }
       break;
@@ -588,7 +585,7 @@ pub fn parse_numeric_value<'a>(
         if ch(next) == 'e' || ch(next) == 'E' {
           has_exponents_part = true;
           if kind != Decimal && kind != DecimalLeadingZero {
-            for _ in 0..char_count {
+            for _ in 0..(char_count + 2) {
               origin.next();
             }
             return Err(NumericConvertionError::UnexpectedTokenFound);
@@ -601,7 +598,7 @@ pub fn parse_numeric_value<'a>(
             }
             if let Some(next) = iter.peek().cloned() {
               if !is_decimal_digits(next) {
-                for _ in 0..char_count {
+                for _ in 0..(char_count + 2) {
                   origin.next();
                 }
                 return Err(NumericConvertionError::ExponentsExpectedNumber);
@@ -609,7 +606,7 @@ pub fn parse_numeric_value<'a>(
               iter.next();
               char_count += 1;
             } else {
-              for _ in 0..char_count {
+              for _ in 0..(char_count + 2) {
                 origin.next();
               }
               return Err(NumericConvertionError::ExponentsExpectedNumber);
@@ -621,6 +618,11 @@ pub fn parse_numeric_value<'a>(
               iter.next();
               char_count += 1;
             }
+          } else {
+            for _ in 0..(char_count + 2) {
+              origin.next();
+            }
+            return Err(NumericConvertionError::ExponentsExpectedNumber);
           }
         }
       }

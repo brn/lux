@@ -885,7 +885,7 @@ pub struct NewExpression {
 impl_expr!(
   NewExpression,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
-    let str = format!("{}[ConditionalExpression {}]\n", indent, source_position.to_string());
+    let str = format!("{}[NewExpression {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
@@ -921,7 +921,8 @@ impl_expr!(
   CallExpression,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
     let str = format!(
-      "[CallExpression receiver = {:?} {}]\n",
+      "{}[CallExpression receiver = {:?} {}]\n",
+      indent,
       self.receiver,
       source_position.to_string()
     );
