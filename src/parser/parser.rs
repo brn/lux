@@ -62,6 +62,11 @@ impl ParserDebugger {
       "{}\n{}Enter {}: CurrentToken = {} {:?}",
       self.buffer, self.indent, next_parse, current_token, self.position
     );
+    #[cfg(feature = "print_ast_when_called")]
+    println!(
+      "{}Enter {}: CurrentToken = {} {:?}",
+      self.indent, next_parse, current_token, self.position
+    );
     self.indent = format!("  {}", self.indent);
   }
 
@@ -70,6 +75,16 @@ impl ParserDebugger {
     self.buffer = format!(
       "{}\n{}Exit {} {} CurrentToken = {:?}{} {:?}",
       self.buffer,
+      self.indent,
+      *self.next_parse.last().unwrap(),
+      if result.is_ok() { "Success" } else { "Failure" },
+      token,
+      if self.has_error { "[Error]" } else { "" },
+      self.position
+    );
+    #[cfg(feature = "print_ast_when_called")]
+    println!(
+      "{}Exit {} {} CurrentToken = {:?}{} {:?}",
       self.indent,
       *self.next_parse.last().unwrap(),
       if result.is_ok() { "Success" } else { "Failure" },
@@ -479,7 +494,10 @@ impl ParserDef for Parser {
         return next_parse!(self, self.parse_regular_expression());
       }
       Token::LeftParen => {
-        return next_parse!(self, self.parse_cover_call_expression_and_async_arrow_head());
+        return next_parse!(
+          self,
+          self.parse_cover_parenthesized_expression_and_arrow_parameter_list()
+        );
       }
       _ => {
         return Err("Unexpected token found".to_string());
@@ -879,7 +897,7 @@ impl ParserDef for Parser {
         &start_call,
         CallReceiverType::Expr,
         Some(m),
-        Some(Node::<Expressions>::try_from(args).unwrap())
+        Some(args)
       );
       call.set_end_position(args.source_position());
       let mut expr = new_node_with_pos!(self, NewExpression, &start, call.into());
@@ -925,7 +943,7 @@ impl ParserDef for Parser {
             source_position,
             receiver_type,
             Some(current),
-            Some(Node::<Expressions>::try_from(a).unwrap())
+            Some(a.into())
           )
           .into();
         }
@@ -972,9 +990,10 @@ impl ParserDef for Parser {
             source_position,
             CallReceiverType::Template,
             Some(current),
-            Some(Node::<Expressions>::try_from(tmpl).unwrap())
+            Some(tmpl)
           )
           .into();
+          current.set_end_position(tmpl.source_position());
         }
         _ => {
           if error_if_default {
@@ -1035,7 +1054,7 @@ impl ParserDef for Parser {
           CallExpression,
           CallReceiverType::Expr,
           Some(*exprs.at(0).unwrap()),
-          Some(Node::<Expressions>::try_from(*exprs.at(1).unwrap()).unwrap())
+          Some(*exprs.at(1).unwrap())
         )
         .into();
       }
@@ -1065,16 +1084,7 @@ impl ParserDef for Parser {
   fn parse_super_call(&mut self) -> ParseResult<Expr> {
     expect!(self, self.cur(), Token::Super);
     let args = next_parse!(self, self.parse_arguments())?;
-    return Ok(
-      new_node!(
-        self,
-        CallExpression,
-        CallReceiverType::Super,
-        None,
-        Some(Node::<Expressions>::try_from(args).unwrap())
-      )
-      .into(),
-    );
+    return Ok(new_node!(self, CallExpression, CallReceiverType::Super, None, Some(args)).into());
   }
   fn parse_arguments(&mut self) -> ParseResult<Expr> {
     let start = self.source_position().clone();
@@ -1223,11 +1233,11 @@ impl ParserDef for Parser {
     }
 
     let mut maybe_bin_ast = prev_ast;
-    while match prev_ast {
+    while match maybe_bin_ast {
       Expr::BinaryExpression(_) => true,
       _ => false,
     } {
-      match prev_ast {
+      match maybe_bin_ast {
         Expr::BinaryExpression(node) => {
           let rhs = node.rhs();
           if !match rhs {
@@ -1236,7 +1246,7 @@ impl ParserDef for Parser {
           } {
             break;
           }
-          maybe_bin_ast = node.into();
+          maybe_bin_ast = rhs;
         }
         _ => break,
       }
@@ -1359,10 +1369,9 @@ impl ParserDef for Parser {
         return Err("':' expected".to_string());
       }
       self.advance();
-      let mut rhs = next_parse!(self, self.parse_assignment_expression())?;
+      let rhs = next_parse!(self, self.parse_assignment_expression())?;
       let rhs_source_pos = rhs.source_position().clone();
-      rhs.set_end_position(&rhs_source_pos);
-      let result = new_node_with_pos!(
+      let mut result = new_node_with_pos!(
         self,
         ConditionalExpression,
         bin_expr.source_position().clone(),
@@ -1370,6 +1379,7 @@ impl ParserDef for Parser {
         lhs,
         rhs
       );
+      result.set_end_position(&rhs_source_pos);
       return Ok(result.into());
     }
     return Ok(bin_expr);

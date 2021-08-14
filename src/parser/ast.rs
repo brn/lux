@@ -905,17 +905,17 @@ impl NewExpression {
 bitflags! {
   pub struct CallReceiverType: u8 {
    const Expr = 0;
-   const New = 4;
-   const Super = 8;
-   const Template = 10;
-   const None = 20;
+   const New = 0x4;
+   const Super = 0x8;
+   const Template = 0x10;
+   const None = 0x20;
   }
 }
 
 pub struct CallExpression {
   callee: Option<Expr>,
   receiver: CallReceiverType,
-  parameters: Option<Node<Expressions>>,
+  parameters: Option<Expr>,
 }
 impl_expr!(
   CallExpression,
@@ -946,7 +946,7 @@ impl CallExpression {
     region: &mut Region,
     receiver: CallReceiverType,
     callee: Option<Expr>,
-    parameters: Option<Node<Expressions>>,
+    parameters: Option<Expr>,
   ) -> Node<CallExpression> {
     return Node::<CallExpression>::new(
       region,

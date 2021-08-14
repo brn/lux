@@ -66,6 +66,9 @@ mod parser_test {
     ($start_col:expr, $end_col:expr, $start_line:expr, $end_line:expr) => {
       SourcePosition::with(Some($start_col), Some($end_col), Some($start_line), Some($end_line))
     };
+    ($start_col:expr, $end_col:expr) => {
+      SourcePosition::with(Some($start_col), Some($end_col), Some(0), Some(0))
+    };
   }
 
   macro_rules! ast {
@@ -236,8 +239,8 @@ mod parser_test {
   }
 
   macro_rules! cond {
-    ($pos:expr, $then:expr, $else:expr) => {{
-      ast_with_children!("ConditionalExpression", &attr, $pos, $then, $else)
+    ($pos:expr, $cond:expr, $then:expr, $else:expr) => {{
+      ast_with_children!("ConditionalExpression", "", $pos, $cond, $then, $else)
     }};
   }
 
@@ -1101,6 +1104,575 @@ mod parser_test {
         );
       },
       "new a.b.c()",
+    );
+  }
+
+  #[test]
+  fn parse_new_expression_with_props_and_element_chain_test() {
+    single_expression_test(
+      |(start, end)| {
+        return newexpr!(
+          pos!(start, end, 0, 0),
+          callexpr!(
+            "Expr",
+            pos!(start + 4, end, 0, 0),
+            prop!(
+              "dot",
+              pos!(start + 4, end - 2, 0, 0),
+              prop!(
+                "element",
+                pos!(start + 4, end - 4, 0, 0),
+                ident!("a", pos!(start + 4, end - 9, 0, 0)),
+                str!("b", pos!(start + 6, end - 5, 0, 0))
+              ),
+              ident!("c", pos!(start + 11, end - 2, 0, 0))
+            ),
+            exprs!(pos!(start + 12, end, 0, 0),)
+          )
+        );
+      },
+      "new a['b'].c()",
+    );
+  }
+
+  #[test]
+  fn parse_new_expression_with_tagged_template_test() {
+    single_expression_test(
+      |(start, end)| {
+        return callexpr!(
+          "Template",
+          pos!(start, end, 0, 0),
+          prop!(
+            "dot",
+            pos!(start, end - 6, 0, 0),
+            newexpr!(
+              pos!(start, end - 8, 0, 0),
+              callexpr!(
+                "Expr",
+                pos!(start + 4, end - 8, 0, 0),
+                ident!("X", pos!(start + 4, end - 10, 0, 0)),
+                exprs!(pos!(start + 5, end - 8, 0, 0))
+              )
+            ),
+            ident!("a", pos!(start + 8, end - 6, 0, 0))
+          ),
+          tmpl!(
+            pos!(start + 9, end, 0, 0),
+            str!("test", pos!(start + 10, end - 1, 0, 0))
+          )
+        );
+      },
+      "new X().a`test`",
+    );
+  }
+
+  #[test]
+  fn parse_exponentiation_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpPow",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 5, end, 0, 0))
+        );
+      },
+      "1 ** 1",
+    );
+  }
+
+  #[test]
+  fn parse_multiplicative_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpMul",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 4, end, 0, 0))
+        );
+      },
+      "1 * 1",
+    );
+  }
+
+  #[test]
+  fn parse_division_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpDiv",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 4, end, 0, 0))
+        );
+      },
+      "1 / 1",
+    );
+  }
+
+  #[test]
+  fn parse_addition_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpPlus",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 4, end, 0, 0))
+        );
+      },
+      "1 + 1",
+    );
+  }
+
+  #[test]
+  fn parse_subtraction_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpMinus",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 4, end, 0, 0))
+        );
+      },
+      "1 - 1",
+    );
+  }
+
+  #[test]
+  fn parse_shift_left_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpShl",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 5, end, 0, 0))
+        );
+      },
+      "1 << 1",
+    );
+  }
+
+  #[test]
+  fn parse_shift_right_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpShr",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 5, end, 0, 0))
+        );
+      },
+      "1 >> 1",
+    );
+  }
+
+  #[test]
+  fn parse_u_shift_right_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpUShr",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 6, end, 0, 0))
+        );
+      },
+      "1 >>> 1",
+    );
+  }
+
+  #[test]
+  fn parse_in_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "In",
+          pos!(start, end, 0, 0),
+          str!("a", pos!(start, start + 3, 0, 0)),
+          ident!("v", pos!(start + 7, end, 0, 0))
+        );
+      },
+      "'a' in v",
+    );
+  }
+
+  #[test]
+  fn parse_instanceof_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "Instanceof",
+          pos!(start, end, 0, 0),
+          ident!("a", pos!(start, start + 1, 0, 0)),
+          ident!("v", pos!(start + 13, end, 0, 0))
+        );
+      },
+      "a instanceof v",
+    );
+  }
+
+  #[test]
+  fn parse_greater_than_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpGreaterThan",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("0", pos!(start + 4, end, 0, 0))
+        );
+      },
+      "1 > 0",
+    );
+  }
+
+  #[test]
+  fn parse_greater_than_or_eq_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpGreaterThanOrEq",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("0", pos!(start + 5, end, 0, 0))
+        );
+      },
+      "1 >= 0",
+    );
+  }
+
+  #[test]
+  fn parse_less_than_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpLessThan",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("0", pos!(start + 4, end, 0, 0))
+        );
+      },
+      "1 < 0",
+    );
+  }
+
+  #[test]
+  fn parse_less_than_or_eq_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpLessThanOrEq",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("0", pos!(start + 5, end, 0, 0))
+        );
+      },
+      "1 <= 0",
+    );
+  }
+
+  #[test]
+  fn parse_equal_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpEq",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 5, end, 0, 0))
+        );
+      },
+      "1 == 1",
+    );
+  }
+
+  #[test]
+  fn parse_strict_equal_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpStrictEq",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 6, end, 0, 0))
+        );
+      },
+      "1 === 1",
+    );
+  }
+
+  #[test]
+  fn parse_not_equal_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpNotEq",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 5, end, 0, 0))
+        );
+      },
+      "1 != 1",
+    );
+  }
+
+  #[test]
+  fn parse_strict_not_equal_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpStrictNotEq",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 6, end, 0, 0))
+        );
+      },
+      "1 !== 1",
+    );
+  }
+
+  #[test]
+  fn parse_bitwise_and_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpAnd",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 4, end, 0, 0))
+        );
+      },
+      "1 & 1",
+    );
+  }
+
+  #[test]
+  fn parse_bitwise_or_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpOr",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 4, end, 0, 0))
+        );
+      },
+      "1 | 1",
+    );
+  }
+
+  #[test]
+  fn parse_bitwise_xor_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpXor",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 4, end, 0, 0))
+        );
+      },
+      "1 ^ 1",
+    );
+  }
+
+  #[test]
+  fn parse_logical_and_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpLogicalAnd",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 5, end, 0, 0))
+        );
+      },
+      "1 && 1",
+    );
+  }
+
+  #[test]
+  fn parse_logical_or_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpLogicalOr",
+          pos!(start, end, 0, 0),
+          number!("1", pos!(start, start + 1, 0, 0)),
+          number!("1", pos!(start + 5, end, 0, 0))
+        );
+      },
+      "1 || 1",
+    );
+  }
+
+  #[test]
+  fn parser_operator_priority_test_1() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpOr",
+          pos!(start, end),
+          binary!(
+            "OpMinus",
+            pos!(start, start + 9),
+            ident!("a", pos!(start, start + 1)),
+            binary!(
+              "OpMul",
+              pos!(start + 4, start + 9, 0, 0),
+              ident!("b", pos!(start + 4, start + 5)),
+              ident!("c", pos!(start + 8, start + 9))
+            )
+          ),
+          binary!(
+            "OpShl",
+            pos!(start + 12, start + 18),
+            ident!("d", pos!(start + 12, start + 13)),
+            binary!(
+              "OpPow",
+              pos!(start + 17, start + 23),
+              ident!("e", pos!(start + 17, start + 18)),
+              ident!("f", pos!(start + 22, start + 23))
+            )
+          )
+        );
+      },
+      "a - b * c | d << e ** f",
+    );
+  }
+
+  #[test]
+  fn parser_operator_priority_test_2() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpOr",
+          pos!(start, end),
+          binary!(
+            "OpShr",
+            pos!(start, start + 14),
+            binary!(
+              "OpPlus",
+              pos!(start, start + 9),
+              binary!(
+                "OpMul",
+                pos!(start, start + 5),
+                ident!("a", pos!(start, start + 1)),
+                ident!("b", pos!(start + 4, start + 5))
+              ),
+              ident!("c", pos!(start + 8, start + 9))
+            ),
+            ident!("d", pos!(start + 13, start + 14))
+          ),
+          binary!(
+            "OpDiv",
+            pos!(start + 17, start + 22),
+            ident!("e", pos!(start + 17, start + 18)),
+            ident!("f", pos!(start + 21, start + 22))
+          )
+        );
+      },
+      "a * b + c >> d | e / f",
+    );
+  }
+
+  #[test]
+  fn parser_operator_priority_test_3() {
+    single_expression_test(
+      |(start, end)| {
+        return binary!(
+          "OpMul",
+          pos!(start, end),
+          exprs!(
+            pos!(start, start + 19),
+            binary!(
+              "OpPlus",
+              pos!(start + 1, start + 18),
+              exprs!(
+                pos!(start + 1, start + 8),
+                binary!(
+                  "OpPlus",
+                  pos!(start + 2, start + 7),
+                  ident!("a", pos!(start + 2, start + 3)),
+                  ident!("b", pos!(start + 6, start + 7))
+                )
+              ),
+              exprs!(
+                pos!(start + 11, start + 18),
+                binary!(
+                  "OpPlus",
+                  pos!(start + 12, start + 17),
+                  ident!("c", pos!(start + 12, start + 13)),
+                  ident!("d", pos!(start + 16, start + 17))
+                )
+              )
+            ),
+          ),
+          exprs!(
+            pos!(end - 7, end),
+            binary!(
+              "OpPlus",
+              pos!(end - 6, end - 1),
+              number!("1", pos!(end - 6, end - 5)),
+              number!("2", pos!(end - 2, end - 1))
+            )
+          )
+        );
+      },
+      "((a + b) + (c + d)) * (1 + 2)",
+    );
+  }
+
+  #[test]
+  fn parser_conditional_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return cond!(
+          pos!(start, end),
+          ident!("x", pos!(start, start + 1)),
+          number!("1", pos!(start + 3, start + 4)),
+          number!("0", pos!(end - 1, end))
+        );
+      },
+      "x? 1: 0",
+    );
+  }
+
+  #[test]
+  fn parser_conditional_expression_test_2() {
+    single_expression_test(
+      |(start, end)| {
+        return cond!(
+          pos!(start, end),
+          binary!(
+            "OpPlus",
+            pos!(start, start + 5),
+            ident!("x", pos!(start, start + 1)),
+            number!("1", pos!(start + 4, start + 5))
+          ),
+          newexpr!(
+            pos!(start + 7, start + 14),
+            callexpr!(
+              "Expr",
+              pos!(start + 11, start + 14),
+              ident!("X", pos!(start + 11, start + 12)),
+              exprs!(pos!(start + 12, start + 14))
+            )
+          ),
+          binary!(
+            "OpMinus",
+            pos!(end - 5, end),
+            ident!("y", pos!(end - 5, end - 4)),
+            number!("3", pos!(end - 1, end))
+          )
+        );
+      },
+      "x + 1? new X(): y - 3",
     );
   }
 }

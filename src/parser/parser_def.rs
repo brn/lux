@@ -28,6 +28,7 @@ pub enum OperatorPriority {
   Additive,
   Multiplicative,
   Exponentiation,
+  Paren,
 }
 
 impl ParserConstraints {
