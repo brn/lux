@@ -4,9 +4,11 @@ mod parser_test {
   use super::super::error_reporter::*;
   use super::super::parser::*;
   use super::super::source_position::*;
+  use super::super::token::Token;
   use super::*;
   use crate::context::*;
   use crate::utility::*;
+  use paste::paste;
 
   struct TestableAst {
     name: String,
@@ -118,6 +120,13 @@ mod parser_test {
     }}
   }
 
+  macro_rules! afnexpr {
+    ($pos:expr, $type:expr, $($asts:expr),*$(,)*) => {{
+      let attr = format!("type = {} async = true", $type);
+      ast_with_children!("FunctionExpression", &attr, $pos, $($asts,)*)
+    }}
+  }
+
   macro_rules! unary {
     ($operand:expr, $position:expr, $pos:expr, $expr:expr) => {{
       let attr = format!("operand = {} position = {}", $operand, $position);
@@ -165,8 +174,8 @@ mod parser_test {
   }
 
   macro_rules! arraylit {
-    ($has_spread:expr, $pos:expr, $callee:expr, $($asts:expr),*$(,)*) => {{
-      let attr = if has_sparead {
+    ($has_spread:expr, $pos:expr, $($asts:expr),*$(,)*) => {{
+      let attr = if $has_spread {
         "type = ArrayLiteral spread = true"
       } else {
         "type = ArrayLiteral"
@@ -177,13 +186,14 @@ mod parser_test {
 
   bitflags! {
     struct ObjectLitType: u8 {
+      const NONE = 0;
       const HAS_ACCESSOR = 1;
       const HAS_GENERATOR = 2;
       const HAS_SPREAD = 4;
     }
   }
   macro_rules! objectlit {
-    ($lit_type:expr, $pos:expr, $callee:expr, $($asts:expr),*$(,)*) => {{
+    ($lit_type:expr, $pos:expr, $($asts:expr),*$(,)*) => {{
       let mut buf = "type = ObjectLiteral".to_string();
       if $lit_type.contains(ObjectLitType::HAS_ACCESSOR) {
         buf = format!("{} accessor = true", buf);
@@ -247,6 +257,12 @@ mod parser_test {
   macro_rules! elision {
     ($pos:expr) => {{
       ast!("Elision", "", $pos)
+    }};
+  }
+
+  macro_rules! empty {
+    ($pos:expr) => {{
+      ast!("Empty", "", $pos)
     }};
   }
 
@@ -1674,5 +1690,379 @@ mod parser_test {
       },
       "x + 1? new X(): y - 3",
     );
+  }
+
+  macro_rules! _make_assignment_test {
+    ($token:tt) => {
+      paste! {
+        #[test]
+        fn [<parser_parse_ $token _test>]() {
+          use Token::*;
+          single_expression_test(
+            |(start, end)| {
+              return binary!(stringify!($token),
+                             pos!(start, end),
+                             ident!("x", pos!(start, start + 1)),
+                                    number!("1", pos!(end - 1, end)));
+            },
+            &format!("x {} 1", $token.symbol())
+          );
+        }
+      }
+    };
+  }
+
+  _make_assignment_test!(OpMulAssign);
+  _make_assignment_test!(OpDivAssign);
+  _make_assignment_test!(OpModAssign);
+  _make_assignment_test!(OpPlusAssign);
+  _make_assignment_test!(OpMinusAssign);
+  _make_assignment_test!(OpAndAssign);
+  _make_assignment_test!(OpOrAssign);
+  _make_assignment_test!(OpXorAssign);
+  _make_assignment_test!(OpAssign);
+  _make_assignment_test!(OpShlAssign);
+  _make_assignment_test!(OpShrAssign);
+  _make_assignment_test!(OpUShrAssign);
+  _make_assignment_test!(OpPowAssign);
+
+  #[test]
+  fn parser_parse_array_literal_test() {
+    single_expression_test(
+      |(start, end)| {
+        return arraylit!(
+          false,
+          pos!(start, end),
+          number!("1", pos!(start + 1, start + 2)),
+          number!("2", pos!(end - 2, end - 1))
+        );
+      },
+      "[1,2]",
+    )
+  }
+
+  #[test]
+  fn parser_parse_array_literal_spread_test() {
+    single_expression_test(
+      |(start, end)| {
+        return arraylit!(
+          true,
+          pos!(start, end),
+          number!("1", pos!(start + 1, start + 2)),
+          unary!(
+            "Spread",
+            "Pre",
+            pos!(end - 5, end - 1),
+            ident!("x", pos!(end - 2, end - 1))
+          )
+        );
+      },
+      "[1,...x]",
+    )
+  }
+
+  #[test]
+  fn parser_parse_array_literal_empty_test() {
+    single_expression_test(
+      |(start, end)| {
+        return arraylit!(
+          false,
+          pos!(start, end),
+          number!("1", pos!(start + 1, start + 2)),
+          empty!(pos!(end - 2, end - 1))
+        );
+      },
+      "[1,]",
+    )
+  }
+
+  #[test]
+  fn parser_parse_array_literal_empty_test_2() {
+    single_expression_test(
+      |(start, end)| {
+        return arraylit!(
+          false,
+          pos!(start, end),
+          number!("1", pos!(start + 1, start + 2)),
+          empty!(pos!(end - 4, end - 3)),
+          empty!(pos!(end - 3, end - 2)),
+          empty!(pos!(end - 2, end - 1))
+        );
+      },
+      "[1,,,]",
+    )
+  }
+
+  #[test]
+  fn parser_parse_array_assignment_pattern() {
+    single_expression_test(
+      |(start, end)| {
+        return exprs!(
+          pos!(start, end),
+          binary!(
+            "OpAssign",
+            pos!(start + 1, end - 1),
+            arraylit!(
+              false,
+              pos!(start + 1, end - 5),
+              ident!("a", pos!(start + 2, start + 3)),
+              ident!("b", pos!(start + 4, start + 5)),
+              ident!("c", pos!(start + 6, start + 7)),
+            ),
+            ident!("y", pos!(end - 2, end - 1))
+          )
+        );
+      },
+      "([a,b,c] = y)",
+    )
+  }
+
+  #[test]
+  fn parser_parse_object_literal() {
+    single_expression_test(
+      |(start, end)| {
+        return exprs!(
+          pos!(start, end),
+          objectlit!(
+            ObjectLitType::NONE,
+            pos!(start + 1, end - 1),
+            object_props!(
+              pos!(start + 2, start + 6),
+              ident!("a", pos!(start + 2, start + 3)),
+              number!("1", pos!(start + 5, start + 6))
+            ),
+            object_props!(
+              pos!(start + 8, start + 12),
+              ident!("b", pos!(start + 8, start + 9)),
+              number!("2", pos!(start + 11, start + 12))
+            ),
+            object_props!(
+              pos!(end - 6, end - 2),
+              ident!("c", pos!(end - 6, end - 5)),
+              number!("3", pos!(end - 3, end - 2))
+            )
+          )
+        );
+      },
+      "({a: 1, b: 2, c: 3})",
+    )
+  }
+
+  #[test]
+  fn parser_parse_computed_object_literal() {
+    single_expression_test(
+      |(start, end)| {
+        return exprs!(
+          pos!(start, end),
+          objectlit!(
+            ObjectLitType::NONE,
+            pos!(start + 1, end - 1),
+            object_props!(
+              pos!(start + 2, start + 8),
+              computed!(
+                "element",
+                pos!(start + 2, start + 5),
+                ident!("a", pos!(start + 3, start + 4))
+              ),
+              number!("1", pos!(start + 7, start + 8))
+            ),
+            object_props!(
+              pos!(start + 10, start + 14),
+              ident!("b", pos!(start + 10, start + 11)),
+              number!("2", pos!(start + 13, start + 14))
+            ),
+          )
+        );
+      },
+      "({[a]: 1, b: 2})",
+    )
+  }
+
+  #[test]
+  fn parser_parse_key_only_object_literal() {
+    single_expression_test(
+      |(start, end)| {
+        return exprs!(
+          pos!(start, end),
+          objectlit!(
+            ObjectLitType::NONE,
+            pos!(start + 1, end - 1),
+            object_props!(
+              pos!(start + 2, start + 3),
+              ident!("a", pos!(start + 2, start + 3)),
+              ident!("a", pos!(start + 2, start + 3))
+            ),
+            object_props!(
+              pos!(start + 5, start + 6),
+              ident!("b", pos!(start + 5, start + 6)),
+              ident!("b", pos!(start + 5, start + 6))
+            ),
+          )
+        );
+      },
+      "({a, b})",
+    )
+  }
+
+  #[test]
+  fn parser_parse_method_object_literal() {
+    single_expression_test(
+      |(start, end)| {
+        return exprs!(
+          pos!(start, end),
+          objectlit!(
+            ObjectLitType::NONE,
+            pos!(start + 1, end - 1),
+            object_props!(
+              pos!(start + 2, start + 9),
+              ident!("a", pos!(start + 2, start + 3)),
+              fnexpr!(
+                pos!(start + 2, start + 9),
+                "Function",
+                ident!("a", pos!(start + 2, start + 3)),
+                exprs!(pos!(start + 4, start + 5)),
+                stmts!(pos!(start + 7, start + 8))
+              )
+            ),
+            object_props!(
+              pos!(start + 10, start + 17),
+              ident!("b", pos!(start + 10, start + 11)),
+              fnexpr!(
+                pos!(start + 10, start + 17),
+                "Function",
+                ident!("b", pos!(start + 10, start + 11)),
+                exprs!(pos!(start + 12, start + 13)),
+                stmts!(pos!(start + 15, start + 16))
+              )
+            ),
+          )
+        );
+      },
+      "({a() {}, b() {}})",
+    )
+  }
+
+  #[test]
+  fn parser_parse_async_method_object_literal() {
+    single_expression_test(
+      |(start, end)| {
+        return exprs!(
+          pos!(start, end),
+          objectlit!(
+            ObjectLitType::NONE,
+            pos!(start + 1, end - 1),
+            object_props!(
+              pos!(start + 2, start + 15),
+              ident!("a", pos!(start + 8, start + 9)),
+              afnexpr!(
+                pos!(start + 2, start + 15),
+                "Function",
+                ident!("a", pos!(start + 8, start + 9)),
+                exprs!(pos!(start + 10, start + 11)),
+                stmts!(pos!(start + 13, start + 14))
+              )
+            ),
+            object_props!(
+              pos!(start + 16, start + 23),
+              ident!("b", pos!(start + 16, start + 17)),
+              fnexpr!(
+                pos!(start + 16, start + 23),
+                "Function",
+                ident!("b", pos!(start + 16, start + 17)),
+                exprs!(pos!(start + 18, start + 19)),
+                stmts!(pos!(start + 21, start + 22))
+              )
+            ),
+          )
+        );
+      },
+      "({async a() {}, b() {}})",
+    )
+  }
+
+  #[test]
+  fn parser_parse_async_method_object_literal_with_await_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return exprs!(
+          pos!(start, end),
+          objectlit!(
+            ObjectLitType::NONE,
+            pos!(start + 1, end - 1),
+            object_props!(
+              pos!(start + 2, start + 24),
+              ident!("a", pos!(start + 8, start + 9)),
+              afnexpr!(
+                pos!(start + 2, start + 24),
+                "Function",
+                ident!("a", pos!(start + 8, start + 9)),
+                exprs!(pos!(start + 10, start + 11)),
+                stmts!(
+                  pos!(start + 13, start + 23),
+                  stmt!(
+                    pos!(start + 13, start + 23),
+                    unary!(
+                      "Await",
+                      "Pre",
+                      pos!(start + 13, start + 23),
+                      callexpr!(
+                        "Expr",
+                        pos!(start + 19, start + 23),
+                        ident!("x", pos!(start + 19, start + 20)),
+                        exprs!(pos!(start + 20, start + 22))
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        );
+      },
+      "({async a() {await x()}})",
+    )
+  }
+
+  #[test]
+  fn parser_parse_generator_method_object_literal_with_await_expression_test() {
+    single_expression_test(
+      |(start, end)| {
+        return exprs!(
+          pos!(start, end),
+          objectlit!(
+            ObjectLitType::NONE,
+            pos!(start + 1, end - 1),
+            object_props!(
+              pos!(start + 2, start + 24),
+              ident!("a", pos!(start + 8, start + 9)),
+              afnexpr!(
+                pos!(start + 2, start + 24),
+                "Function",
+                ident!("a", pos!(start + 8, start + 9)),
+                exprs!(pos!(start + 10, start + 11)),
+                stmts!(
+                  pos!(start + 13, start + 23),
+                  stmt!(
+                    pos!(start + 13, start + 23),
+                    unary!(
+                      "Await",
+                      "Pre",
+                      pos!(start + 13, start + 23),
+                      callexpr!(
+                        "Expr",
+                        pos!(start + 19, start + 23),
+                        ident!("x", pos!(start + 19, start + 20)),
+                        exprs!(pos!(start + 20, start + 22))
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        );
+      },
+      "({*a() {yield x()}})",
+    )
   }
 }

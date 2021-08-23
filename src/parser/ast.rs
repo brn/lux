@@ -912,9 +912,15 @@ bitflags! {
   }
 }
 
+#[derive(Property)]
 pub struct CallExpression {
+  #[property(get(type = "copy"))]
   callee: Option<Expr>,
+
+  #[property(get(type = "copy"))]
   receiver: CallReceiverType,
+
+  #[property(get(type = "copy"))]
   parameters: Option<Expr>,
 }
 impl_expr!(
@@ -1080,7 +1086,7 @@ impl_expr!(
   FunctionExpression,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
     let str = format!(
-      "{}[FunctionExpression type = {} {}]\n",
+      "{}[FunctionExpression type = {}{} {}]\n",
       indent,
       if self.is_arrow_function() {
         "ArrowFunction"
@@ -1089,6 +1095,7 @@ impl_expr!(
       } else {
         "Function"
       },
+      if self.is_async { " async = true" } else { "" },
       source_position.to_string()
     );
     result.push_str(&str);
@@ -1197,19 +1204,15 @@ impl Elision {
   }
 }
 
-bitflags! {
-  pub struct StructuralLiteralType: u8 {
-    const Array = 1;
-    const Object = 2;
-  }
+pub enum StructuralLiteralType {
+  Array = 1,
+  Object,
 }
 
-bitflags! {
-  pub struct StructuralLiteralTrait: u8 {
-    const HasAccessor = 4;
-    const HasGenerator = 8;
-    const HasSpread = 16;
-  }
+pub enum StructuralLiteralTrait {
+  HasAccessor = 3,
+  HasGenerator,
+  HasSpread,
 }
 
 pub struct StructuralLiteral {
@@ -1220,7 +1223,7 @@ impl_expr!(
   StructuralLiteral,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
     let str = format!(
-      "{}[StructualLiteral type = {}{} {}]\n",
+      "{}[StructuralLiteral type = {}{} {}]\n",
       indent,
       if self.is_array_literal() {
         "ArrayLiteral"
@@ -1259,7 +1262,7 @@ impl StructuralLiteral {
     return Node::<StructuralLiteral>::new(
       region,
       StructuralLiteral {
-        flag: Bitset::<u8>::with(literal_type.bits()),
+        flag: Bitset::<u8>::with(literal_type as u8),
         properties: Vec::new(),
       },
     );
@@ -1267,42 +1270,42 @@ impl StructuralLiteral {
 
   #[inline(always)]
   pub fn is_array_literal(&self) -> bool {
-    return self.flag.get(StructuralLiteralType::Array.bits() as usize);
+    return self.flag.get(StructuralLiteralType::Array as usize);
   }
 
   #[inline(always)]
   pub fn is_object_literal(&self) -> bool {
-    return self.flag.get(StructuralLiteralType::Object.bits() as usize);
+    return self.flag.get(StructuralLiteralType::Object as usize);
   }
 
   #[inline(always)]
   pub fn set_accessor(&mut self) {
-    return self.flag.set(StructuralLiteralTrait::HasAccessor.bits() as usize);
+    return self.flag.set(StructuralLiteralTrait::HasAccessor as usize);
   }
 
   #[inline(always)]
   pub fn has_accessor(&self) -> bool {
-    return self.flag.get(StructuralLiteralTrait::HasAccessor.bits() as usize);
+    return self.flag.get(StructuralLiteralTrait::HasAccessor as usize);
   }
 
   #[inline(always)]
   pub fn set_generator(&mut self) {
-    return self.flag.set(StructuralLiteralTrait::HasGenerator.bits() as usize);
+    return self.flag.set(StructuralLiteralTrait::HasGenerator as usize);
   }
 
   #[inline(always)]
   pub fn has_generator(&self) -> bool {
-    return self.flag.get(StructuralLiteralTrait::HasGenerator.bits() as usize);
+    return self.flag.get(StructuralLiteralTrait::HasGenerator as usize);
   }
 
   #[inline(always)]
   pub fn set_spread(&mut self) {
-    return self.flag.set(StructuralLiteralTrait::HasSpread.bits() as usize);
+    return self.flag.set(StructuralLiteralTrait::HasSpread as usize);
   }
 
   #[inline(always)]
   pub fn has_spread(&self) -> bool {
-    return self.flag.get(StructuralLiteralTrait::HasSpread.bits() as usize);
+    return self.flag.get(StructuralLiteralTrait::HasSpread as usize);
   }
 }
 

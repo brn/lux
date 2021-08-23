@@ -5,6 +5,8 @@ pub enum ParserState {
   InTemplateLiteral = 0,
   InTemplateInterpolation,
   RegexpExpected,
+  InFunction,
+  InAsyncFunction,
   InGeneratorFunction,
   InAsyncGeneratorFunction,
   _Sentinel,
@@ -64,10 +66,16 @@ impl ParserStateStack {
 
   pub fn match_states(&self, state: &[ParserState]) -> bool {
     for s in state.iter() {
-      if self.state_count[(*s) as usize] == 0 {
-        return false;
+      if self.state_count[(*s) as usize] > 0 {
+        return true;
       }
     }
-    return true;
+    return false;
+  }
+}
+
+impl std::fmt::Debug for ParserStateStack {
+  fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+    return write!(f, "{:?} {:?}", self.stack, self.state_count);
   }
 }

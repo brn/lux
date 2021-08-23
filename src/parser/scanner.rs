@@ -1245,7 +1245,7 @@ impl Scanner {
 
   #[inline(always)]
   fn unset_flag(&mut self, state: ScannerState) {
-    self.current_scanner_state_mut().set(state as usize);
+    self.current_scanner_state_mut().unset(state as usize);
   }
 
   #[inline(always)]

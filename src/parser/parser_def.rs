@@ -92,9 +92,8 @@ pub trait ParserDef {
     error_if_default: bool,
   ) -> ParseResult<Expr>;
   fn parse_new_expression(&mut self) -> ParseResult<Expr>;
-  fn parse_call_expression(&mut self) -> ParseResult<Expr>;
-  fn parse_cover_call_expression_and_async_arrow_head(&mut self) -> ParseResult<Expr>;
   fn parse_super_call(&mut self) -> ParseResult<Expr>;
+  fn parse_import_call(&mut self) -> ParseResult<Expr>;
   fn parse_arguments(&mut self) -> ParseResult<Expr>;
   fn parse_arguments_list(&mut self) -> ParseResult<Expr>;
   fn parse_left_hand_side_expression(&mut self) -> ParseResult<Expr>;
@@ -166,11 +165,9 @@ pub trait ParserDef {
   fn parse_formal_parameter_list(&mut self) -> ParseResult<Expr>;
   fn parse_function_rest_parameter(&mut self) -> ParseResult<Expr>;
   fn parse_function_body(&mut self) -> ParseResult<Stmt>;
-  fn parse_arrow_function(&mut self) -> ParseResult<Expr>;
+  fn parse_arrow_function(&mut self, is_async: bool) -> ParseResult<Expr>;
   fn parse_arrow_parameter(&mut self) -> ParseResult<Expr>;
-  fn parse_concise_body(&mut self) -> ParseResult<Ast>;
-  fn parse_async_concise_body(&mut self) -> ParseResult<Expr>;
-  fn parse_async_arrow_head(&mut self) -> ParseResult<Expr>;
+  fn parse_concise_body(&mut self, is_async: bool, args: Expr) -> ParseResult<Expr>;
   fn parse_method_definition(&mut self) -> ParseResult<Expr>;
   fn parse_property_set_parameter_list(&mut self) -> ParseResult<Expr>;
   fn parse_generator_method(&mut self) -> ParseResult<Expr>;
@@ -178,11 +175,6 @@ pub trait ParserDef {
   fn parse_generator_expression(&mut self) -> ParseResult<Expr>;
   fn parse_generator_body(&mut self) -> ParseResult<Expr>;
   fn parse_yield_expression(&mut self) -> ParseResult<Expr>;
-  fn parse_async_method(&mut self) -> ParseResult<Expr>;
-  fn parse_async_function_declaration(&mut self) -> ParseResult<Stmt>;
-  fn parse_async_function_expression(&mut self) -> ParseResult<Expr>;
-  fn parse_async_function_body(&mut self) -> ParseResult<Expr>;
-  fn parse_async_arrow_function(&mut self) -> ParseResult<Expr>;
   fn parse_await_expression(&mut self) -> ParseResult<Expr>;
   fn parse_class_declaration(&mut self) -> ParseResult<Stmt>;
   fn parse_class_expression(&mut self) -> ParseResult<Expr>;

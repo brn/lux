@@ -30,6 +30,14 @@ macro_rules! token_enum {
         }
       }
 
+      pub const fn str(&self) -> &'static str {
+        return match self {
+          $(
+            &$name::$item => stringify!($item),
+          )*
+        }
+      }
+
       pub fn values() -> std::slice::Iter<'static, $name> {
         static VALUES: &'static [$name] = &[$($name::$item),*];
         VALUES.into_iter()
@@ -158,6 +166,7 @@ token_enum! {
     (While,                false, "while"),
     (With,                 false, "with"),
     (Yield,                false, "yield"),
+    (YieldAggregator,      true,  "yield*"),
     (Identifier,           true,  "$Identifier"),
     (NumericLiteral,       true,  "$NumericLiteral"),
     (ImplicitOctalLiteral, true,  "$ImplicitOctalLiteral"),

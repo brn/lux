@@ -110,7 +110,8 @@ macro_rules! next_parse {
       .debugger
       .enter(stringify!($call), cur, &source_position, has_pending_error);
     let result = $call;
-    $self.debugger.leave($self.cur(), &result);
+    let cur = $self.cur();
+    $self.debugger.leave(cur, &result);
     result
   }};
 }
@@ -428,7 +429,9 @@ impl ParserDef for Parser {
   fn parse_identifier(&mut self) -> ParseResult<Expr> {
     expect!(@notadvance self, self.cur(), Token::Identifier);
     let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
-    return Ok(new_node!(self, Literal, Token::Identifier, val).into());
+    let mut node = new_node!(self, Literal, Token::Identifier, val);
+    node.set_valid_lhs();
+    return Ok(node.into());
   }
 
   fn parse_identifier_reference(&mut self) -> ParseResult<Expr> {
@@ -436,7 +439,9 @@ impl ParserDef for Parser {
     let result = match self.cur() {
       Token::Identifier | Token::Yield | Token::Await => {
         let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
-        Ok(new_node_with_pos!(self, Literal, &start, Token::Identifier, val).into())
+        let mut node = new_node_with_pos!(self, Literal, &start, Token::Identifier, val);
+        node.set_valid_lhs();
+        Ok(node.into())
       }
       _ => Err("Literal expected".to_string()),
     };
@@ -456,7 +461,7 @@ impl ParserDef for Parser {
         return next_parse!(self, self.parse_array_literal(ParserConstraints::None));
       }
       Token::LeftBrace => {
-        return next_parse!(self, self.parse_array_literal(ParserConstraints::None));
+        return next_parse!(self, self.parse_object_literal(ParserConstraints::None));
       }
       Token::Function => {
         if self.peek() == Token::OpMul {
@@ -468,10 +473,9 @@ impl ParserDef for Parser {
         return next_parse!(self, self.parse_class_expression());
       }
       Token::Identifier => {
-        if self.is_value_match_with("async") {
-          if self.peek() == Token::Terminate {
-            return next_parse!(self, self.parse_async_function_expression());
-          }
+        if self.is_value_match_with("async") && !self.has_line_break_after() && self.peek() == Token::Function {
+          self.advance();
+          return next_parse!(self, self.parse_function_expression(true, false));
         }
         return next_parse!(self, self.parse_identifier_reference());
       }
@@ -532,38 +536,53 @@ impl ParserDef for Parser {
   }
 
   fn parse_array_literal(&mut self, constraints: ParserConstraints) -> ParseResult<Expr> {
-    debug_assert!(self.cur() == Token::LeftBracket);
+    expect!(@notadvance self, self.cur(), Token::LeftBracket);
     let mut array = new_node!(self, StructuralLiteral, StructuralLiteralType::Array);
     array.set_source_position(self.source_position());
+    array.set_valid_lhs();
     self.advance();
+    let mut is_spread_seen = false;
     while !self.cur().one_of(&[Token::RightBracket, Token::Invalid, Token::End]) {
       if self.cur() == Token::Comma {
         let start_pos = self.source_position().clone();
         self.advance();
         match self.cur() {
           Token::Comma | Token::RightBracket => {
-            array.push(new_node_with_pos!(self, Elision, start_pos).into());
+            array.push(new_node_with_pos!(self, Empty, start_pos).into());
           }
           _ => {
-            let pos = self.source_position().clone();
-            array.push(new_node_with_pos!(self, Elision, pos).into());
+            while self.cur() == Token::Comma {
+              let pos = self.source_position().clone();
+              array.push(new_node_with_pos!(self, Empty, pos).into());
+              self.advance();
+            }
           }
         }
       } else {
+        if is_spread_seen {
+          return Err("Spread must be last element".to_string());
+        }
         if self.cur() == Token::Spread {
+          is_spread_seen = true;
           let a = next_parse!(self, self.parse_spread_element())?;
           array.push(a);
+          array.set_spread();
         } else {
-          let mut expr = next_parse!(self, self.parse_assignment_expression())?;
+          let expr = next_parse!(self, self.parse_assignment_expression())?;
           match expr {
             Expr::Literal(lit) => {
-              if lit.is_identifier() {
-                expr.set_valid_lhs();
-              } else {
-                expr.unset_valid_lhs();
+              if !lit.is_identifier() {
+                array.unset_valid_lhs();
               }
             }
-            _ => expr.unset_valid_lhs(),
+            Expr::StructuralLiteral(lit) => {
+              if !lit.is_valid_lhs() {
+                array.unset_valid_lhs();
+              }
+            }
+            _ => {
+              array.unset_valid_lhs();
+            }
           };
           array.push(expr);
         }
@@ -614,20 +633,44 @@ impl ParserDef for Parser {
     expect!(self, self.cur(), Token::RightBrace);
     return Ok(object.into());
   }
+
   fn parse_object_literal_property(&mut self, constraints: ParserConstraints) -> ParseResult<Expr> {
     let mut key: ParseResult<Expr> = Err("".to_string());
     let mut is_computed_property_name = false;
     let start = self.source_position().clone();
-
-    if self.cur().one_of(&[
+    let binding_tokens = [
+      Token::Identifier,
+      Token::LeftBracket,
+      Token::StringLiteral,
       Token::NumericLiteral,
       Token::ImplicitOctalLiteral,
-      Token::Identifier,
-      Token::StringLiteral,
-      Token::LeftBracket,
-    ]) {
+      Token::OpMul,
+    ];
+
+    if self.cur().one_of(&binding_tokens) {
       if self.peek() == Token::LeftParen {
         return next_parse!(self, self.parse_method_definition());
+      }
+
+      if self.is_value_match_with("async") && self.peek().one_of(&binding_tokens) && !self.has_line_break_after() {
+        let state = if self.peek() == Token::OpMul {
+          ParserState::InAsyncGeneratorFunction
+        } else {
+          ParserState::InAsyncFunction
+        };
+        let mut this = scoped!(self, |this| {
+          this.parser_state.pop_state(state);
+        });
+        this.parser_state.push_state(state);
+        return next_parse!(this, this.parse_method_definition());
+      }
+
+      if self.cur() == Token::OpMul && self.peek().one_of(&binding_tokens) {
+        let mut this = scoped!(self, |this| {
+          this.parser_state.pop_state(ParserState::InGeneratorFunction);
+        });
+        this.parser_state.push_state(ParserState::InGeneratorFunction);
+        return next_parse!(this, this.parse_method_definition());
       }
 
       key = if self.cur() == Token::Identifier {
@@ -640,6 +683,7 @@ impl ParserDef for Parser {
         if constraints.is_binding_pattern_allowed() || is_computed_property_name {
           return Err("Unexpected '=' detected".to_string());
         }
+        self.advance();
         let ident = next_parse!(self, self.parse_identifier_reference())?;
         let value = next_parse!(self, self.parse_assignment_expression())?;
         return Ok(
@@ -678,8 +722,7 @@ impl ParserDef for Parser {
     }
 
     let key_node = key.unwrap();
-
-    if self.cur() == Token::Colon {
+    if self.cur() != Token::Colon {
       match key_node {
         Expr::Literal(lit) => {
           if lit.is_identifier() {
@@ -734,7 +777,9 @@ impl ParserDef for Parser {
   fn parse_property_name(&mut self) -> ParseResult<Expr> {
     match self.cur() {
       Token::Identifier => {
-        return next_parse!(self, self.parse_identifier());
+        let i = next_parse!(self, self.parse_identifier());
+        self.advance();
+        return i;
       }
       Token::StringLiteral | Token::NumericLiteral | Token::ImplicitOctalLiteral => {
         return next_parse!(self, self.parse_literal());
@@ -841,6 +886,7 @@ impl ParserDef for Parser {
     expect!(self, self.cur(), Token::RightParen);
     return Ok(exprs.into());
   }
+
   fn parse_member_expression(&mut self) -> ParseResult<Expr> {
     let start = self.source_position().clone();
 
@@ -920,6 +966,7 @@ impl ParserDef for Parser {
       self.parse_post_member_expression(&start, n, CallReceiverType::Expr, ParserConstraints::Template, false)
     );
   }
+
   fn parse_post_member_expression(
     &mut self,
     source_position: &SourcePosition,
@@ -1022,70 +1069,20 @@ impl ParserDef for Parser {
     return next_parse!(self, self.parse_member_expression());
   }
 
-  fn parse_call_expression(&mut self) -> ParseResult<Expr> {
-    let start = self.source_position().clone();
-    match self.cur() {
-      Token::Super => {
-        self.record();
-        self.advance();
-        if self.cur() == Token::LeftParen {
-          self.restore();
-          let n = next_parse!(self, self.parse_super_call())?;
-          return next_parse!(
-            self,
-            self.parse_post_member_expression(
-              &start,
-              n,
-              CallReceiverType::Super,
-              ParserConstraints::Call | ParserConstraints::Template,
-              false
-            )
-          );
-        }
-        self.restore();
-      }
-      _ => {}
-    }
-    let mut expr = next_parse!(self, self.parse_cover_call_expression_and_async_arrow_head())?;
-    if let Ok(exprs) = Node::<Expressions>::try_from(expr) {
-      if exprs.is_arguments() {
-        expr = new_node!(
-          self,
-          CallExpression,
-          CallReceiverType::Expr,
-          Some(*exprs.at(0).unwrap()),
-          Some(*exprs.at(1).unwrap())
-        )
-        .into();
-      }
-    }
-    return next_parse!(
-      self,
-      self.parse_post_member_expression(
-        &start,
-        expr,
-        CallReceiverType::Expr,
-        ParserConstraints::Call | ParserConstraints::Template,
-        false
-      )
-    );
-  }
-  fn parse_cover_call_expression_and_async_arrow_head(&mut self) -> ParseResult<Expr> {
-    let n = next_parse!(self, self.parse_member_expression())?;
-    if self.cur() == Token::LeftParen {
-      let a = next_parse!(self, self.parse_arguments())?;
-      let mut exprs = new_node!(self, Expressions);
-      exprs.push(n);
-      exprs.push(a);
-      return Ok(exprs.into());
-    }
-    return Ok(n);
-  }
   fn parse_super_call(&mut self) -> ParseResult<Expr> {
     expect!(self, self.cur(), Token::Super);
     let args = next_parse!(self, self.parse_arguments())?;
     return Ok(new_node!(self, CallExpression, CallReceiverType::Super, None, Some(args)).into());
   }
+
+  fn parse_import_call(&mut self) -> ParseResult<Expr> {
+    expect!(self, self.cur(), Token::Import);
+    expect!(self, self.cur(), Token::LeftParen);
+    let expr = next_parse!(self, self.parse_assignment_expression())?;
+    expect!(self, self.cur(), Token::RightParen);
+    return Ok(new_node!(self, CallExpression, CallReceiverType::Super, None, Some(expr)).into());
+  }
+
   fn parse_arguments(&mut self) -> ParseResult<Expr> {
     let start = self.source_position().clone();
     expect!(self, self.cur(), Token::LeftParen);
@@ -1137,15 +1134,50 @@ impl ParserDef for Parser {
       Token::New => {
         if self.peek() == Token::Dot {
           self.advance();
-          return next_parse!(self, self.parse_call_expression().map(set_lhs));
+          return next_parse!(self, self.parse_member_expression().map(set_lhs));
         }
-        return next_parse!(self, self.parse_new_expression().map(set_lhs));
+        return next_parse!(self, self.parse_member_expression());
+      }
+      Token::Super => {
+        if self.peek() == Token::LeftParen {
+          return next_parse!(self, self.parse_super_call());
+        }
+        return next_parse!(self, self.parse_member_expression());
+      }
+      Token::Import => {
+        return next_parse!(self, self.parse_import_call());
       }
       _ => {
-        return next_parse!(self, self.parse_call_expression().map(set_lhs));
+        let expr = next_parse!(self, self.parse_member_expression())?;
+        if self.cur() == Token::LeftParen {
+          let a = next_parse!(self, self.parse_arguments())?;
+          let pos = self.source_position().clone();
+          let n = new_node_with_positions!(
+            self,
+            CallExpression,
+            expr.source_position().clone(),
+            pos,
+            CallReceiverType::Expr,
+            Some(expr),
+            Some(a)
+          );
+          return next_parse!(
+            self,
+            self.parse_post_member_expression(
+              expr.source_position(),
+              n.into(),
+              CallReceiverType::Expr,
+              ParserConstraints::Template | ParserConstraints::Call,
+              false
+            )
+          );
+        } else {
+          return Ok(expr);
+        };
       }
     }
   }
+
   fn parse_update_expression(&mut self) -> ParseResult<Expr> {
     let start = self.source_position().clone();
     match self.cur() {
@@ -1196,7 +1228,12 @@ impl ParserDef for Parser {
         return Ok(unary.into());
       }
       Token::Await => {
-        self.advance();
+        if !self
+          .parser_state
+          .match_states(&[ParserState::InAsyncFunction, ParserState::InAsyncGeneratorFunction])
+        {
+          return Err("await is not allowed outside of async function.".to_string());
+        }
         return next_parse!(self, self.parse_await_expression());
       }
       _ => {
@@ -1397,19 +1434,61 @@ impl ParserDef for Parser {
         return next_parse!(self, self.parse_assignment_expression_lhs());
       }
       _ => {
-        if self.peek() == Token::ArrowFunctionGlyph {
-          return next_parse!(self, self.parse_arrow_function());
+        if self.cur().one_of(&[Token::Identifier, Token::Await, Token::Yield])
+          && self.peek() == Token::ArrowFunctionGlyph
+        {
+          return next_parse!(self, self.parse_arrow_function(false));
         }
-        if self.is_value_match_with("async") {
-          self.record();
-          self.advance();
-          let next = self.peek();
-          self.restore();
-          if next == Token::ArrowFunctionGlyph {
-            return self.parse_arrow_function();
-          }
-        }
+
         let expr = next_parse!(self, self.parse_conditional_expression())?;
+        if self.cur() == Token::ArrowFunctionGlyph {
+          let pos = self.source_position().clone();
+          self.advance();
+          match expr {
+            Expr::CallExpression(call_node) => {
+              if match call_node.receiver() {
+                CallReceiverType::New | CallReceiverType::Super => true,
+                _ => false,
+              } {
+                return Err("Unexpected token found".to_string());
+              }
+              if let Some(callee) = call_node.callee() {
+                match callee {
+                  Expr::Literal(literal_node) => {
+                    if literal_node.literal_type() == Token::Identifier {
+                      match literal_node.value() {
+                        LiteralValue::String(array) => {
+                          if array.to_utf8().eq("async") {
+                            if let Some(args) = call_node.parameters() {
+                              return next_parse!(self, self.parse_concise_body(true, args));
+                            } else {
+                              let mut exprs = new_node_with_pos!(self, Expressions, pos);
+                              exprs.push(literal_node.into());
+                              exprs.mark_as_arguments();
+                              return next_parse!(self, self.parse_concise_body(false, exprs.into()));
+                            };
+                          }
+                        }
+                        _ => {
+                          return Err("Identifier expected".to_string());
+                        }
+                      }
+                    }
+                  }
+                  _ => {
+                    return Err("Identifier expected".to_string());
+                  }
+                }
+              }
+            }
+            Expr::Expressions(exprs) => {
+              return next_parse!(self, self.parse_concise_body(false, exprs.into()));
+            }
+            _ => {
+              return Err("Unexpected token found".to_string());
+            }
+          };
+        }
 
         if self.cur().is_assignment_operator() {
           if !expr.is_valid_lhs() {
@@ -1583,7 +1662,7 @@ impl ParserDef for Parser {
       _ => {
         if self.cur() == Token::Identifier {
           let v = self.value();
-          if (self.is_value_match_with("async") && self.peek() == Token::Function && !self.has_line_break_before())
+          if (self.is_value_match_with("async") && self.peek() == Token::Function && !self.has_line_break_after())
             || self.is_value_match_with("let")
           {
             return next_parse!(self, self.parse_declaration());
@@ -1830,27 +1909,16 @@ impl ParserDef for Parser {
   fn parse_function_body(&mut self) -> ParseResult<Stmt> {
     return next_parse!(self, self.parse_statement_list(|t| t != Token::RightBrace));
   }
-  fn parse_arrow_function(&mut self) -> ParseResult<Expr> {
+
+  fn parse_arrow_function(&mut self, is_async: bool) -> ParseResult<Expr> {
     let p = next_parse!(self, self.parse_arrow_parameter())?;
     if self.cur() != Token::Terminate || self.has_line_break_before() {
       expect!(self, self.cur(), Token::ArrowFunctionGlyph);
-      let body = next_parse!(self, self.parse_async_concise_body())?;
-      return Ok(
-        new_node!(
-          self,
-          FunctionExpression,
-          false,
-          None,
-          FunctionType::NonScoped,
-          FunctionAccessor::None,
-          Node::<Expressions>::try_from(p).unwrap(),
-          body.into()
-        )
-        .into(),
-      );
+      return next_parse!(self, self.parse_concise_body(is_async, p));
     }
     return Ok(p);
   }
+
   fn parse_arrow_parameter(&mut self) -> ParseResult<Expr> {
     match self.cur() {
       Token::LeftParen => {
@@ -1867,29 +1935,38 @@ impl ParserDef for Parser {
       }
     }
   }
-  fn parse_concise_body(&mut self) -> ParseResult<Ast> {
-    if self.peek() == Token::LeftBrace {
-      let ret = next_parse!(self, self.parse_assignment_expression())?;
-      return Ok(ret.into());
+
+  fn parse_concise_body(&mut self, is_async: bool, args: Expr) -> ParseResult<Expr> {
+    let has_brace = self.cur() == Token::LeftBrace;
+    let body = if has_brace {
+      self.advance();
+      next_parse!(self, self.parse_statement_list(|t| t == Token::RightBrace)).map(|t| t.into())
+    } else {
+      next_parse!(self, self.parse_assignment_expression()).map(|t| t.into())
+    }?;
+    if has_brace {
+      self.advance();
     }
-    self.advance();
-    let n = next_parse!(self, self.parse_function_body())?;
-    expect!(self, self.cur(), Token::RightBrace);
-    return Ok(n.into());
-  }
-  fn parse_async_concise_body(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
-  }
-  fn parse_async_arrow_head(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
-  }
-  fn parse_async_arrow_function(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
+    return Ok(
+      new_node!(
+        self,
+        FunctionExpression,
+        is_async,
+        None,
+        FunctionType::NonScoped,
+        FunctionAccessor::None,
+        Node::<Expressions>::try_from(args).unwrap(),
+        body
+      )
+      .into(),
+    );
   }
   fn parse_method_definition(&mut self) -> ParseResult<Expr> {
+    let start = self.source_position().clone();
     let is_getter = self.is_value_match_with("get");
     let is_setter = self.is_value_match_with("set");
-    if (is_getter || is_setter) && self.cur().one_of(&[Token::Identifier, Token::LeftBracket]) {
+    let is_generator = self.cur() == Token::OpMul;
+    if ((is_getter || is_setter) && self.cur().one_of(&[Token::Identifier, Token::LeftBracket])) || is_generator {
       self.advance();
     }
 
@@ -1904,9 +1981,9 @@ impl ParserDef for Parser {
       | Token::Identifier => {
         let mut maybe_name = Err("".to_string());
         let mut formal_parameters = Err("".to_string());
-
-        if self.cur() == Token::Identifier && self.is_value_match_with("async") {
-          return next_parse!(self, self.parse_async_method());
+        let mut is_async = self.cur() == Token::Identifier && self.is_value_match_with("async");
+        if is_async {
+          self.advance();
         }
         maybe_name = next_parse!(self, self.parse_property_name());
 
@@ -1928,6 +2005,7 @@ impl ParserDef for Parser {
           self.advance();
         } else {
           formal_parameters = next_parse!(self, self.parse_formal_parameters());
+          expect!(self, self.cur(), Token::RightParen);
         }
 
         expect!(self, self.cur(), Token::LeftBrace);
@@ -1942,17 +2020,34 @@ impl ParserDef for Parser {
         } else {
           FunctionAccessor::None
         };
-        let function = new_node!(
+        let function = new_node_with_positions!(
           self,
           FunctionExpression,
-          false,
+          start,
+          self.source_position().clone(),
+          is_async,
           Some(Node::<Literal>::try_from(name).unwrap()),
-          FunctionType::Scoped,
+          if is_generator {
+            FunctionType::Generator
+          } else {
+            FunctionType::Scoped
+          },
           accessor_type,
           Node::<Expressions>::try_from(formal_params).unwrap(),
           body.into()
         );
-        return Ok(new_node!(self, ObjectPropertyExpression, name, Some(function.into()), None).into());
+        return Ok(
+          new_node_with_positions!(
+            self,
+            ObjectPropertyExpression,
+            start,
+            self.source_position().clone(),
+            name,
+            Some(function.into()),
+            None
+          )
+          .into(),
+        );
       }
       _ => unreachable!(),
     };
@@ -1973,22 +2068,72 @@ impl ParserDef for Parser {
     return Err("".to_string());
   }
   fn parse_yield_expression(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
-  }
-  fn parse_async_method(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
-  }
-  fn parse_async_function_declaration(&mut self) -> ParseResult<Stmt> {
-    return Err("".to_string());
-  }
-  fn parse_async_function_expression(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
-  }
-  fn parse_async_function_body(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
+    let pos = self.source_position().clone();
+    expect!(self, self.cur(), Token::Yield);
+    let has_termination = self.cur() == Token::Terminate;
+    println!("aAAAaaaaaaaaa = {} {:?}", self.has_line_break_before(), self.cur());
+    if has_termination || self.has_line_break_before() {
+      if has_termination {
+        self.advance();
+      }
+      return Ok(
+        new_node_with_pos!(
+          self,
+          UnaryExpression,
+          pos,
+          UnaryExpressionOperandPosition::Pre,
+          Token::Yield,
+          self.empty.into()
+        )
+        .into(),
+      );
+    }
+
+    if self.cur() == Token::OpMul {
+      self.advance();
+      let expr = next_parse!(self, self.parse_assignment_expression())?;
+      return Ok(
+        new_node_with_positions!(
+          self,
+          UnaryExpression,
+          pos,
+          expr.source_position().clone(),
+          UnaryExpressionOperandPosition::Pre,
+          Token::YieldAggregator,
+          expr
+        )
+        .into(),
+      );
+    }
+
+    let expr = next_parse!(self, self.parse_assignment_expression())?;
+    return Ok(
+      new_node_with_positions!(
+        self,
+        UnaryExpression,
+        pos,
+        expr.source_position().clone(),
+        UnaryExpressionOperandPosition::Pre,
+        Token::Yield,
+        expr
+      )
+      .into(),
+    );
   }
   fn parse_await_expression(&mut self) -> ParseResult<Expr> {
-    return Err("".to_string());
+    let start = self.source_position().clone();
+    expect!(self, self.cur(), Token::Await);
+    let expr = next_parse!(self, self.parse_unary_expression())?;
+    let mut unary = new_node_with_pos!(
+      self,
+      UnaryExpression,
+      start,
+      UnaryExpressionOperandPosition::Pre,
+      Token::Await,
+      expr
+    );
+    unary.set_end_position(expr.source_position());
+    return Ok(unary.into());
   }
   fn parse_class_declaration(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
@@ -2064,6 +2209,7 @@ impl ParserDef for Parser {
 
     return Err("Module specifier expected".to_string());
   }
+
   fn parse_name_space_import(&mut self) -> ParseResult<Expr> {
     expect!(self, self.cur(), Token::Export);
     if self.cur() == Token::Identifier && self.is_value_match_with("as") {
@@ -2071,9 +2217,11 @@ impl ParserDef for Parser {
     }
     return Err("'as' expected".to_string());
   }
+
   fn parse_named_import(&mut self) -> ParseResult<Expr> {
     return next_parse!(self, self.parse_named_list());
   }
+
   fn parse_export_declaration(&mut self) -> ParseResult<Stmt> {
     expect!(self, self.cur(), Token::Export);
     let mut export_type = ExportDeclarationType::NamespaceExport;
@@ -2089,11 +2237,7 @@ impl ParserDef for Parser {
           export_clause = Some(next_parse!(self, self.parse_function_declaration(false, true))?.into());
         }
         Token::Identifier => {
-          if self.is_value_match_with("async") {
-            export_clause = Some(next_parse!(self, self.parse_arrow_function())?.into());
-          } else {
-            export_clause = Some(next_parse!(self, self.parse_assignment_expression())?.into());
-          }
+          export_clause = Some(next_parse!(self, self.parse_assignment_expression())?.into());
         }
         _ => {
           export_clause = Some(next_parse!(self, self.parse_assignment_expression())?.into());
@@ -2111,11 +2255,10 @@ impl ParserDef for Parser {
         export_clause = Some(next_parse!(self, self.parse_declaration())?.into());
       }
       Token::Identifier => {
-        if self.is_value_match_with("async") {
-          export_clause = Some(next_parse!(self, self.parse_async_arrow_function())?.into());
-        } else if self.is_value_match_with("let") {
+        if self.is_value_match_with("let") {
           export_clause = Some(next_parse!(self, self.parse_declaration())?.into());
         }
+        return Err("Unexpected token found".to_string());
       }
       _ => {
         export_clause = Some(next_parse!(self, self.parse_export_clause())?.into());
