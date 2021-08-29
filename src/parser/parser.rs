@@ -36,7 +36,6 @@ macro_rules! expect {
 #[cfg(feature = "print_ast")]
 struct ParserDebugger {
   next_parse: Vec<&'static str>,
-  position: SourcePosition,
   has_error: bool,
   indent: String,
   buffer: String,
@@ -47,7 +46,6 @@ impl ParserDebugger {
   fn new() -> Self {
     ParserDebugger {
       next_parse: Vec::<&'static str>::new(),
-      position: SourcePosition::new(),
       has_error: false,
       indent: "".to_string(),
       buffer: String::new(),
@@ -55,22 +53,21 @@ impl ParserDebugger {
   }
   fn enter(&mut self, next_parse: &'static str, current_token: Token, position: &SourcePosition, has_error: bool) {
     self.next_parse.push(next_parse);
-    self.position = *position;
     self.has_error = has_error;
 
     self.buffer = format!(
       "{}\n{}Enter {}: CurrentToken = {} {:?}",
-      self.buffer, self.indent, next_parse, current_token, self.position
+      self.buffer, self.indent, next_parse, current_token, position
     );
     #[cfg(feature = "print_ast_when_called")]
     println!(
       "{}Enter {}: CurrentToken = {} {:?}",
-      self.indent, next_parse, current_token, self.position
+      self.indent, next_parse, current_token, position
     );
     self.indent = format!("  {}", self.indent);
   }
 
-  fn leave<T>(&mut self, token: Token, result: &ParseResult<T>) {
+  fn leave<T>(&mut self, position: &SourcePosition, token: Token, result: &ParseResult<T>) {
     self.indent = self.indent.chars().take(self.indent.len() - 2).collect::<String>();
     self.buffer = format!(
       "{}\n{}Exit {} {} CurrentToken = {:?}{} {:?}",
@@ -80,7 +77,7 @@ impl ParserDebugger {
       if result.is_ok() { "Success" } else { "Failure" },
       token,
       if self.has_error { "[Error]" } else { "" },
-      self.position
+      position
     );
     #[cfg(feature = "print_ast_when_called")]
     println!(
@@ -90,7 +87,7 @@ impl ParserDebugger {
       if result.is_ok() { "Success" } else { "Failure" },
       token,
       if self.has_error { "[Error]" } else { "" },
-      self.position
+      position
     );
     self.next_parse.pop();
   }
@@ -111,7 +108,8 @@ macro_rules! next_parse {
       .enter(stringify!($call), cur, &source_position, has_pending_error);
     let result = $call;
     let cur = $self.cur();
-    $self.debugger.leave(cur, &result);
+    let pos = $self.source_position().clone();
+    $self.debugger.leave(&pos, cur, &result);
     result
   }};
 }
@@ -156,13 +154,13 @@ macro_rules! new_node {
   ($self:tt, $name:tt, $($args:expr),+$(,)?) => {{
     let mut node = $name::new(&mut $self.region, $($args),*);
     let p = $self.source_position().clone();
-    node.set_source_position(&p);
+    node.set_source_position(&p.runtime_source_position());
     node
   }};
   ($self:tt, $name:tt) => {{
     let mut node = $name::new(&mut $self.region);
     let p = $self.source_position().clone();
-    node.set_source_position(&p);
+    node.set_source_position(&p.runtime_source_position());
     node
   }}
 }
@@ -171,32 +169,28 @@ macro_rules! new_node_with_pos {
   ($self:tt, $name:tt, $pos:expr, $($args:expr),+$(,)?) => {{
     let p = $pos;
     let mut node = $name::new(&mut $self.region, $($args),*);
-    node.set_source_position(&p);
+    node.set_source_position(&p.runtime_source_position());
     node
   }};
   ($self:tt, $name:tt, $pos:expr) => {{
     let p = $pos;
     let mut node = $name::new(&mut $self.region);
-    node.set_source_position(&p);
+    node.set_source_position(&p.runtime_source_position());
     node
   }}
 }
 
-macro_rules! new_node_with_positions {
-  ($self:tt, $name:tt, $pos:expr, $end:expr, $($args:expr),+$(,)?) => {{
+macro_rules! new_node_with_runtime_pos {
+  ($self:tt, $name:tt, $pos:expr, $($args:expr),+$(,)?) => {{
     let p = $pos;
-    let pe = $end;
     let mut node = $name::new(&mut $self.region, $($args),*);
-    node.set_start_position(&p);
-    node.set_end_position(&pe);
+    node.set_source_position(p);
     node
   }};
-  ($self:tt, $name:tt, $pos:expr, $end:expr) => {{
+  ($self:tt, $name:tt, $pos:expr) => {{
     let p = $pos;
-    let pe = $end;
     let mut node = $name::new(&mut $self.region);
-    node.set_start_position(&p);
-    node.set_end_position(&pe);
+    node.set_source_position(p);
     node
   }}
 }
@@ -537,8 +531,12 @@ impl ParserDef for Parser {
 
   fn parse_array_literal(&mut self, constraints: ParserConstraints) -> ParseResult<Expr> {
     expect!(@notadvance self, self.cur(), Token::LeftBracket);
-    let mut array = new_node!(self, StructuralLiteral, StructuralLiteralType::Array);
-    array.set_source_position(self.source_position());
+    let mut array = new_node_with_pos!(
+      self,
+      StructuralLiteral,
+      self.source_position().clone(),
+      StructuralLiteralType::Array
+    );
     array.set_valid_lhs();
     self.advance();
     let mut is_spread_seen = false;
@@ -588,7 +586,6 @@ impl ParserDef for Parser {
         }
       }
     }
-    array.set_end_position(self.source_position());
     expect!(self, self.cur(), Token::RightBracket);
     return Ok(array.into());
   }
@@ -608,7 +605,6 @@ impl ParserDef for Parser {
       Token::Spread,
       expr
     );
-    node.set_end_position(expr.source_position());
     return Ok(node.into());
   }
   fn parse_object_literal(&mut self, constraints: ParserConstraints) -> ParseResult<Expr> {
@@ -629,7 +625,6 @@ impl ParserDef for Parser {
       }
     }
 
-    object.set_end_position(self.source_position());
     expect!(self, self.cur(), Token::RightBrace);
     return Ok(object.into());
   }
@@ -667,7 +662,18 @@ impl ParserDef for Parser {
 
       if self.cur() == Token::OpMul && self.peek().one_of(&binding_tokens) {
         let mut this = scoped!(self, |this| {
-          this.parser_state.pop_state(ParserState::InGeneratorFunction);
+          let n = this.parser_state.pop_state(ParserState::InGeneratorFunction);
+          debug_assert!(
+            n,
+            format!(
+              "State mismatched current state = {:?}",
+              if let Some(cur) = this.parser_state.cur_state() {
+                *cur
+              } else {
+                ParserState::_None
+              }
+            )
+          )
         });
         this.parser_state.push_state(ParserState::InGeneratorFunction);
         return next_parse!(this, this.parse_method_definition());
@@ -686,32 +692,10 @@ impl ParserDef for Parser {
         self.advance();
         let ident = next_parse!(self, self.parse_identifier_reference())?;
         let value = next_parse!(self, self.parse_assignment_expression())?;
-        return Ok(
-          new_node_with_positions!(
-            self,
-            ObjectPropertyExpression,
-            start,
-            value.source_position(),
-            ident,
-            None,
-            Some(value)
-          )
-          .into(),
-        );
+        return Ok(new_node_with_pos!(self, ObjectPropertyExpression, start, ident, None, Some(value)).into());
       } else if self.cur().one_of(&[Token::Comma, Token::RightBrace]) {
         let key_node = key?;
-        return Ok(
-          new_node_with_positions!(
-            self,
-            ObjectPropertyExpression,
-            start,
-            key_node.source_position().clone(),
-            key_node,
-            Some(key_node),
-            None
-          )
-          .into(),
-        );
+        return Ok(new_node_with_pos!(self, ObjectPropertyExpression, start, key_node, Some(key_node), None).into());
       }
     } else {
       return Err(format!("Property name must be one of 'identifier', 'string literal', 'numeric literal' or 'computed property' but got {}", self.cur().symbol()));
@@ -727,16 +711,7 @@ impl ParserDef for Parser {
         Expr::Literal(lit) => {
           if lit.is_identifier() {
             return Ok(
-              new_node_with_positions!(
-                self,
-                ObjectPropertyExpression,
-                start,
-                key_node.source_position().clone(),
-                key_node,
-                Some(key_node),
-                None
-              )
-              .into(),
+              new_node_with_pos!(self, ObjectPropertyExpression, start, key_node, Some(key_node), None).into(),
             );
           }
         }
@@ -760,18 +735,7 @@ impl ParserDef for Parser {
       }
     }
 
-    return Ok(
-      new_node_with_positions!(
-        self,
-        ObjectPropertyExpression,
-        start,
-        value.source_position().clone(),
-        key_node,
-        Some(value),
-        None
-      )
-      .into(),
-    );
+    return Ok(new_node_with_pos!(self, ObjectPropertyExpression, start, key_node, Some(value), None).into());
   }
 
   fn parse_property_name(&mut self) -> ParseResult<Expr> {
@@ -788,14 +752,12 @@ impl ParserDef for Parser {
         let start = self.source_position().clone();
         expect!(self, self.cur(), Token::LeftBracket);
         let ret = next_parse!(self, self.parse_assignment_expression())?;
-        let end = self.source_position().clone();
         expect!(self, self.cur(), Token::RightBracket);
         return Ok(
-          new_node_with_positions!(
+          new_node_with_pos!(
             self,
             PropertyAccessExpression,
             start,
-            end,
             PropertyAccessType::Element,
             CallReceiverType::None,
             None,
@@ -832,7 +794,6 @@ impl ParserDef for Parser {
       };
     }
 
-    template_literal.set_end_position(self.source_position());
     self.parser_state.pop_state(ParserState::InTemplateLiteral);
     self.advance();
     return Ok(template_literal.into());
@@ -857,11 +818,10 @@ impl ParserDef for Parser {
         } else {
           e = next_parse!(self, self.parse_single_name_binding(ParserConstraints::None))?;
         }
-        let u = new_node_with_positions!(
+        let u = new_node_with_pos!(
           self,
           UnaryExpression,
           start,
-          e.source_position().clone(),
           UnaryExpressionOperandPosition::Pre,
           Token::Spread,
           e
@@ -882,7 +842,6 @@ impl ParserDef for Parser {
       }
     }
 
-    exprs.set_end_position(self.source_position());
     expect!(self, self.cur(), Token::RightParen);
     return Ok(exprs.into());
   }
@@ -895,7 +854,7 @@ impl ParserDef for Parser {
       return next_parse!(
         self,
         self.parse_post_member_expression(
-          &start,
+          &start.runtime_source_position(),
           self.empty.into(),
           CallReceiverType::Super,
           ParserConstraints::None,
@@ -933,11 +892,10 @@ impl ParserDef for Parser {
       let m = next_parse!(self, self.parse_member_expression())?;
       if self.cur() != Token::LeftParen {
         let mut expr = new_node_with_pos!(self, NewExpression, &start, m);
-        expr.set_end_position(m.source_position());
         return Ok(expr.into());
       }
       let args = next_parse!(self, self.parse_arguments())?;
-      let mut call = new_node_with_pos!(
+      let call = new_node_with_pos!(
         self,
         CallExpression,
         &start_call,
@@ -945,13 +903,11 @@ impl ParserDef for Parser {
         Some(m),
         Some(args)
       );
-      call.set_end_position(args.source_position());
-      let mut expr = new_node_with_pos!(self, NewExpression, &start, call.into());
-      expr.set_end_position(args.source_position());
+      let expr = new_node_with_pos!(self, NewExpression, &start, call.into());
       return next_parse!(
         self,
         self.parse_post_member_expression(
-          &start,
+          &start.runtime_source_position(),
           expr.into(),
           CallReceiverType::Expr,
           ParserConstraints::Template,
@@ -963,13 +919,19 @@ impl ParserDef for Parser {
     let n = next_parse!(self, self.parse_primary_expression())?;
     return next_parse!(
       self,
-      self.parse_post_member_expression(&start, n, CallReceiverType::Expr, ParserConstraints::Template, false)
+      self.parse_post_member_expression(
+        &start.runtime_source_position(),
+        n,
+        CallReceiverType::Expr,
+        ParserConstraints::Template,
+        false
+      )
     );
   }
 
   fn parse_post_member_expression(
     &mut self,
-    source_position: &SourcePosition,
+    source_position: &RuntimeSourcePosition,
     expr: Expr,
     receiver_type: CallReceiverType,
     constraints: ParserConstraints,
@@ -984,7 +946,7 @@ impl ParserDef for Parser {
             break;
           }
           let a = next_parse!(self, self.parse_arguments())?;
-          current = new_node_with_pos!(
+          current = new_node_with_runtime_pos!(
             self,
             CallExpression,
             source_position,
@@ -999,7 +961,7 @@ impl ParserDef for Parser {
           let n = next_parse!(self, self.parse_expression())?;
           let end = self.source_position().clone();
           expect!(self, self.cur(), Token::RightBracket);
-          let mut expr = new_node_with_pos!(
+          let expr = new_node_with_runtime_pos!(
             self,
             PropertyAccessExpression,
             source_position,
@@ -1008,13 +970,12 @@ impl ParserDef for Parser {
             Some(current),
             Some(n)
           );
-          expr.set_end_position(&end);
           current = expr.into();
         }
         Token::Dot => {
           self.advance();
           let ident = next_parse!(self, self.parse_identifier_reference())?;
-          let mut expr = new_node_with_pos!(
+          let expr = new_node_with_runtime_pos!(
             self,
             PropertyAccessExpression,
             source_position,
@@ -1023,7 +984,6 @@ impl ParserDef for Parser {
             Some(current),
             Some(ident)
           );
-          expr.set_end_position(ident.source_position());
           current = expr.into();
         }
         Token::BackQuote => {
@@ -1031,7 +991,7 @@ impl ParserDef for Parser {
             return Err("Unexpected '`' found".to_string());
           }
           let tmpl = next_parse!(self, self.parse_template_literal())?;
-          current = new_node_with_pos!(
+          current = new_node_with_runtime_pos!(
             self,
             CallExpression,
             source_position,
@@ -1040,7 +1000,6 @@ impl ParserDef for Parser {
             Some(tmpl)
           )
           .into();
-          current.set_end_position(tmpl.source_position());
         }
         _ => {
           if error_if_default {
@@ -1060,8 +1019,7 @@ impl ParserDef for Parser {
       if self.peek() == Token::New {
         self.advance();
         let callee = next_parse!(self, self.parse_new_expression())?;
-        let mut expr = new_node_with_pos!(self, NewExpression, start, callee);
-        expr.set_end_position(callee.source_position());
+        let expr = new_node_with_pos!(self, NewExpression, start, callee);
         return Ok(expr.into());
       }
       return next_parse!(self, self.parse_member_expression());
@@ -1117,14 +1075,14 @@ impl ParserDef for Parser {
       }
     }
 
-    let end = self.source_position().clone();
     expect!(self, self.cur(), Token::RightParen);
-    exprs.set_end_position(&end);
     return Ok(exprs.into());
   }
+
   fn parse_arguments_list(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_left_hand_side_expression(&mut self) -> ParseResult<Expr> {
     let set_lhs = |mut node: Expr| {
       node.set_valid_lhs();
@@ -1151,12 +1109,10 @@ impl ParserDef for Parser {
         let expr = next_parse!(self, self.parse_member_expression())?;
         if self.cur() == Token::LeftParen {
           let a = next_parse!(self, self.parse_arguments())?;
-          let pos = self.source_position().clone();
-          let n = new_node_with_positions!(
+          let n = new_node_with_runtime_pos!(
             self,
             CallExpression,
-            expr.source_position().clone(),
-            pos,
+            expr.source_position(),
             CallReceiverType::Expr,
             Some(expr),
             Some(a)
@@ -1185,8 +1141,7 @@ impl ParserDef for Parser {
         let op = self.cur();
         self.advance();
         let n = next_parse!(self, self.parse_left_hand_side_expression())?;
-        let mut update = new_node_with_pos!(self, UnaryExpression, start, UnaryExpressionOperandPosition::Pre, op, n);
-        update.set_end_position(n.source_position());
+        let update = new_node_with_pos!(self, UnaryExpression, start, UnaryExpressionOperandPosition::Pre, op, n);
         return Ok(update.into());
       }
       _ => {
@@ -1197,11 +1152,10 @@ impl ParserDef for Parser {
             let sp = self.source_position().clone();
             self.advance();
             Ok(
-              new_node_with_positions!(
+              new_node_with_pos!(
                 self,
                 UnaryExpression,
                 start,
-                sp,
                 UnaryExpressionOperandPosition::Post,
                 token,
                 n
@@ -1215,6 +1169,7 @@ impl ParserDef for Parser {
       }
     }
   }
+
   fn parse_unary_expression(&mut self) -> ParseResult<Expr> {
     let start = self.source_position().clone();
     match self.cur() {
@@ -1222,9 +1177,14 @@ impl ParserDef for Parser {
         let op = self.cur();
         self.advance();
         let rhs_exp = next_parse!(self, self.parse_unary_expression())?;
-        let mut unary = new_node!(self, UnaryExpression, UnaryExpressionOperandPosition::Pre, op, rhs_exp);
-        unary.set_start_position(&start);
-        unary.set_end_position(rhs_exp.source_position());
+        let unary = new_node_with_pos!(
+          self,
+          UnaryExpression,
+          start,
+          UnaryExpressionOperandPosition::Pre,
+          op,
+          rhs_exp
+        );
         return Ok(unary.into());
       }
       Token::Await => {
@@ -1257,15 +1217,7 @@ impl ParserDef for Parser {
     if prev_priority == OperatorPriority::None || prev_priority >= priority {
       left = prev_ast;
       right = expr;
-      let mut ret = new_node_with_pos!(
-        self,
-        BinaryExpression,
-        left.source_position().clone(),
-        token,
-        left,
-        right
-      );
-      ret.set_end_position(right.source_position());
+      let ret = new_node_with_runtime_pos!(self, BinaryExpression, left.source_position(), token, left, right);
       return Ok(ret.into());
     }
 
@@ -1291,17 +1243,8 @@ impl ParserDef for Parser {
     let mut bin_expr = Node::<BinaryExpression>::try_from(maybe_bin_ast).unwrap();
     right = expr;
     left = bin_expr.rhs();
-    let mut ret = new_node_with_pos!(
-      self,
-      BinaryExpression,
-      left.source_position().clone(),
-      token,
-      left,
-      right
-    );
-    ret.set_end_position(expr.source_position());
+    let ret = new_node_with_runtime_pos!(self, BinaryExpression, left.source_position(), token, left, right);
     bin_expr.set_rhs(ret);
-    prev_ast.set_end_position(expr.source_position());
     return Ok(prev_ast);
   }
 
@@ -1408,15 +1351,14 @@ impl ParserDef for Parser {
       self.advance();
       let rhs = next_parse!(self, self.parse_assignment_expression())?;
       let rhs_source_pos = rhs.source_position().clone();
-      let mut result = new_node_with_pos!(
+      let result = new_node_with_runtime_pos!(
         self,
         ConditionalExpression,
-        bin_expr.source_position().clone(),
+        bin_expr.source_position(),
         bin_expr,
         lhs,
         rhs
       );
-      result.set_end_position(&rhs_source_pos);
       return Ok(result.into());
     }
     return Ok(bin_expr);
@@ -1498,21 +1440,15 @@ impl ParserDef for Parser {
           self.advance();
           let assignment = next_parse!(self, self.parse_assignment_expression())?;
           let end_pos = assignment.source_position().clone();
-          let mut binary_expr = new_node_with_pos!(
-            self,
-            BinaryExpression,
-            expr.source_position().clone(),
-            op,
-            expr,
-            assignment
-          );
-          binary_expr.set_end_position(&end_pos);
+          let binary_expr =
+            new_node_with_runtime_pos!(self, BinaryExpression, expr.source_position(), op, expr, assignment);
           return Ok(binary_expr.into());
         }
         return Ok(expr);
       }
     }
   }
+
   fn parse_assignment_expression_lhs(&mut self) -> ParseResult<Expr> {
     let lhs = next_parse!(self, self.parse_left_hand_side_expression())?;
     if self.cur().is_assignment_operator() {
@@ -1524,36 +1460,47 @@ impl ParserDef for Parser {
     }
     return Ok(lhs);
   }
+
   fn parse_assignment_pattern(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_object_assignment_pattern(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_array_assignment_pattern(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_assignment_property_list(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_assignment_element_list(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_assignment_elision_element(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_assignment_property(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_assignment_element(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_assignment_rest_element(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_destructuring_assignment_target(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_expression(&mut self) -> ParseResult<Expr> {
     let expr = next_parse!(self, self.parse_assignment_expression())?;
     if self.cur() == Token::Comma {
@@ -1569,6 +1516,7 @@ impl ParserDef for Parser {
 
     return Ok(expr);
   }
+
   fn parse_statement(&mut self) -> ParseResult<Stmt> {
     use Token::*;
     match self.cur() {
@@ -1627,18 +1575,23 @@ impl ParserDef for Parser {
       _ => unreachable!(),
     };
   }
+
   fn parse_hoistable_declaration(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_breakable_statement(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_block_statement(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_block(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_statement_list<T: Fn(Token) -> bool>(&mut self, condition: T) -> ParseResult<Stmt> {
     let mut statements = new_node!(self, Statements);
     while self.has_more() && condition(self.cur()) {
@@ -1646,14 +1599,9 @@ impl ParserDef for Parser {
       statements.push(stmt);
     }
 
-    if statements.len() > 0 {
-      let last = statements.last().unwrap();
-      let sp = last.source_position().clone();
-      statements.set_end_position(&sp);
-    }
-
     return Ok(statements.into());
   }
+
   fn parse_statement_list_item(&mut self) -> ParseResult<Stmt> {
     match self.cur() {
       Token::Class | Token::Const | Token::Function => {
@@ -1737,75 +1685,94 @@ impl ParserDef for Parser {
 
   fn parse_expression_statement(&mut self) -> ParseResult<Stmt> {
     let expr = next_parse!(self, self.parse_expression())?;
-    let mut stmt = new_node!(self, Statement, expr);
-    let sp = expr.source_position().clone();
-    stmt.set_start_position(&sp);
-    stmt.set_end_position(&sp);
+    let stmt = new_node_with_runtime_pos!(self, Statement, expr.source_position(), expr);
     return next_parse!(self, self.parse_terminator(stmt.into()));
   }
+
   fn parse_if_statement(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_iteration_statement(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_for_declaration(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_for_binding(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_continue_statement(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_break_statement(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_return_statement(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_with_statement(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_switch_statement(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_case_block(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_case_clauses(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_case_clause(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_default_caluse(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_labelled_statement(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_labelled_item(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_throw_statement(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_try_statement(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_catch(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_finally(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_catch_parameter(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_debugger_statement(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_function_declaration(&mut self, is_async: bool, is_default: bool) -> ParseResult<Stmt> {
     let start = self.source_position().clone();
     if is_async {
@@ -1825,16 +1792,14 @@ impl ParserDef for Parser {
     let formal_parameter_position = self.source_position().clone();
     expect!(self, self.cur(), Token::LeftParen);
     let mut params = next_parse!(self, self.parse_formal_parameters())?;
-    params.set_start_position(&formal_parameter_position);
-    params.set_end_position(self.source_position());
+    params.set_source_position(&formal_parameter_position.runtime_source_position());
     expect!(self, self.cur(), Token::RightParen);
 
     let body_start_position = self.source_position().clone();
     expect!(self, self.cur(), Token::LeftBrace);
     let mut body = next_parse!(self, self.parse_function_body())?;
     expect!(self, self.cur(), Token::RightBrace);
-    body.set_start_position(&body_start_position);
-    body.set_end_position(self.source_position());
+    body.set_source_position(&body_start_position.runtime_source_position());
 
     let function_type = if self
       .parser_state
@@ -1845,9 +1810,10 @@ impl ParserDef for Parser {
       FunctionType::Scoped
     };
 
-    let mut function = new_node!(
+    let function = new_node_with_pos!(
       self,
       FunctionExpression,
+      start,
       is_async,
       identifier,
       function_type,
@@ -1855,16 +1821,14 @@ impl ParserDef for Parser {
       Node::<Expressions>::try_from(params).unwrap(),
       body.into()
     );
-    function.set_start_position(&start);
-    function.set_end_position(self.prev_source_position());
-    let mut stmt = new_node!(self, Statement, function.into());
-    stmt.set_start_position(&start);
-    stmt.set_end_position(self.prev_source_position());
+    let stmt = new_node_with_pos!(self, Statement, start, function.into());
     return Ok(stmt.into());
   }
+
   fn parse_function_expression(&mut self, is_async: bool, is_default: bool) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_formal_parameters(&mut self) -> ParseResult<Expr> {
     if self.cur() == Token::Spread {
       return next_parse!(self, self.parse_function_rest_parameter());
@@ -1880,6 +1844,7 @@ impl ParserDef for Parser {
     }
     return Ok(exprs.into());
   }
+
   fn parse_formal_parameter_list(&mut self) -> ParseResult<Expr> {
     let mut exprs = new_node!(self, Expressions);
     loop {
@@ -1896,6 +1861,7 @@ impl ParserDef for Parser {
     }
     unreachable!();
   }
+
   fn parse_function_rest_parameter(&mut self) -> ParseResult<Expr> {
     expect!(self, self.cur(), Token::Spread);
     self.advance();
@@ -1906,6 +1872,7 @@ impl ParserDef for Parser {
       _ => return next_parse!(self, self.parse_single_name_binding(ParserConstraints::Initializer)),
     }
   }
+
   fn parse_function_body(&mut self) -> ParseResult<Stmt> {
     return next_parse!(self, self.parse_statement_list(|t| t != Token::RightBrace));
   }
@@ -1961,19 +1928,17 @@ impl ParserDef for Parser {
       .into(),
     );
   }
+
   fn parse_method_definition(&mut self) -> ParseResult<Expr> {
     let start = self.source_position().clone();
     let is_getter = self.is_value_match_with("get");
     let is_setter = self.is_value_match_with("set");
-    let is_generator = self.cur() == Token::OpMul;
+    let mut is_generator = self.cur() == Token::OpMul;
     if ((is_getter || is_setter) && self.cur().one_of(&[Token::Identifier, Token::LeftBracket])) || is_generator {
       self.advance();
     }
 
     match self.cur() {
-      Token::OpMul => {
-        return next_parse!(self, self.parse_generator_method());
-      }
       Token::NumericLiteral
       | Token::ImplicitOctalLiteral
       | Token::StringLiteral
@@ -1984,6 +1949,11 @@ impl ParserDef for Parser {
         let mut is_async = self.cur() == Token::Identifier && self.is_value_match_with("async");
         if is_async {
           self.advance();
+        }
+        if self.cur() == Token::OpMul {
+          is_generator = true;
+          self.advance();
+          self.parser_state.push_state(ParserState::InAsyncGeneratorFunction);
         }
         maybe_name = next_parse!(self, self.parse_property_name());
 
@@ -2020,11 +1990,10 @@ impl ParserDef for Parser {
         } else {
           FunctionAccessor::None
         };
-        let function = new_node_with_positions!(
+        let mut function = new_node_with_pos!(
           self,
           FunctionExpression,
           start,
-          self.source_position().clone(),
           is_async,
           Some(Node::<Literal>::try_from(name).unwrap()),
           if is_generator {
@@ -2036,42 +2005,39 @@ impl ParserDef for Parser {
           Node::<Expressions>::try_from(formal_params).unwrap(),
           body.into()
         );
-        return Ok(
-          new_node_with_positions!(
-            self,
-            ObjectPropertyExpression,
-            start,
-            self.source_position().clone(),
-            name,
-            Some(function.into()),
-            None
-          )
-          .into(),
-        );
+        if is_async && is_generator {
+          self.parser_state.pop_state(ParserState::InAsyncGeneratorFunction);
+        }
+        return Ok(new_node_with_pos!(self, ObjectPropertyExpression, start, name, Some(function.into()), None).into());
       }
       _ => unreachable!(),
     };
   }
+
   fn parse_property_set_parameter_list(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_generator_method(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_generator_declaration(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_generator_expression(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_generator_body(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_yield_expression(&mut self) -> ParseResult<Expr> {
     let pos = self.source_position().clone();
     expect!(self, self.cur(), Token::Yield);
     let has_termination = self.cur() == Token::Terminate;
-    println!("aAAAaaaaaaaaa = {} {:?}", self.has_line_break_before(), self.cur());
     if has_termination || self.has_line_break_before() {
       if has_termination {
         self.advance();
@@ -2093,11 +2059,10 @@ impl ParserDef for Parser {
       self.advance();
       let expr = next_parse!(self, self.parse_assignment_expression())?;
       return Ok(
-        new_node_with_positions!(
+        new_node_with_pos!(
           self,
           UnaryExpression,
           pos,
-          expr.source_position().clone(),
           UnaryExpressionOperandPosition::Pre,
           Token::YieldAggregator,
           expr
@@ -2108,11 +2073,10 @@ impl ParserDef for Parser {
 
     let expr = next_parse!(self, self.parse_assignment_expression())?;
     return Ok(
-      new_node_with_positions!(
+      new_node_with_pos!(
         self,
         UnaryExpression,
         pos,
-        expr.source_position().clone(),
         UnaryExpressionOperandPosition::Pre,
         Token::Yield,
         expr
@@ -2120,6 +2084,7 @@ impl ParserDef for Parser {
       .into(),
     );
   }
+
   fn parse_await_expression(&mut self) -> ParseResult<Expr> {
     let start = self.source_position().clone();
     expect!(self, self.cur(), Token::Await);
@@ -2132,30 +2097,37 @@ impl ParserDef for Parser {
       Token::Await,
       expr
     );
-    unary.set_end_position(expr.source_position());
     return Ok(unary.into());
   }
+
   fn parse_class_declaration(&mut self) -> ParseResult<Stmt> {
     return Err("".to_string());
   }
+
   fn parse_class_expression(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_class_tail(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_class_heritage(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_class_body(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_class_element_list(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_class_element(&mut self) -> ParseResult<Expr> {
     return Err("".to_string());
   }
+
   fn parse_module_item(&mut self) -> ParseResult<Stmt> {
     match self.cur() {
       Token::Import => return next_parse!(self, self.parse_import_declaration()),
@@ -2163,6 +2135,7 @@ impl ParserDef for Parser {
       _ => return next_parse!(self, self.parse_statement_list_item()),
     }
   }
+
   fn parse_import_declaration(&mut self) -> ParseResult<Stmt> {
     debug_assert!(self.cur() == Token::Import);
     let mut start = self.source_position().clone();

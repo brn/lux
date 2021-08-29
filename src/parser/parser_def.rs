@@ -1,5 +1,5 @@
 use super::ast::*;
-use super::source_position::SourcePosition;
+use super::source_position::{RuntimeSourcePosition, SourcePosition};
 use super::token::*;
 
 pub type ParseResult<T> = Result<T, String>;
@@ -85,7 +85,7 @@ pub trait ParserDef {
   fn parse_member_expression(&mut self) -> ParseResult<Expr>;
   fn parse_post_member_expression(
     &mut self,
-    source_position: &SourcePosition,
+    source_position: &RuntimeSourcePosition,
     expr: Expr,
     receiver_type: CallReceiverType,
     constraints: ParserConstraints,

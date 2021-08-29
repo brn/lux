@@ -1,4 +1,4 @@
-use super::source_position::SourcePosition;
+use super::source_position::RuntimeSourcePosition;
 use super::token::Token;
 use crate::property::Property;
 use crate::structs::{FixedU16CodePointArray, Repr};
@@ -17,21 +17,21 @@ pub trait AstNode {
     return !self.is_expr();
   }
 
-  fn to_string(&self, indent: &mut String, result: &mut String, source_positon: &SourcePosition);
+  fn to_string(&self, indent: &mut String, result: &mut String, source_positon: &RuntimeSourcePosition);
 
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_positon: &SourcePosition);
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_positon: &RuntimeSourcePosition);
 }
 
 #[derive(Copy, Clone)]
 pub struct AstMetadata {
   flags: Bitset<u8>,
-  source_position: SourcePosition,
+  source_position: RuntimeSourcePosition,
 }
 impl AstMetadata {
   fn new() -> Self {
     return AstMetadata {
       flags: Bitset::<u8>::new(),
-      source_position: SourcePosition::new(),
+      source_position: RuntimeSourcePosition::new(0, 0),
     };
   }
 }
@@ -49,9 +49,9 @@ trait AstStringifyInternal {
 }
 
 pub trait AstMetaInfo {
-  fn source_position(&self) -> &SourcePosition;
+  fn source_position(&self) -> &RuntimeSourcePosition;
 
-  fn source_position_mut(&mut self) -> &mut SourcePosition;
+  fn source_position_mut(&mut self) -> &mut RuntimeSourcePosition;
 
   fn is_expr(&self) -> bool;
 
@@ -65,41 +65,21 @@ pub trait AstMetaInfo {
 
   fn unset_valid_lhs(&mut self);
 
-  fn set_source_position(&mut self, pos: &SourcePosition) {
+  fn set_source_position(&mut self, pos: &RuntimeSourcePosition) {
     (*self.source_position_mut()) = *pos;
   }
 
-  fn set_start_position(&mut self, pos: &SourcePosition) {
-    self.source_position_mut().set_start_col(pos.start_col());
-    self
-      .source_position_mut()
-      .set_start_line_number(pos.start_line_number());
+  fn set_position(&mut self, pos: &RuntimeSourcePosition) {
+    self.source_position_mut().set_col(pos.col());
+    self.source_position_mut().set_line_number(pos.line_number());
   }
 
-  fn set_end_position(&mut self, pos: &SourcePosition) {
-    self.source_position_mut().set_end_col(pos.end_col());
-    self.source_position_mut().set_end_line_number(pos.end_line_number());
+  fn set_col(&mut self, pos: u32) {
+    self.source_position_mut().set_col(pos);
   }
 
-  fn set_end_position_clone(&mut self, pos: SourcePosition) {
-    self.source_position_mut().set_end_col(pos.end_col());
-    self.source_position_mut().set_end_line_number(pos.end_line_number());
-  }
-
-  fn set_start_pos(&mut self, pos: u32) {
-    self.source_position_mut().set_start_col(pos);
-  }
-
-  fn set_end_pos(&mut self, pos: u32) {
-    self.source_position_mut().set_end_col(pos);
-  }
-
-  fn set_start_line_number(&mut self, line: u32) {
-    self.source_position_mut().set_start_line_number(line);
-  }
-
-  fn set_end_line_number(&mut self, line: u32) {
-    self.source_position_mut().set_end_line_number(line);
+  fn set_line_number(&mut self, line: u32) {
+    self.source_position_mut().set_line_number(line);
   }
 }
 
@@ -149,7 +129,7 @@ macro_rules! _ast_enum {
     }
 
     impl AstMetaInfo for $name {
-      fn source_position(&self) -> &SourcePosition {
+      fn source_position(&self) -> &RuntimeSourcePosition {
         return match self {
           $(
             &$name::$item(ref node) => node.source_position(),
@@ -157,7 +137,7 @@ macro_rules! _ast_enum {
         }
       }
 
-      fn source_position_mut(&mut self) -> &mut SourcePosition {
+      fn source_position_mut(&mut self) -> &mut RuntimeSourcePosition {
         return match self {
           $(
             &mut $name::$item(ref mut node) => node.source_position_mut(),
@@ -375,14 +355,14 @@ impl AstStringify for Ast {
 }
 
 impl AstMetaInfo for Ast {
-  fn source_position(&self) -> &SourcePosition {
+  fn source_position(&self) -> &RuntimeSourcePosition {
     return match self {
       &Ast::Expr(ref expr) => expr.source_position(),
       &Ast::Stmt(ref stmt) => stmt.source_position(),
     };
   }
 
-  fn source_position_mut(&mut self) -> &mut SourcePosition {
+  fn source_position_mut(&mut self) -> &mut RuntimeSourcePosition {
     return match self {
       &mut Ast::Expr(ref mut expr) => expr.source_position_mut(),
       &mut Ast::Stmt(ref mut stmt) => stmt.source_position_mut(),
@@ -515,11 +495,11 @@ impl<T: AstNode> AstStringifyInternal for Node<T> {
 }
 
 impl<T: AstNode> AstMetaInfo for Node<T> {
-  fn source_position(&self) -> &SourcePosition {
+  fn source_position(&self) -> &RuntimeSourcePosition {
     return &self.0.as_ref().meta.source_position;
   }
 
-  fn source_position_mut(&mut self) -> &mut SourcePosition {
+  fn source_position_mut(&mut self) -> &mut RuntimeSourcePosition {
     return &mut self.0.as_mut().meta.source_position;
   }
 
@@ -561,11 +541,11 @@ fn to_string_list<T: AstStringifyInternal>(list: &Vec<T>, indent: &mut String, r
 pub struct Empty;
 impl_expr!(
   Empty,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[Empty {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
   }
 );
@@ -630,11 +610,11 @@ pub struct Expressions {
 }
 impl_expr!(
   Expressions,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[Expressions {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     to_string_list(&self.items, indent, result);
   }
@@ -683,11 +663,11 @@ pub struct Statements {
 }
 impl_stmt!(
   Statements,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[Statements {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     to_string_list(&self.items, indent, result);
   }
@@ -734,11 +714,11 @@ pub struct Statement {
 }
 impl_stmt!(
   Statement,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[Statement {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.expr.to_string_tree_internal(&mut ni, result);
@@ -765,7 +745,7 @@ pub struct BinaryExpression {
 }
 impl_expr!(
   BinaryExpression,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
       "{}[BinaryExpression operand = {} {}]\n",
       indent,
@@ -774,7 +754,7 @@ impl_expr!(
     );
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.lhs.to_string_tree_internal(&mut ni, result);
@@ -808,7 +788,7 @@ pub struct UnaryExpression {
 }
 impl_expr!(
   UnaryExpression,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
       "{}[UnaryExpression operand = {} position = {:?} {}]\n",
       indent,
@@ -818,7 +798,7 @@ impl_expr!(
     );
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.target.to_string_tree_internal(&mut ni, result);
@@ -850,11 +830,11 @@ pub struct ConditionalExpression {
 }
 impl_expr!(
   ConditionalExpression,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[ConditionalExpression {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.condition.to_string_tree_internal(&mut ni, result);
@@ -884,11 +864,11 @@ pub struct NewExpression {
 }
 impl_expr!(
   NewExpression,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[NewExpression {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.callee.to_string_tree_internal(&mut ni, result);
@@ -925,7 +905,7 @@ pub struct CallExpression {
 }
 impl_expr!(
   CallExpression,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
       "{}[CallExpression receiver = {:?} {}]\n",
       indent,
@@ -934,7 +914,7 @@ impl_expr!(
     );
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     if let Some(callee) = self.callee {
@@ -979,7 +959,7 @@ pub struct PropertyAccessExpression {
 }
 impl_expr!(
   PropertyAccessExpression,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
       "{}[PropertyAccessExpression property_access = {} {}]\n",
       indent,
@@ -996,7 +976,7 @@ impl_expr!(
     );
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     if let Some(ref receiver) = self.receiver {
@@ -1084,7 +1064,7 @@ pub struct FunctionExpression {
 }
 impl_expr!(
   FunctionExpression,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
       "{}[FunctionExpression type = {}{} {}]\n",
       indent,
@@ -1100,7 +1080,7 @@ impl_expr!(
     );
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     if let Some(ref name) = self.name {
@@ -1158,11 +1138,11 @@ pub struct ObjectPropertyExpression {
 }
 impl_expr!(
   ObjectPropertyExpression,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[ObjectPropertyExpression {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.key.to_string_tree_internal(&mut ni, result);
@@ -1189,11 +1169,11 @@ impl ObjectPropertyExpression {
 pub struct Elision;
 impl_expr!(
   Elision,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[Elision {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
   }
 );
@@ -1221,7 +1201,7 @@ pub struct StructuralLiteral {
 }
 impl_expr!(
   StructuralLiteral,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
       "{}[StructuralLiteral type = {}{} {}]\n",
       indent,
@@ -1240,7 +1220,7 @@ impl_expr!(
     );
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     to_string_list(self.list(), indent, result);
   }
@@ -1326,7 +1306,7 @@ pub struct Literal {
 }
 impl_expr!(
   Literal,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
       "{}[Literal type = {:?} value = {} {}]\n",
       indent,
@@ -1340,7 +1320,7 @@ impl_expr!(
     );
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
   }
 );
@@ -1360,11 +1340,11 @@ pub struct TemplateLiteral {
 }
 impl_expr!(
   TemplateLiteral,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[TemplateLiteral {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     to_string_list(&self.parts, indent, result);
   }
@@ -1393,7 +1373,7 @@ pub struct ImportSpecifier {
 }
 impl_expr!(
   ImportSpecifier,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
       "{}[ImportSpecifier is_namespace = {} {}]\n",
       indent,
@@ -1402,7 +1382,7 @@ impl_expr!(
     );
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     if let Some(ref name) = self.name {
@@ -1436,11 +1416,11 @@ pub struct NamedImportList {
 }
 impl_expr!(
   NamedImportList,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[NamedImportList {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     to_string_list(&self.list, indent, result);
   }
@@ -1475,11 +1455,11 @@ pub struct ImportBinding {
 }
 impl_expr!(
   ImportBinding,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[ImportBinding {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     if let Some(ref default_binding) = self.default_binding {
@@ -1521,11 +1501,11 @@ pub struct ImportDeclaration {
 }
 impl_stmt!(
   ImportDeclaration,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[ImportDeclaration {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     if let Some(ref import_binding) = self.import_binding {
@@ -1562,7 +1542,7 @@ pub struct ExportDeclaration {
 }
 impl_stmt!(
   ExportDeclaration,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
       "{}[ExportDeclaration type = {} {}]\n",
       indent,
@@ -1575,7 +1555,7 @@ impl_stmt!(
     );
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     if let Some(ref export_clause) = self.export_clause {
@@ -1634,11 +1614,11 @@ pub struct ClassExpression {
 }
 impl_expr!(
   ClassExpression,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[ClassExpression {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     if let Some(ref heritage) = self.heritage {
@@ -1656,11 +1636,11 @@ pub struct ForStatement {
 }
 impl_stmt!(
   ForStatement,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[ForStatement {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.declarations.to_string_tree_internal(&mut ni, result);
@@ -1675,11 +1655,11 @@ pub struct WhileStatement {
 }
 impl_stmt!(
   WhileStatement,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[ForStatement {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.comparison.to_string_tree_internal(&mut ni, result);
@@ -1693,11 +1673,11 @@ pub struct DoWhileStatement {
 }
 impl_stmt!(
   DoWhileStatement,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[ForStatement {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.comparison.to_string_tree_internal(&mut ni, result);
@@ -1712,11 +1692,11 @@ pub struct IfStatement {
 }
 impl_stmt!(
   IfStatement,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[IfStatement {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.condition.to_string_tree_internal(&mut ni, result);
@@ -1731,11 +1711,11 @@ pub struct SwitchStatement {
 }
 impl_stmt!(
   SwitchStatement,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[SwitchStatement {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.condition.to_string_tree_internal(&mut ni, result);
@@ -1749,11 +1729,11 @@ pub struct SwitchCases {
 }
 impl_stmt!(
   SwitchCases,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[SwitchCases {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.condition.to_string_tree_internal(&mut ni, result);
@@ -1764,11 +1744,11 @@ impl_stmt!(
 pub struct BreakStatement;
 impl_stmt!(
   BreakStatement,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[BreakStatement {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
   }
 );
@@ -1776,11 +1756,11 @@ impl_stmt!(
 pub struct ContinueStatement;
 impl_stmt!(
   ContinueStatement,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[ContinueStatement {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
   }
 );
@@ -1790,11 +1770,11 @@ pub struct BlockStatement {
 }
 impl_stmt!(
   BlockStatement,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[BlockStatement {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.body.to_string_tree_internal(&mut ni, result);
@@ -1806,11 +1786,11 @@ pub struct LabelledStatement {
 }
 impl_stmt!(
   LabelledStatement,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[BlockStatement {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.stmt.to_string_tree_internal(&mut ni, result);
@@ -1823,11 +1803,11 @@ pub struct WithStatement {
 }
 impl_stmt!(
   WithStatement,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[BlockStatement {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.expr.to_string_tree_internal(&mut ni, result);
@@ -1848,7 +1828,7 @@ pub struct VariableDeclaration {
 }
 impl_stmt!(
   VariableDeclaration,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
       "{}[VariableDeclaration type = {:?} {}]\n",
       indent,
@@ -1857,7 +1837,7 @@ impl_stmt!(
     );
     result.push_str(&str);
   },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &SourcePosition) {
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.binding.to_string_tree_internal(&mut ni, result);
@@ -1883,9 +1863,9 @@ mod ast_test {
       "Expressions",
       &expressions.to_string_tree(),
       indoc! {"
-        [Expressions [0, 0, 0, 0]]
-          [Elision [0, 0, 0, 0]]
-          [Elision [0, 0, 0, 0]]
+        [Expressions [0, 0]]
+          [Elision [0, 0]]
+          [Elision [0, 0]]
       "},
     ) {
       Err(em) => {

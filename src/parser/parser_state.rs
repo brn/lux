@@ -9,6 +9,7 @@ pub enum ParserState {
   InAsyncFunction,
   InGeneratorFunction,
   InAsyncGeneratorFunction,
+  _None,
   _Sentinel,
 }
 
@@ -71,6 +72,10 @@ impl ParserStateStack {
       }
     }
     return false;
+  }
+
+  pub fn cur_state(&self) -> Option<&ParserState> {
+    return self.stack.last();
   }
 }
 

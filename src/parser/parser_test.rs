@@ -13,12 +13,12 @@ mod parser_test {
   struct TestableAst {
     name: String,
     attr: String,
-    pos: SourcePosition,
+    pos: RuntimeSourcePosition,
     children: Vec<Box<TestableAst>>,
   }
 
   impl TestableAst {
-    fn ast(name: &str, attr: &str, pos: SourcePosition) -> Self {
+    fn ast(name: &str, attr: &str, pos: RuntimeSourcePosition) -> Self {
       return TestableAst {
         name: name.to_string(),
         attr: attr.to_string(),
@@ -64,12 +64,15 @@ mod parser_test {
     }
   }
 
-  macro_rules! pos {
+  macro_rules! s_pos {
     ($start_col:expr, $end_col:expr, $start_line:expr, $end_line:expr) => {
       SourcePosition::with(Some($start_col), Some($end_col), Some($start_line), Some($end_line))
     };
-    ($start_col:expr, $end_col:expr) => {
-      SourcePosition::with(Some($start_col), Some($end_col), Some(0), Some(0))
+  }
+
+  macro_rules! pos {
+    ($col:expr, $line:expr) => {
+      RuntimeSourcePosition::new($col, $line)
     };
   }
 
@@ -84,7 +87,7 @@ mod parser_test {
       let mut ast = TestableAst::ast($name, $attr, $pos);
       $(
         ast.push($asts);
-      )*;
+      )*
       ast
     }};
   }
@@ -254,12 +257,6 @@ mod parser_test {
     }};
   }
 
-  macro_rules! elision {
-    ($pos:expr) => {{
-      ast!("Elision", "", $pos)
-    }};
-  }
-
   macro_rules! empty {
     ($pos:expr) => {{
       ast!("Empty", "", $pos)
@@ -339,7 +336,6 @@ mod parser_test {
   fn wrap_with_function_expr<F: Fn((u32, u32)) -> TestableAst>(
     expr_size: u32,
     ast_builder: F,
-    end_line_number: u32,
     mut before_line_break_col_count: u32,
   ) -> (F, String) {
     let buf = String::new();
@@ -348,10 +344,8 @@ mod parser_test {
       before_line_break_col_count += 14;
     }
 
-    let exit = (31 + expr_size) - before_line_break_col_count;
-    let exit_expr = (13 + expr_size) - before_line_break_col_count;
-    let func_exit = exit_expr + 2;
     let base_position = 9;
+    let func_exit = (13 + expr_size) - before_line_break_col_count + 2;
     let sentinel_start = if original_blb_cc > 0 {
       (expr_size - original_blb_cc) + 2
     } else {
@@ -359,39 +353,23 @@ mod parser_test {
     };
 
     let ast = stmts!(
-      pos!(0, exit, 0, end_line_number),
+      pos!(0, 0),
       stmt!(
-        pos!(0, func_exit, 0, end_line_number),
+        pos!(0, 0),
         fnexpr!(
-          pos!(0, func_exit, 0, end_line_number),
+          pos!(0, 0),
           "Function",
-          ident!("X", pos!(base_position, base_position + 1, 0, 0)),
-          exprs!(pos!(base_position + 1, base_position + 3, 0, 0)),
+          ident!("X", pos!(base_position, 0)),
+          exprs!(pos!(base_position + 1, 0)),
           stmts!(
-            pos!(
-              base_position + 4,
-              (base_position + (7 + expr_size)) - before_line_break_col_count,
-              0,
-              end_line_number
-            ),
-            stmt!(
-              pos!(
-                base_position + 5,
-                (base_position + (5 + expr_size)) - before_line_break_col_count,
-                0,
-                end_line_number
-              ),
-              ast_builder((
-                base_position + 5,
-                (base_position + (5 + expr_size) - before_line_break_col_count)
-              ))
-            )
+            pos!(base_position + 4, 0),
+            stmt!(pos!(base_position + 5, 0), ast_builder((base_position + 5, 0)))
           ),
         )
       ),
       stmt!(
-        pos!(sentinel_start, exit, 0, end_line_number),
-        ident!("PARSER_SENTINEL", pos!(sentinel_start, exit, 0, end_line_number))
+        pos!(sentinel_start, 0),
+        ident!("PARSER_SENTINEL", pos!(sentinel_start, 0))
       )
     );
 
@@ -399,14 +377,13 @@ mod parser_test {
   }
 
   fn single_expression_test<F: Fn((u32, u32)) -> TestableAst>(ast_builder: F, value: &str) {
-    single_expression_test_with_options(ast_builder, value, false, 0, 0);
+    single_expression_test_with_options(ast_builder, value, false, 0);
   }
 
   fn single_expression_test_with_options<F: Fn((u32, u32)) -> TestableAst>(
     ast_builder: F,
     value: &str,
     is_skip_strict_mode: bool,
-    end_line_number: u32,
     before_line_break_count: u32,
   ) {
     let env: [(Option<&str>, &str); 3] = [
@@ -423,45 +400,30 @@ mod parser_test {
     ];
 
     let size = value.len() as u32;
-    let product1 = ast_builder((0, size - before_line_break_count));
-    let (ast_b, f) = wrap_with_function_expr(size, ast_builder, end_line_number, before_line_break_count);
-    let mut exit = (16 + size) - before_line_break_count;
-    let expr_exit = size - before_line_break_count;
+    let product1 = ast_builder((0, 0));
+    let (ast_b, f) = wrap_with_function_expr(size, ast_builder, before_line_break_count);
     let normal = stmts!(
-      pos!(0, exit, 0, end_line_number),
-      stmt!(pos!(0, expr_exit, 0, end_line_number), product1),
+      pos!(0, 0),
+      stmt!(pos!(0, 0), product1),
       stmt!(
-        pos!((size + 1) - before_line_break_count, exit, 0, end_line_number),
-        ident!(
-          "PARSER_SENTINEL",
-          pos!((size + 1) - before_line_break_count, exit, 0, end_line_number)
-        )
+        pos!((size + 1) - before_line_break_count, 0),
+        ident!("PARSER_SENTINEL", pos!((size + 1) - before_line_break_count, 0))
       )
     )
     .to_string();
 
-    exit = if before_line_break_count > 0 {
-      size - before_line_break_count + 16
-    } else {
-      29 + size
-    };
-    let expr_stmt_exit = if before_line_break_count > 0 {
-      size - before_line_break_count
-    } else {
-      (13 + size) - before_line_break_count
-    };
     let sentinel_start_col = if before_line_break_count > 0 {
       size - before_line_break_count + 1
     } else {
       (size + 14) - before_line_break_count
     };
-    let product2 = ast_b((13, expr_stmt_exit));
+    let product2 = ast_b((13, 0));
     let strict = stmts!(
-      pos!(13, exit, 0, end_line_number),
-      stmt!(pos!(13, expr_stmt_exit, 0, end_line_number), product2),
+      pos!(13, 0),
+      stmt!(pos!(13, 0), product2),
       stmt!(
-        pos!(sentinel_start_col, exit, 0, end_line_number),
-        ident!("PARSER_SENTINEL", pos!(sentinel_start_col, exit, 0, end_line_number))
+        pos!(sentinel_start_col, 0),
+        ident!("PARSER_SENTINEL", pos!(sentinel_start_col, 0))
       )
     )
     .to_string();
@@ -473,8 +435,8 @@ mod parser_test {
   #[test]
   fn parse_single_decimal_literal_test() {
     single_expression_test(
-      |(start, end)| {
-        return number!("1", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return number!("1", pos!(col, line));
       },
       "1",
     );
@@ -483,8 +445,8 @@ mod parser_test {
   #[test]
   fn parse_multi_decimal_literal_test() {
     single_expression_test(
-      |(start, end)| {
-        return number!("1024", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return number!("1024", pos!(col, line));
       },
       "1024",
     );
@@ -493,8 +455,8 @@ mod parser_test {
   #[test]
   fn parse_multi_decimal_exponent_literal_test() {
     single_expression_test(
-      |(start, end)| {
-        return number!("130000000000", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return number!("130000000000", pos!(col, line));
       },
       "13e+10",
     );
@@ -503,8 +465,8 @@ mod parser_test {
   #[test]
   fn parse_float_leading_zero_literal_test() {
     single_expression_test(
-      |(start, end)| {
-        return number!("0.12", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return number!("0.12", pos!(col, line));
       },
       "0.12",
     );
@@ -513,8 +475,8 @@ mod parser_test {
   #[test]
   fn parse_float_not_leading_zero_literal_test() {
     single_expression_test(
-      |(start, end)| {
-        return number!("0.12", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return number!("0.12", pos!(col, line));
       },
       ".12",
     );
@@ -523,8 +485,8 @@ mod parser_test {
   #[test]
   fn parse_hex_decimal_literal_test() {
     single_expression_test(
-      |(start, end)| {
-        return number!("12379813812177893000", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return number!("12379813812177893000", pos!(col, line));
       },
       "0xabcdef1234567890",
     );
@@ -533,8 +495,8 @@ mod parser_test {
   #[test]
   fn parse_binary_literal_test() {
     single_expression_test(
-      |(start, end)| {
-        return number!("21", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return number!("21", pos!(col, line));
       },
       "0b010101",
     );
@@ -543,8 +505,8 @@ mod parser_test {
   #[test]
   fn parse_octal_literal_test() {
     single_expression_test(
-      |(start, end)| {
-        return number!("511", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return number!("511", pos!(col, line));
       },
       "0o777",
     );
@@ -553,12 +515,11 @@ mod parser_test {
   #[test]
   fn parse_implicit_octal_literal_test() {
     single_expression_test_with_options(
-      |(start, end)| {
-        return octal!("511", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return octal!("511", pos!(col, line));
       },
       "0777",
       true,
-      0,
       0,
     );
   }
@@ -566,8 +527,8 @@ mod parser_test {
   #[test]
   fn parse_decimal_leading_zero_literal_test() {
     single_expression_test(
-      |(start, end)| {
-        return number!("7778", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return number!("7778", pos!(col, line));
       },
       "07778",
     );
@@ -579,35 +540,35 @@ mod parser_test {
     syntax_error_test(
       &env,
       "0x_",
-      &[&pos!(0, 2, 0, 0), &pos!(12, 14, 0, 0), &pos!(14, 16, 0, 0)],
+      &[&s_pos!(0, 2, 0, 0), &s_pos!(12, 14, 0, 0), &s_pos!(14, 16, 0, 0)],
       false,
     );
 
     syntax_error_test(
       &env,
       "0b_",
-      &[&pos!(0, 2, 0, 0), &pos!(12, 14, 0, 0), &pos!(14, 16, 0, 0)],
+      &[&s_pos!(0, 2, 0, 0), &s_pos!(12, 14, 0, 0), &s_pos!(14, 16, 0, 0)],
       false,
     );
 
     syntax_error_test(
       &env,
       "0o_",
-      &[&pos!(0, 2, 0, 0), &pos!(12, 14, 0, 0), &pos!(14, 16, 0, 0)],
+      &[&s_pos!(0, 2, 0, 0), &s_pos!(12, 14, 0, 0), &s_pos!(14, 16, 0, 0)],
       false,
     );
 
     syntax_error_test(
       &env,
       "13e",
-      &[&pos!(0, 3, 0, 0), &pos!(12, 15, 0, 0), &pos!(14, 17, 0, 0)],
+      &[&s_pos!(0, 3, 0, 0), &s_pos!(12, 15, 0, 0), &s_pos!(14, 17, 0, 0)],
       false,
     );
 
     syntax_error_test(
       &env,
       "13e+",
-      &[&pos!(0, 4, 0, 0), &pos!(12, 16, 0, 0), &pos!(14, 18, 0, 0)],
+      &[&s_pos!(0, 4, 0, 0), &s_pos!(12, 16, 0, 0), &s_pos!(14, 18, 0, 0)],
       false,
     );
   }
@@ -618,7 +579,7 @@ mod parser_test {
     syntax_error_test(
       &env,
       "0777",
-      &[&pos!(0, 0, 0, 0), &pos!(0, 0, 0, 0), &pos!(13, 17, 0, 0)],
+      &[&s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(13, 17, 0, 0)],
       false,
     );
   }
@@ -626,8 +587,8 @@ mod parser_test {
   #[test]
   fn parse_single_quote_string_literal_test() {
     single_expression_test(
-      |(start, end)| {
-        return str!("test", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return str!("test", pos!(col, line));
       },
       "'test'",
     );
@@ -636,8 +597,8 @@ mod parser_test {
   #[test]
   fn parse_double_quote_string_literal_test() {
     single_expression_test(
-      |(start, end)| {
-        return str!("test", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return str!("test", pos!(col, line));
       },
       "\"test\"",
     );
@@ -646,8 +607,8 @@ mod parser_test {
   #[test]
   fn parse_single_quote_escaped_string_literal_test() {
     single_expression_test(
-      |(start, end)| {
-        return str!("test 'value", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return str!("test 'value", pos!(col, line));
       },
       "'test \\'value'",
     );
@@ -656,8 +617,8 @@ mod parser_test {
   #[test]
   fn parse_double_quote_escaped_string_literal_test() {
     single_expression_test(
-      |(start, end)| {
-        return str!("test \"value", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return str!("test \"value", pos!(col, line));
       },
       "\"test \\\"value\"",
     );
@@ -666,8 +627,8 @@ mod parser_test {
   #[test]
   fn parse_single_quote_backslash_escaped_string_literal_test() {
     single_expression_test(
-      |(start, end)| {
-        return str!("test\\ value", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return str!("test\\ value", pos!(col, line));
       },
       "'test\\\\ value'",
     );
@@ -676,8 +637,8 @@ mod parser_test {
   #[test]
   fn parse_double_quote_backslash_escaped_string_literal_test() {
     single_expression_test(
-      |(start, end)| {
-        return str!("test\\ value", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return str!("test\\ value", pos!(col, line));
       },
       "\"test\\\\ value\"",
     );
@@ -686,8 +647,8 @@ mod parser_test {
   #[test]
   fn parse_string_literal_unicode_escape_sequence_test() {
     single_expression_test(
-      |(start, end)| {
-        return str!("A_B_C_D", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return str!("A_B_C_D", pos!(col, line));
       },
       "'\\u0041_\\u0042_\\u0043_\\u0044'",
     );
@@ -696,8 +657,8 @@ mod parser_test {
   #[test]
   fn parse_string_literal_ascii_escape_sequence_test() {
     single_expression_test(
-      |(start, end)| {
-        return str!("A_B_C_D", pos!(start, end, 0, 0));
+      |(col, line)| {
+        return str!("A_B_C_D", pos!(col, line));
       },
       "'\\x41_\\x42_\\x43_\\x44'",
     );
@@ -706,8 +667,8 @@ mod parser_test {
   #[test]
   fn parse_template_literal_without_interpolation_test() {
     single_expression_test(
-      |(start, end)| {
-        return tmpl!(pos!(start, end, 0, 0), str!("test", pos!(start + 1, end - 1, 0, 0)));
+      |(col, line)| {
+        return tmpl!(pos!(col, line), str!("test", pos!(col + 1, line)));
       },
       "`test`",
     );
@@ -716,11 +677,8 @@ mod parser_test {
   #[test]
   fn parse_template_literal_escaped_without_interpolation_test() {
     single_expression_test(
-      |(start, end)| {
-        return tmpl!(
-          pos!(start, end, 0, 0),
-          str!("test${aaa}", pos!(start + 1, end - 1, 0, 0))
-        );
+      |(col, line)| {
+        return tmpl!(pos!(col, line), str!("test${aaa}", pos!(col + 1, line)));
       },
       "`test\\${aaa}`",
     );
@@ -729,12 +687,11 @@ mod parser_test {
   #[test]
   fn parse_template_literal_linebreak_without_interpolation_test() {
     single_expression_test_with_options(
-      |(start, end)| {
-        return tmpl!(pos!(start, end, 0, 1), str!("test\ntest", pos!(start + 1, 4, 0, 1)));
+      |(col, line)| {
+        return tmpl!(pos!(col, line), str!("test\ntest", pos!(col + 1, line)));
       },
       "`test\ntest`",
       false,
-      1,
       6,
     );
   }
@@ -742,11 +699,11 @@ mod parser_test {
   #[test]
   fn parse_template_literal_with_empty_suffix_interpolation_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return tmpl!(
-          pos!(start, end, 0, 0),
-          str!("test", pos!(start + 1, end - 8, 0, 0)),
-          ident!("test", pos!(start + 7, end - 2, 0, 0))
+          pos!(col, line),
+          str!("test", pos!(col + 1, line)),
+          ident!("test", pos!(col + 7, line))
         );
       },
       "`test${test}`",
@@ -756,12 +713,12 @@ mod parser_test {
   #[test]
   fn parse_template_literal_with_suffix_interpolation_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return tmpl!(
-          pos!(start, end, 0, 0),
-          str!("foo", pos!(start + 1, end - 10, 0, 0)),
-          ident!("bar", pos!(start + 6, end - 5, 0, 0)),
-          str!("baz", pos!(start + 10, end - 1, 0, 0)),
+          pos!(col, line),
+          str!("foo", pos!(col + 1, line)),
+          ident!("bar", pos!(col + 6, line)),
+          str!("baz", pos!(col + 10, line)),
         );
       },
       "`foo${bar}baz`",
@@ -771,18 +728,18 @@ mod parser_test {
   #[test]
   fn parse_template_literal_with_many_suffix_interpolation_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return tmpl!(
-          pos!(start, end, 0, 0),
-          str!("foo", pos!(start + 1, end - 23, 0, 0)),
-          ident!("bar", pos!(start + 6, end - 18, 0, 0)),
-          str!("baz", pos!(start + 10, end - 14, 0, 0)),
-          number!("100", pos!(start + 15, end - 9, 0, 0)),
+          pos!(col, line),
+          str!("foo", pos!(col + 1, line)),
+          ident!("bar", pos!(col + 6, line)),
+          str!("baz", pos!(col + 10, line)),
+          number!("100", pos!(col + 15, line)),
           unary!(
             "OpPlus",
             "Pre",
-            pos!(start + 21, end - 2, 0, 0),
-            ident!("foo", pos!(start + 22, end - 2, 0, 0))
+            pos!(col + 21, line),
+            ident!("foo", pos!(col + 22, line))
           )
         );
       },
@@ -793,14 +750,14 @@ mod parser_test {
   #[test]
   fn parse_nested_template_literal_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return tmpl!(
-          pos!(start, end, 0, 0),
-          str!("foo", pos!(start + 1, end - 15, 0, 0)),
+          pos!(col, line),
+          str!("foo", pos!(col + 1, line)),
           tmpl!(
-            pos!(start + 6, end - 2, 0, 0),
-            str!("foo", pos!(start + 7, end - 9, 0, 0)),
-            ident!("bar", pos!(start + 12, end - 4, 0, 0)),
+            pos!(col + 6, line),
+            str!("foo", pos!(col + 7, line)),
+            ident!("bar", pos!(col + 12, line)),
           ),
         );
       },
@@ -818,7 +775,7 @@ mod parser_test {
     syntax_error_test(
       &env,
       "'test",
-      &[&pos!(0, 21, 0, 0), &pos!(13, 34, 0, 0), &pos!(14, 35, 0, 0)],
+      &[&s_pos!(0, 21, 0, 0), &s_pos!(13, 34, 0, 0), &s_pos!(14, 35, 0, 0)],
       false,
     )
   }
@@ -833,7 +790,7 @@ mod parser_test {
     syntax_error_test(
       &env,
       "'test\\n",
-      &[&pos!(0, 23, 0, 0), &pos!(13, 36, 0, 0), &pos!(14, 37, 0, 0)],
+      &[&s_pos!(0, 23, 0, 0), &s_pos!(13, 36, 0, 0), &s_pos!(14, 37, 0, 0)],
       false,
     )
   }
@@ -848,7 +805,7 @@ mod parser_test {
     syntax_error_test(
       &env,
       "'\\u0041_\\u0042_\\u043_\\u0044'",
-      &[&pos!(0, 20, 0, 0), &pos!(13, 33, 0, 0), &pos!(14, 34, 0, 0)],
+      &[&s_pos!(0, 20, 0, 0), &s_pos!(13, 33, 0, 0), &s_pos!(14, 34, 0, 0)],
       false,
     )
   }
@@ -856,13 +813,8 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_plus_pre_test() {
     single_expression_test(
-      |(start, end)| {
-        return unary!(
-          "OpPlus",
-          "Pre",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start + 1, end, 0, 0))
-        );
+      |(col, line)| {
+        return unary!("OpPlus", "Pre", pos!(col, line), number!("1", pos!(col + 1, line)));
       },
       "+1",
     );
@@ -871,13 +823,8 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_minus_pre_test() {
     single_expression_test(
-      |(start, end)| {
-        return unary!(
-          "OpMinus",
-          "Pre",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start + 1, end, 0, 0))
-        );
+      |(col, line)| {
+        return unary!("OpMinus", "Pre", pos!(col, line), number!("1", pos!(col + 1, line)));
       },
       "-1",
     );
@@ -886,13 +833,8 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_not_pre_test() {
     single_expression_test(
-      |(start, end)| {
-        return unary!(
-          "OpNot",
-          "Pre",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start + 1, end, 0, 0))
-        );
+      |(col, line)| {
+        return unary!("OpNot", "Pre", pos!(col, line), number!("1", pos!(col + 1, line)));
       },
       "!1",
     );
@@ -901,13 +843,8 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_tilde_pre_test() {
     single_expression_test(
-      |(start, end)| {
-        return unary!(
-          "OpTilde",
-          "Pre",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start + 1, end, 0, 0))
-        );
+      |(col, line)| {
+        return unary!("OpTilde", "Pre", pos!(col, line), number!("1", pos!(col + 1, line)));
       },
       "~1",
     );
@@ -916,13 +853,8 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_delete_pre_test() {
     single_expression_test(
-      |(start, end)| {
-        return unary!(
-          "Delete",
-          "Pre",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start + 7, end, 0, 0))
-        );
+      |(col, line)| {
+        return unary!("Delete", "Pre", pos!(col, line), number!("1", pos!(col + 7, line)));
       },
       "delete 1",
     );
@@ -931,13 +863,8 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_typeof_pre_test() {
     single_expression_test(
-      |(start, end)| {
-        return unary!(
-          "Typeof",
-          "Pre",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start + 7, end, 0, 0))
-        );
+      |(col, line)| {
+        return unary!("Typeof", "Pre", pos!(col, line), number!("1", pos!(col + 7, line)));
       },
       "typeof 1",
     );
@@ -946,13 +873,8 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_void_pre_test() {
     single_expression_test(
-      |(start, end)| {
-        return unary!(
-          "Void",
-          "Pre",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start + 5, end, 0, 0))
-        );
+      |(col, line)| {
+        return unary!("Void", "Pre", pos!(col, line), number!("1", pos!(col + 5, line)));
       },
       "void 1",
     );
@@ -961,13 +883,8 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_increments_pre_test() {
     single_expression_test(
-      |(start, end)| {
-        return unary!(
-          "OpIncrement",
-          "Pre",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start + 2, end, 0, 0))
-        );
+      |(col, line)| {
+        return unary!("OpIncrement", "Pre", pos!(col, line), number!("1", pos!(col + 2, line)));
       },
       "++1",
     );
@@ -976,13 +893,8 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_decrements_pre_test() {
     single_expression_test(
-      |(start, end)| {
-        return unary!(
-          "OpDecrement",
-          "Pre",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start + 2, end, 0, 0))
-        );
+      |(col, line)| {
+        return unary!("OpDecrement", "Pre", pos!(col, line), number!("1", pos!(col + 2, line)));
       },
       "--1",
     );
@@ -991,13 +903,8 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_increments_post_test() {
     single_expression_test(
-      |(start, end)| {
-        return unary!(
-          "OpIncrement",
-          "Post",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, end - 2, 0, 0))
-        );
+      |(col, line)| {
+        return unary!("OpIncrement", "Post", pos!(col, line), number!("1", pos!(col, line)));
       },
       "1++",
     );
@@ -1006,13 +913,8 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_decrements_post_test() {
     single_expression_test(
-      |(start, end)| {
-        return unary!(
-          "OpDecrement",
-          "Post",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, end - 2, 0, 0))
-        );
+      |(col, line)| {
+        return unary!("OpDecrement", "Post", pos!(col, line), number!("1", pos!(col, line)));
       },
       "1--",
     );
@@ -1021,8 +923,8 @@ mod parser_test {
   #[test]
   fn parse_new_expression_no_args_test() {
     single_expression_test(
-      |(start, end)| {
-        return newexpr!(pos!(start, end, 0, 0), ident!("X", pos!(start + 4, end, 0, 0)));
+      |(col, line)| {
+        return newexpr!(pos!(col, line), ident!("X", pos!(col + 4, line)));
       },
       "new X",
     );
@@ -1031,14 +933,14 @@ mod parser_test {
   #[test]
   fn parse_new_expression_with_args_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return newexpr!(
-          pos!(start, end, 0, 0),
+          pos!(col, line),
           callexpr!(
             "Expr",
-            pos!(start + 4, end, 0, 0),
-            ident!("X", pos!(start + 4, end - 3, 0, 0)),
-            exprs!(pos!(start + 5, end, 0, 0), number!("1", pos!(start + 6, end - 1, 0, 0)))
+            pos!(col + 4, line),
+            ident!("X", pos!(col + 4, line)),
+            exprs!(pos!(col + 5, line), number!("1", pos!(col + 6, line)))
           )
         );
       },
@@ -1049,19 +951,19 @@ mod parser_test {
   #[test]
   fn parse_new_expression_with_props_call_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return newexpr!(
-          pos!(start, end, 0, 0),
+          pos!(col, line),
           callexpr!(
             "Expr",
-            pos!(start + 4, end, 0, 0),
+            pos!(col + 4, line),
             prop!(
               "dot",
-              pos!(start + 4, end - 3, 0, 0),
-              ident!("X", pos!(start + 4, end - 5, 0, 0)),
-              ident!("a", pos!(start + 6, end - 3, 0, 0))
+              pos!(col + 4, line),
+              ident!("X", pos!(col + 4, line)),
+              ident!("a", pos!(col + 6, line))
             ),
-            exprs!(pos!(start + 7, end, 0, 0), number!("1", pos!(start + 8, end - 1, 0, 0)))
+            exprs!(pos!(col + 7, line), number!("1", pos!(col + 8, line)))
           )
         );
       },
@@ -1072,22 +974,19 @@ mod parser_test {
   #[test]
   fn parse_new_expression_with_element_call_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return newexpr!(
-          pos!(start, end, 0, 0),
+          pos!(col, line),
           callexpr!(
             "Expr",
-            pos!(start + 4, end, 0, 0),
+            pos!(col + 4, line),
             prop!(
               "element",
-              pos!(start + 4, end - 3, 0, 0),
-              ident!("X", pos!(start + 4, end - 8, 0, 0)),
-              str!("a", pos!(start + 6, end - 4, 0, 0))
+              pos!(col + 4, line),
+              ident!("X", pos!(col + 4, line)),
+              str!("a", pos!(col + 6, line))
             ),
-            exprs!(
-              pos!(start + 10, end, 0, 0),
-              number!("1", pos!(start + 11, end - 1, 0, 0))
-            )
+            exprs!(pos!(col + 10, line), number!("1", pos!(col + 11, line)))
           )
         );
       },
@@ -1098,24 +997,24 @@ mod parser_test {
   #[test]
   fn parse_new_expression_with_props_chain_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return newexpr!(
-          pos!(start, end, 0, 0),
+          pos!(col, line),
           callexpr!(
             "Expr",
-            pos!(start + 4, end, 0, 0),
+            pos!(col + 4, line),
             prop!(
               "dot",
-              pos!(start + 4, end - 2, 0, 0),
+              pos!(col + 4, line),
               prop!(
                 "dot",
-                pos!(start + 4, end - 4, 0, 0),
-                ident!("a", pos!(start + 4, end - 6, 0, 0)),
-                ident!("b", pos!(start + 6, end - 4, 0, 0))
+                pos!(col + 4, line),
+                ident!("a", pos!(col + 4, line)),
+                ident!("b", pos!(col + 6, line))
               ),
-              ident!("c", pos!(start + 8, end - 2, 0, 0))
+              ident!("c", pos!(col + 8, line))
             ),
-            exprs!(pos!(start + 9, end, 0, 0),)
+            exprs!(pos!(col + 9, line),)
           )
         );
       },
@@ -1126,24 +1025,24 @@ mod parser_test {
   #[test]
   fn parse_new_expression_with_props_and_element_chain_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return newexpr!(
-          pos!(start, end, 0, 0),
+          pos!(col, line),
           callexpr!(
             "Expr",
-            pos!(start + 4, end, 0, 0),
+            pos!(col + 4, line),
             prop!(
               "dot",
-              pos!(start + 4, end - 2, 0, 0),
+              pos!(col + 4, line),
               prop!(
                 "element",
-                pos!(start + 4, end - 4, 0, 0),
-                ident!("a", pos!(start + 4, end - 9, 0, 0)),
-                str!("b", pos!(start + 6, end - 5, 0, 0))
+                pos!(col + 4, line),
+                ident!("a", pos!(col + 4, line)),
+                str!("b", pos!(col + 6, line))
               ),
-              ident!("c", pos!(start + 11, end - 2, 0, 0))
+              ident!("c", pos!(col + 11, line))
             ),
-            exprs!(pos!(start + 12, end, 0, 0),)
+            exprs!(pos!(col + 12, line),)
           )
         );
       },
@@ -1154,28 +1053,25 @@ mod parser_test {
   #[test]
   fn parse_new_expression_with_tagged_template_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return callexpr!(
           "Template",
-          pos!(start, end, 0, 0),
+          pos!(col, line),
           prop!(
             "dot",
-            pos!(start, end - 6, 0, 0),
+            pos!(col, line),
             newexpr!(
-              pos!(start, end - 8, 0, 0),
+              pos!(col, line),
               callexpr!(
                 "Expr",
-                pos!(start + 4, end - 8, 0, 0),
-                ident!("X", pos!(start + 4, end - 10, 0, 0)),
-                exprs!(pos!(start + 5, end - 8, 0, 0))
+                pos!(col + 4, line),
+                ident!("X", pos!(col + 4, line)),
+                exprs!(pos!(col + 5, line))
               )
             ),
-            ident!("a", pos!(start + 8, end - 6, 0, 0))
+            ident!("a", pos!(col + 8, line))
           ),
-          tmpl!(
-            pos!(start + 9, end, 0, 0),
-            str!("test", pos!(start + 10, end - 1, 0, 0))
-          )
+          tmpl!(pos!(col + 9, line), str!("test", pos!(col + 10, line)))
         );
       },
       "new X().a`test`",
@@ -1185,12 +1081,12 @@ mod parser_test {
   #[test]
   fn parse_exponentiation_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpPow",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 5, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 5, line))
         );
       },
       "1 ** 1",
@@ -1200,12 +1096,12 @@ mod parser_test {
   #[test]
   fn parse_multiplicative_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpMul",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 4, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 4, line))
         );
       },
       "1 * 1",
@@ -1215,12 +1111,12 @@ mod parser_test {
   #[test]
   fn parse_division_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpDiv",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 4, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 4, line))
         );
       },
       "1 / 1",
@@ -1230,12 +1126,12 @@ mod parser_test {
   #[test]
   fn parse_addition_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpPlus",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 4, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 4, line))
         );
       },
       "1 + 1",
@@ -1245,12 +1141,12 @@ mod parser_test {
   #[test]
   fn parse_subtraction_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpMinus",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 4, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 4, line))
         );
       },
       "1 - 1",
@@ -1260,12 +1156,12 @@ mod parser_test {
   #[test]
   fn parse_shift_left_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpShl",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 5, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 5, line))
         );
       },
       "1 << 1",
@@ -1275,12 +1171,12 @@ mod parser_test {
   #[test]
   fn parse_shift_right_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpShr",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 5, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 5, line))
         );
       },
       "1 >> 1",
@@ -1290,12 +1186,12 @@ mod parser_test {
   #[test]
   fn parse_u_shift_right_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpUShr",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 6, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 6, line))
         );
       },
       "1 >>> 1",
@@ -1305,12 +1201,12 @@ mod parser_test {
   #[test]
   fn parse_in_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "In",
-          pos!(start, end, 0, 0),
-          str!("a", pos!(start, start + 3, 0, 0)),
-          ident!("v", pos!(start + 7, end, 0, 0))
+          pos!(col, line),
+          str!("a", pos!(col, line)),
+          ident!("v", pos!(col + 7, line))
         );
       },
       "'a' in v",
@@ -1320,12 +1216,12 @@ mod parser_test {
   #[test]
   fn parse_instanceof_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "Instanceof",
-          pos!(start, end, 0, 0),
-          ident!("a", pos!(start, start + 1, 0, 0)),
-          ident!("v", pos!(start + 13, end, 0, 0))
+          pos!(col, line),
+          ident!("a", pos!(col, line)),
+          ident!("v", pos!(col + 13, line))
         );
       },
       "a instanceof v",
@@ -1335,12 +1231,12 @@ mod parser_test {
   #[test]
   fn parse_greater_than_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpGreaterThan",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("0", pos!(start + 4, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("0", pos!(col + 4, line))
         );
       },
       "1 > 0",
@@ -1350,12 +1246,12 @@ mod parser_test {
   #[test]
   fn parse_greater_than_or_eq_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpGreaterThanOrEq",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("0", pos!(start + 5, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("0", pos!(col + 5, line))
         );
       },
       "1 >= 0",
@@ -1365,12 +1261,12 @@ mod parser_test {
   #[test]
   fn parse_less_than_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpLessThan",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("0", pos!(start + 4, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("0", pos!(col + 4, line))
         );
       },
       "1 < 0",
@@ -1380,12 +1276,12 @@ mod parser_test {
   #[test]
   fn parse_less_than_or_eq_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpLessThanOrEq",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("0", pos!(start + 5, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("0", pos!(col + 5, line))
         );
       },
       "1 <= 0",
@@ -1395,12 +1291,12 @@ mod parser_test {
   #[test]
   fn parse_equal_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpEq",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 5, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 5, line))
         );
       },
       "1 == 1",
@@ -1410,12 +1306,12 @@ mod parser_test {
   #[test]
   fn parse_strict_equal_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpStrictEq",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 6, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 6, line))
         );
       },
       "1 === 1",
@@ -1425,12 +1321,12 @@ mod parser_test {
   #[test]
   fn parse_not_equal_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpNotEq",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 5, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 5, line))
         );
       },
       "1 != 1",
@@ -1440,12 +1336,12 @@ mod parser_test {
   #[test]
   fn parse_strict_not_equal_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpStrictNotEq",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 6, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 6, line))
         );
       },
       "1 !== 1",
@@ -1455,12 +1351,12 @@ mod parser_test {
   #[test]
   fn parse_bitwise_and_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpAnd",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 4, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 4, line))
         );
       },
       "1 & 1",
@@ -1470,12 +1366,12 @@ mod parser_test {
   #[test]
   fn parse_bitwise_or_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpOr",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 4, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 4, line))
         );
       },
       "1 | 1",
@@ -1485,12 +1381,12 @@ mod parser_test {
   #[test]
   fn parse_bitwise_xor_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpXor",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 4, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 4, line))
         );
       },
       "1 ^ 1",
@@ -1500,12 +1396,12 @@ mod parser_test {
   #[test]
   fn parse_logical_and_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpLogicalAnd",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 5, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 5, line))
         );
       },
       "1 && 1",
@@ -1515,12 +1411,12 @@ mod parser_test {
   #[test]
   fn parse_logical_or_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpLogicalOr",
-          pos!(start, end, 0, 0),
-          number!("1", pos!(start, start + 1, 0, 0)),
-          number!("1", pos!(start + 5, end, 0, 0))
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 5, line))
         );
       },
       "1 || 1",
@@ -1530,30 +1426,30 @@ mod parser_test {
   #[test]
   fn parser_operator_priority_test_1() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpOr",
-          pos!(start, end),
+          pos!(col, line),
           binary!(
             "OpMinus",
-            pos!(start, start + 9),
-            ident!("a", pos!(start, start + 1)),
+            pos!(col, line),
+            ident!("a", pos!(col, line)),
             binary!(
               "OpMul",
-              pos!(start + 4, start + 9, 0, 0),
-              ident!("b", pos!(start + 4, start + 5)),
-              ident!("c", pos!(start + 8, start + 9))
+              pos!(col + 4, line),
+              ident!("b", pos!(col + 4, line)),
+              ident!("c", pos!(col + 8, line))
             )
           ),
           binary!(
             "OpShl",
-            pos!(start + 12, start + 18),
-            ident!("d", pos!(start + 12, start + 13)),
+            pos!(col + 12, line),
+            ident!("d", pos!(col + 12, line)),
             binary!(
               "OpPow",
-              pos!(start + 17, start + 23),
-              ident!("e", pos!(start + 17, start + 18)),
-              ident!("f", pos!(start + 22, start + 23))
+              pos!(col + 17, line),
+              ident!("e", pos!(col + 17, line)),
+              ident!("f", pos!(col + 22, line))
             )
           )
         );
@@ -1565,31 +1461,31 @@ mod parser_test {
   #[test]
   fn parser_operator_priority_test_2() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpOr",
-          pos!(start, end),
+          pos!(col, line),
           binary!(
             "OpShr",
-            pos!(start, start + 14),
+            pos!(col, line),
             binary!(
               "OpPlus",
-              pos!(start, start + 9),
+              pos!(col, line),
               binary!(
                 "OpMul",
-                pos!(start, start + 5),
-                ident!("a", pos!(start, start + 1)),
-                ident!("b", pos!(start + 4, start + 5))
+                pos!(col, line),
+                ident!("a", pos!(col, line)),
+                ident!("b", pos!(col + 4, line))
               ),
-              ident!("c", pos!(start + 8, start + 9))
+              ident!("c", pos!(col + 8, line))
             ),
-            ident!("d", pos!(start + 13, start + 14))
+            ident!("d", pos!(col + 13, line))
           ),
           binary!(
             "OpDiv",
-            pos!(start + 17, start + 22),
-            ident!("e", pos!(start + 17, start + 18)),
-            ident!("f", pos!(start + 21, start + 22))
+            pos!(col + 17, line),
+            ident!("e", pos!(col + 17, line)),
+            ident!("f", pos!(col + 21, line))
           )
         );
       },
@@ -1600,42 +1496,42 @@ mod parser_test {
   #[test]
   fn parser_operator_priority_test_3() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return binary!(
           "OpMul",
-          pos!(start, end),
+          pos!(col, line),
           exprs!(
-            pos!(start, start + 19),
+            pos!(col, line),
             binary!(
               "OpPlus",
-              pos!(start + 1, start + 18),
+              pos!(col + 1, line),
               exprs!(
-                pos!(start + 1, start + 8),
+                pos!(col + 1, line),
                 binary!(
                   "OpPlus",
-                  pos!(start + 2, start + 7),
-                  ident!("a", pos!(start + 2, start + 3)),
-                  ident!("b", pos!(start + 6, start + 7))
+                  pos!(col + 2, line),
+                  ident!("a", pos!(col + 2, line)),
+                  ident!("b", pos!(col + 6, line))
                 )
               ),
               exprs!(
-                pos!(start + 11, start + 18),
+                pos!(col + 11, line),
                 binary!(
                   "OpPlus",
-                  pos!(start + 12, start + 17),
-                  ident!("c", pos!(start + 12, start + 13)),
-                  ident!("d", pos!(start + 16, start + 17))
+                  pos!(col + 12, line),
+                  ident!("c", pos!(col + 12, line)),
+                  ident!("d", pos!(col + 16, line))
                 )
               )
             ),
           ),
           exprs!(
-            pos!(end - 7, end),
+            pos!(col + 22, line),
             binary!(
               "OpPlus",
-              pos!(end - 6, end - 1),
-              number!("1", pos!(end - 6, end - 5)),
-              number!("2", pos!(end - 2, end - 1))
+              pos!(col + 23, line),
+              number!("1", pos!(col + 23, line)),
+              number!("2", pos!(col + 27, line))
             )
           )
         );
@@ -1647,12 +1543,12 @@ mod parser_test {
   #[test]
   fn parser_conditional_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return cond!(
-          pos!(start, end),
-          ident!("x", pos!(start, start + 1)),
-          number!("1", pos!(start + 3, start + 4)),
-          number!("0", pos!(end - 1, end))
+          pos!(col, line),
+          ident!("x", pos!(col, line)),
+          number!("1", pos!(col + 3, line)),
+          number!("0", pos!(col + 6, line))
         );
       },
       "x? 1: 0",
@@ -1662,29 +1558,29 @@ mod parser_test {
   #[test]
   fn parser_conditional_expression_test_2() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return cond!(
-          pos!(start, end),
+          pos!(col, line),
           binary!(
             "OpPlus",
-            pos!(start, start + 5),
-            ident!("x", pos!(start, start + 1)),
-            number!("1", pos!(start + 4, start + 5))
+            pos!(col, line),
+            ident!("x", pos!(col, line)),
+            number!("1", pos!(col + 4, line))
           ),
           newexpr!(
-            pos!(start + 7, start + 14),
+            pos!(col + 7, line),
             callexpr!(
               "Expr",
-              pos!(start + 11, start + 14),
-              ident!("X", pos!(start + 11, start + 12)),
-              exprs!(pos!(start + 12, start + 14))
+              pos!(col + 11, line),
+              ident!("X", pos!(col + 11, line)),
+              exprs!(pos!(col + 12, line))
             )
           ),
           binary!(
             "OpMinus",
-            pos!(end - 5, end),
-            ident!("y", pos!(end - 5, end - 4)),
-            number!("3", pos!(end - 1, end))
+            pos!(col + 16, line),
+            ident!("y", pos!(col + 16, line)),
+            number!("3", pos!(col + 20, line))
           )
         );
       },
@@ -1699,11 +1595,11 @@ mod parser_test {
         fn [<parser_parse_ $token _test>]() {
           use Token::*;
           single_expression_test(
-            |(start, end)| {
+            |(col, line)| {
               return binary!(stringify!($token),
-                             pos!(start, end),
-                             ident!("x", pos!(start, start + 1)),
-                                    number!("1", pos!(end - 1, end)));
+                             pos!(col, line),
+                             ident!("x", pos!(col, line)),
+                                    number!("1", pos!(col + ($token.symbol().len() as u32) + 3, line)));
             },
             &format!("x {} 1", $token.symbol())
           );
@@ -1729,12 +1625,12 @@ mod parser_test {
   #[test]
   fn parser_parse_array_literal_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return arraylit!(
           false,
-          pos!(start, end),
-          number!("1", pos!(start + 1, start + 2)),
-          number!("2", pos!(end - 2, end - 1))
+          pos!(col, line),
+          number!("1", pos!(col + 1, line)),
+          number!("2", pos!(col + 3, line))
         );
       },
       "[1,2]",
@@ -1744,17 +1640,12 @@ mod parser_test {
   #[test]
   fn parser_parse_array_literal_spread_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return arraylit!(
           true,
-          pos!(start, end),
-          number!("1", pos!(start + 1, start + 2)),
-          unary!(
-            "Spread",
-            "Pre",
-            pos!(end - 5, end - 1),
-            ident!("x", pos!(end - 2, end - 1))
-          )
+          pos!(col, line),
+          number!("1", pos!(col + 1, line)),
+          unary!("Spread", "Pre", pos!(col + 3, line), ident!("x", pos!(col + 6, line)))
         );
       },
       "[1,...x]",
@@ -1764,12 +1655,12 @@ mod parser_test {
   #[test]
   fn parser_parse_array_literal_empty_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return arraylit!(
           false,
-          pos!(start, end),
-          number!("1", pos!(start + 1, start + 2)),
-          empty!(pos!(end - 2, end - 1))
+          pos!(col, line),
+          number!("1", pos!(col + 1, line)),
+          empty!(pos!(col + 2, line))
         );
       },
       "[1,]",
@@ -1779,14 +1670,14 @@ mod parser_test {
   #[test]
   fn parser_parse_array_literal_empty_test_2() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return arraylit!(
           false,
-          pos!(start, end),
-          number!("1", pos!(start + 1, start + 2)),
-          empty!(pos!(end - 4, end - 3)),
-          empty!(pos!(end - 3, end - 2)),
-          empty!(pos!(end - 2, end - 1))
+          pos!(col, line),
+          number!("1", pos!(col + 1, line)),
+          empty!(pos!(col + 2, line)),
+          empty!(pos!(col + 3, line)),
+          empty!(pos!(col + 4, line))
         );
       },
       "[1,,,]",
@@ -1796,20 +1687,20 @@ mod parser_test {
   #[test]
   fn parser_parse_array_assignment_pattern() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return exprs!(
-          pos!(start, end),
+          pos!(col, line),
           binary!(
             "OpAssign",
-            pos!(start + 1, end - 1),
+            pos!(col + 1, line),
             arraylit!(
               false,
-              pos!(start + 1, end - 5),
-              ident!("a", pos!(start + 2, start + 3)),
-              ident!("b", pos!(start + 4, start + 5)),
-              ident!("c", pos!(start + 6, start + 7)),
+              pos!(col + 1, line),
+              ident!("a", pos!(col + 2, line)),
+              ident!("b", pos!(col + 4, line)),
+              ident!("c", pos!(col + 6, line)),
             ),
-            ident!("y", pos!(end - 2, end - 1))
+            ident!("y", pos!(col + 11, line))
           )
         );
       },
@@ -1820,26 +1711,26 @@ mod parser_test {
   #[test]
   fn parser_parse_object_literal() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return exprs!(
-          pos!(start, end),
+          pos!(col, line),
           objectlit!(
             ObjectLitType::NONE,
-            pos!(start + 1, end - 1),
+            pos!(col + 1, line),
             object_props!(
-              pos!(start + 2, start + 6),
-              ident!("a", pos!(start + 2, start + 3)),
-              number!("1", pos!(start + 5, start + 6))
+              pos!(col + 2, line),
+              ident!("a", pos!(col + 2, line)),
+              number!("1", pos!(col + 5, line))
             ),
             object_props!(
-              pos!(start + 8, start + 12),
-              ident!("b", pos!(start + 8, start + 9)),
-              number!("2", pos!(start + 11, start + 12))
+              pos!(col + 8, line),
+              ident!("b", pos!(col + 8, line)),
+              number!("2", pos!(col + 11, line))
             ),
             object_props!(
-              pos!(end - 6, end - 2),
-              ident!("c", pos!(end - 6, end - 5)),
-              number!("3", pos!(end - 3, end - 2))
+              pos!(col + 14, line),
+              ident!("c", pos!(col + 14, line)),
+              number!("3", pos!(col + 17, line))
             )
           )
         );
@@ -1851,25 +1742,21 @@ mod parser_test {
   #[test]
   fn parser_parse_computed_object_literal() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return exprs!(
-          pos!(start, end),
+          pos!(col, line),
           objectlit!(
             ObjectLitType::NONE,
-            pos!(start + 1, end - 1),
+            pos!(col + 1, line),
             object_props!(
-              pos!(start + 2, start + 8),
-              computed!(
-                "element",
-                pos!(start + 2, start + 5),
-                ident!("a", pos!(start + 3, start + 4))
-              ),
-              number!("1", pos!(start + 7, start + 8))
+              pos!(col + 2, line),
+              computed!("element", pos!(col + 2, line), ident!("a", pos!(col + 3, line))),
+              number!("1", pos!(col + 7, line))
             ),
             object_props!(
-              pos!(start + 10, start + 14),
-              ident!("b", pos!(start + 10, start + 11)),
-              number!("2", pos!(start + 13, start + 14))
+              pos!(col + 10, line),
+              ident!("b", pos!(col + 10, line)),
+              number!("2", pos!(col + 13, line))
             ),
           )
         );
@@ -1881,21 +1768,21 @@ mod parser_test {
   #[test]
   fn parser_parse_key_only_object_literal() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return exprs!(
-          pos!(start, end),
+          pos!(col, line),
           objectlit!(
             ObjectLitType::NONE,
-            pos!(start + 1, end - 1),
+            pos!(col + 1, line),
             object_props!(
-              pos!(start + 2, start + 3),
-              ident!("a", pos!(start + 2, start + 3)),
-              ident!("a", pos!(start + 2, start + 3))
+              pos!(col + 2, line),
+              ident!("a", pos!(col + 2, line)),
+              ident!("a", pos!(col + 2, line))
             ),
             object_props!(
-              pos!(start + 5, start + 6),
-              ident!("b", pos!(start + 5, start + 6)),
-              ident!("b", pos!(start + 5, start + 6))
+              pos!(col + 5, line),
+              ident!("b", pos!(col + 5, line)),
+              ident!("b", pos!(col + 5, line))
             ),
           )
         );
@@ -1907,32 +1794,32 @@ mod parser_test {
   #[test]
   fn parser_parse_method_object_literal() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return exprs!(
-          pos!(start, end),
+          pos!(col, line),
           objectlit!(
             ObjectLitType::NONE,
-            pos!(start + 1, end - 1),
+            pos!(col + 1, line),
             object_props!(
-              pos!(start + 2, start + 9),
-              ident!("a", pos!(start + 2, start + 3)),
+              pos!(col + 2, line),
+              ident!("a", pos!(col + 2, line)),
               fnexpr!(
-                pos!(start + 2, start + 9),
+                pos!(col + 2, line),
                 "Function",
-                ident!("a", pos!(start + 2, start + 3)),
-                exprs!(pos!(start + 4, start + 5)),
-                stmts!(pos!(start + 7, start + 8))
+                ident!("a", pos!(col + 2, line)),
+                exprs!(pos!(col + 4, line)),
+                stmts!(pos!(col + 7, line))
               )
             ),
             object_props!(
-              pos!(start + 10, start + 17),
-              ident!("b", pos!(start + 10, start + 11)),
+              pos!(col + 10, line),
+              ident!("b", pos!(col + 10, line)),
               fnexpr!(
-                pos!(start + 10, start + 17),
+                pos!(col + 10, line),
                 "Function",
-                ident!("b", pos!(start + 10, start + 11)),
-                exprs!(pos!(start + 12, start + 13)),
-                stmts!(pos!(start + 15, start + 16))
+                ident!("b", pos!(col + 10, line)),
+                exprs!(pos!(col + 12, line)),
+                stmts!(pos!(col + 15, line))
               )
             ),
           )
@@ -1945,32 +1832,32 @@ mod parser_test {
   #[test]
   fn parser_parse_async_method_object_literal() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return exprs!(
-          pos!(start, end),
+          pos!(col, line),
           objectlit!(
             ObjectLitType::NONE,
-            pos!(start + 1, end - 1),
+            pos!(col + 1, line),
             object_props!(
-              pos!(start + 2, start + 15),
-              ident!("a", pos!(start + 8, start + 9)),
+              pos!(col + 2, line),
+              ident!("a", pos!(col + 8, line)),
               afnexpr!(
-                pos!(start + 2, start + 15),
+                pos!(col + 2, line),
                 "Function",
-                ident!("a", pos!(start + 8, start + 9)),
-                exprs!(pos!(start + 10, start + 11)),
-                stmts!(pos!(start + 13, start + 14))
+                ident!("a", pos!(col + 8, line)),
+                exprs!(pos!(col + 10, line)),
+                stmts!(pos!(col + 13, line))
               )
             ),
             object_props!(
-              pos!(start + 16, start + 23),
-              ident!("b", pos!(start + 16, start + 17)),
+              pos!(col + 16, line),
+              ident!("b", pos!(col + 16, line)),
               fnexpr!(
-                pos!(start + 16, start + 23),
+                pos!(col + 16, line),
                 "Function",
-                ident!("b", pos!(start + 16, start + 17)),
-                exprs!(pos!(start + 18, start + 19)),
-                stmts!(pos!(start + 21, start + 22))
+                ident!("b", pos!(col + 16, line)),
+                exprs!(pos!(col + 18, line)),
+                stmts!(pos!(col + 21, line))
               )
             ),
           )
@@ -1983,33 +1870,33 @@ mod parser_test {
   #[test]
   fn parser_parse_async_method_object_literal_with_await_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return exprs!(
-          pos!(start, end),
+          pos!(col, line),
           objectlit!(
             ObjectLitType::NONE,
-            pos!(start + 1, end - 1),
+            pos!(col + 1, line),
             object_props!(
-              pos!(start + 2, start + 24),
-              ident!("a", pos!(start + 8, start + 9)),
+              pos!(col + 2, line),
+              ident!("a", pos!(col + 8, line)),
               afnexpr!(
-                pos!(start + 2, start + 24),
+                pos!(col + 2, line),
                 "Function",
-                ident!("a", pos!(start + 8, start + 9)),
-                exprs!(pos!(start + 10, start + 11)),
+                ident!("a", pos!(col + 8, line)),
+                exprs!(pos!(col + 10, line)),
                 stmts!(
-                  pos!(start + 13, start + 23),
+                  pos!(col + 13, line),
                   stmt!(
-                    pos!(start + 13, start + 23),
+                    pos!(col + 13, line),
                     unary!(
                       "Await",
                       "Pre",
-                      pos!(start + 13, start + 23),
+                      pos!(col + 13, line),
                       callexpr!(
                         "Expr",
-                        pos!(start + 19, start + 23),
-                        ident!("x", pos!(start + 19, start + 20)),
-                        exprs!(pos!(start + 20, start + 22))
+                        pos!(col + 19, line),
+                        ident!("x", pos!(col + 19, line)),
+                        exprs!(pos!(col + 20, line))
                       )
                     )
                   )
@@ -2026,33 +1913,33 @@ mod parser_test {
   #[test]
   fn parser_parse_generator_method_object_literal_with_await_expression_test() {
     single_expression_test(
-      |(start, end)| {
+      |(col, line)| {
         return exprs!(
-          pos!(start, end),
+          pos!(col, line),
           objectlit!(
             ObjectLitType::NONE,
-            pos!(start + 1, end - 1),
+            pos!(col + 1, line),
             object_props!(
-              pos!(start + 2, start + 24),
-              ident!("a", pos!(start + 8, start + 9)),
-              afnexpr!(
-                pos!(start + 2, start + 24),
-                "Function",
-                ident!("a", pos!(start + 8, start + 9)),
-                exprs!(pos!(start + 10, start + 11)),
+              pos!(col + 2, line),
+              ident!("a", pos!(col + 3, line)),
+              fnexpr!(
+                pos!(col + 2, line),
+                "Generator",
+                ident!("a", pos!(col + 3, line)),
+                exprs!(pos!(col + 5, line)),
                 stmts!(
-                  pos!(start + 13, start + 23),
+                  pos!(col + 8, line),
                   stmt!(
-                    pos!(start + 13, start + 23),
+                    pos!(col + 8, line),
                     unary!(
-                      "Await",
+                      "Yield",
                       "Pre",
-                      pos!(start + 13, start + 23),
+                      pos!(col + 8, line),
                       callexpr!(
                         "Expr",
-                        pos!(start + 19, start + 23),
-                        ident!("x", pos!(start + 19, start + 20)),
-                        exprs!(pos!(start + 20, start + 22))
+                        pos!(col + 14, line),
+                        ident!("x", pos!(col + 14, line)),
+                        exprs!(pos!(col + 15, line))
                       )
                     )
                   )
@@ -2063,6 +1950,63 @@ mod parser_test {
         );
       },
       "({*a() {yield x()}})",
+    )
+  }
+
+  #[test]
+  fn parser_parse_async_generator_method_object_literal_with_await_expression_test() {
+    single_expression_test(
+      |(col, line)| {
+        return exprs!(
+          pos!(col, line),
+          objectlit!(
+            ObjectLitType::NONE,
+            pos!(col + 1, line),
+            object_props!(
+              pos!(col + 2, line),
+              ident!("a", pos!(col + 9, line)),
+              afnexpr!(
+                pos!(col + 2, line),
+                "Generator",
+                ident!("a", pos!(col + 9, line)),
+                exprs!(pos!(col + 11, line)),
+                stmts!(
+                  pos!(col + 14, line),
+                  stmt!(
+                    pos!(col + 14, line),
+                    unary!(
+                      "Await",
+                      "Pre",
+                      pos!(col + 14, line),
+                      callexpr!(
+                        "Expr",
+                        pos!(col + 20, line),
+                        ident!("x", pos!(col + 20, line)),
+                        exprs!(pos!(col + 21, line))
+                      )
+                    )
+                  ),
+                  stmt!(
+                    pos!(col + 25, line),
+                    unary!(
+                      "Yield",
+                      "Pre",
+                      pos!(col + 25, line),
+                      callexpr!(
+                        "Expr",
+                        pos!(col + 31, line),
+                        ident!("y", pos!(col + 31, line)),
+                        exprs!(pos!(col + 32, line))
+                      )
+                    )
+                  )
+                )
+              )
+            )
+          )
+        );
+      },
+      "({async *a() {await x(); yield y();}})",
     )
   }
 }

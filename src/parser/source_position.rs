@@ -68,6 +68,10 @@ impl SourcePosition {
       self.start_col, self.end_col, self.start_line_number, self.end_line_number
     );
   }
+
+  pub fn runtime_source_position(&self) -> RuntimeSourcePosition {
+    return RuntimeSourcePosition::new(self.start_col, self.start_line_number);
+  }
 }
 
 impl Debug for SourcePosition {
@@ -91,6 +95,48 @@ impl PartialOrd for SourcePosition {
       });
     }
     return Some(if self.start_line_number > other.start_line_number {
+      Greater
+    } else {
+      Less
+    });
+  }
+}
+
+#[derive(PartialEq, Eq, Property, Copy, Clone)]
+pub struct RuntimeSourcePosition {
+  #[property(get(type = "copy"), set(type = "none"))]
+  col: u32,
+  #[property(get(type = "copy"), set(type = "none"))]
+  line_number: u32,
+}
+
+impl RuntimeSourcePosition {
+  pub fn new(col: u32, line_number: u32) -> RuntimeSourcePosition {
+    return RuntimeSourcePosition { col, line_number };
+  }
+
+  pub fn to_string(&self) -> String {
+    return format!("[{}, {}]", self.col, self.line_number);
+  }
+}
+
+impl Debug for RuntimeSourcePosition {
+  fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+    return write!(
+      f,
+      "SourcePosition: {{col: {}, line_number: {}}}",
+      self.col, self.line_number
+    );
+  }
+}
+
+impl PartialOrd for RuntimeSourcePosition {
+  fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+    use Ordering::*;
+    if self.line_number == other.line_number {
+      return Some(if self.col > other.col { Greater } else { Less });
+    }
+    return Some(if self.line_number > other.line_number {
       Greater
     } else {
       Less

@@ -315,6 +315,10 @@ impl Scanner {
     self.mode = Mode::Current;
     if !self.has_more() {
       self.position[Mode::Lookahead as usize] = self.position[Mode::Current as usize].clone();
+      let end_col = self.current_position().end_col();
+      let end_line = self.current_position().end_line_number();
+      self.current_position_mut().set_start_col(end_col);
+      self.current_position_mut().set_start_line_number(end_line);
       self.token = Token::End;
       self.lookahead_token = Token::End;
       return self.lookahead_token;
