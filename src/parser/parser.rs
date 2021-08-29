@@ -1593,7 +1593,7 @@ impl ParserDef for Parser {
   }
 
   fn parse_statement_list<T: Fn(Token) -> bool>(&mut self, condition: T) -> ParseResult<Stmt> {
-    let mut statements = new_node!(self, Statements);
+    let mut statements = new_node_with_pos!(self, Statements, self.source_position().clone());
     while self.has_more() && condition(self.cur()) {
       let stmt = next_parse!(self, self.parse_statement_list_item())?;
       statements.push(stmt);
@@ -1907,7 +1907,7 @@ impl ParserDef for Parser {
     let has_brace = self.cur() == Token::LeftBrace;
     let body = if has_brace {
       self.advance();
-      next_parse!(self, self.parse_statement_list(|t| t == Token::RightBrace)).map(|t| t.into())
+      next_parse!(self, self.parse_statement_list(|t| t != Token::RightBrace)).map(|t| t.into())
     } else {
       next_parse!(self, self.parse_assignment_expression()).map(|t| t.into())
     }?;
@@ -1915,9 +1915,10 @@ impl ParserDef for Parser {
       self.advance();
     }
     return Ok(
-      new_node!(
+      new_node_with_runtime_pos!(
         self,
         FunctionExpression,
+        args.source_position(),
         is_async,
         None,
         FunctionType::NonScoped,

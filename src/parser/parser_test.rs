@@ -1830,6 +1830,32 @@ mod parser_test {
   }
 
   #[test]
+  fn parser_parse_object_literal_function_expr_value() {
+    single_expression_test(
+      |(col, line)| {
+        return exprs!(
+          pos!(col, line),
+          objectlit!(
+            ObjectLitType::NONE,
+            pos!(col + 1, line),
+            object_props!(
+              pos!(col + 2, line),
+              ident!("a", pos!(col + 2, line)),
+              fnexpr!(
+                pos!(col + 5, line),
+                "ArrowFunction",
+                exprs!(pos!(col + 5, line)),
+                stmts!(pos!(col + 12, line))
+              )
+            ),
+          )
+        );
+      },
+      "({a: () => {}})",
+    )
+  }
+
+  #[test]
   fn parser_parse_async_method_object_literal() {
     single_expression_test(
       |(col, line)| {
