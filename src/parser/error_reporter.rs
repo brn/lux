@@ -1,6 +1,7 @@
 use super::error_formatter::*;
 use super::source::Source;
 use super::source_position::SourcePosition;
+use crate::utility::Exotic;
 use property::Property;
 use std::boxed::Box;
 use std::rc::Rc;
@@ -69,7 +70,7 @@ impl std::fmt::Display for ErrorDescriptor {
 #[derive(Property)]
 pub struct ErrorReporter {
   #[property(get(type = "ref"))]
-  pending_errors: Vec<ErrorDescriptor>,
+  pending_errors: Vec<Exotic<ErrorDescriptor>>,
 
   source: Rc<Source>,
 }
@@ -82,7 +83,7 @@ impl ErrorReporter {
     };
   }
 
-  pub fn report_syntax_error(&mut self, mut ed: ErrorDescriptor) {
+  pub fn report_syntax_error(&mut self, mut ed: Exotic<ErrorDescriptor>) {
     if ed.is_registered() {
       return;
     }
@@ -103,9 +104,9 @@ impl ErrorReporter {
     return self.pending_errors.len() > 0;
   }
 
-  pub fn last_error(&self) -> Option<&ErrorDescriptor> {
+  pub fn last_error(&self) -> Option<Exotic<ErrorDescriptor>> {
     if self.has_pending_error() {
-      return Some(self.pending_errors.last().as_ref().unwrap());
+      return Some(*self.pending_errors.last().unwrap());
     }
     return None;
   }
@@ -116,14 +117,14 @@ pub trait ReportSyntaxError {
 
   fn source_position(&self) -> &SourcePosition;
 
-  fn report_syntax_error(&mut self, ed: ErrorDescriptor) {
+  fn report_syntax_error(&mut self, ed: Exotic<ErrorDescriptor>) {
     self.error_reporter().report_syntax_error(ed);
   }
 }
 
 macro_rules! _base_report_error {
   ($self:expr, $pos:expr, $message:expr) => {{
-    let mut e = ErrorDescriptor::new($pos);
+    let mut e = $self.region.alloc(ErrorDescriptor::new($pos));
     e.append_message($message);
     $self.report_syntax_error(e);
   }};
@@ -146,11 +147,11 @@ macro_rules! report_error {
 
 #[cfg(debug_assertions)]
 macro_rules! parse_error {
-  ($message:expr, $pos:expr) => {{
+  ($region:expr, $message:expr, $pos:expr) => {{
     debug_log!("===SYNTAX ERROR FOUND===");
     let pos = $pos;
     let message = $message;
-    let mut e = ErrorDescriptor::new($pos);
+    let mut e = $region.alloc(ErrorDescriptor::new($pos));
     e.append_message(&format!("[Debug] line: {}\n{}", line!(), message));
     Err(e)
   }};

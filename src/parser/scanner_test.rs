@@ -58,14 +58,15 @@ mod scanner_test {
 
   #[test]
   fn scanner_all_token_test() {
-    for token in Token::values().filter(|token| !token.is_pseudo_token()) {
+    for token in Token::values().filter(|token| !token.is_pseudo_token() && !token.is_contextual_keyword()) {
       scan_test(*token);
     }
   }
 
   #[test]
   fn scanner_all_token_once_test() {
-    let base_iter = Token::values().filter(|token| !token.is_pseudo_token() && **token != Token::BackQuote);
+    let base_iter = Token::values()
+      .filter(|token| !token.is_pseudo_token() && !token.is_contextual_keyword() && **token != Token::BackQuote);
     let source: String = base_iter.clone().map(|token| token.symbol()).intersperse(" ").collect();
     let results = scan(&source);
     let mut expected = base_iter.clone().collect::<Vec<_>>();
@@ -99,6 +100,89 @@ mod scanner_test {
       assert_eq!(scanner.next(), Token::Identifier);
       let value = chars::to_utf8(scanner.current_literal_buffer());
       assert_eq!(&value, "IDENTIFIER");
+    });
+  }
+
+  #[test]
+  fn scanner_scan_contextual_keyword_test() {
+    init_scanner("eval", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::Eval);
+    });
+
+    init_scanner("arguments", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::Arguments);
+    });
+
+    init_scanner("async", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::Async);
+    });
+
+    init_scanner("let", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::Let);
+    });
+
+    init_scanner("target", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::Target);
+    });
+
+    init_scanner("get", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::Get);
+    });
+
+    init_scanner("set", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::Set);
+    });
+
+    init_scanner("from", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::From);
+    });
+
+    init_scanner("as", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::As);
+    });
+
+    init_scanner("implements", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::Implements);
+    });
+
+    init_scanner("interface", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::Interface);
+    });
+
+    init_scanner("package", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::Package);
+    });
+
+    init_scanner("private", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::Private);
+    });
+
+    init_scanner("protected", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::Protected);
+    });
+
+    init_scanner("public", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::Public);
+    });
+
+    init_scanner("static", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Identifier);
+      assert_eq!(scanner.contextual_keyword(), Token::Static);
     });
   }
 

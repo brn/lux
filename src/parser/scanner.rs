@@ -1,17 +1,12 @@
-use super::super::structs::{FixedU16CodePointArray, FixedU16CodePointArrayIterator};
+use super::super::structs::FixedU16CodePointArray;
 use super::super::unicode::chars;
-use super::error_formatter::*;
 use super::error_reporter::*;
 use super::parser_state::{ParserState, ParserStateStack};
 use super::source::Source;
 use super::source_position::SourcePosition;
 use super::token::Token;
 use crate::utility::*;
-use std::boxed::Box;
 use std::cmp::{Eq, PartialEq};
-use std::iter::Peekable;
-use std::marker::PhantomPinned;
-use std::pin::Pin;
 use std::rc::Rc;
 use std::vec::Vec;
 
@@ -178,7 +173,9 @@ pub struct Scanner {
   token: Token,
   lookahead_token: Token,
   iter: SourceCursor,
+  region: Region,
   source: Rc<Source>,
+  contextual_keywords: [Token; 2],
 
   numeric_value: [f64; 2],
 
@@ -217,9 +214,10 @@ impl Scanner {
     let mut scanner = Scanner {
       token: Token::Invalid,
       lookahead_token: Token::Invalid,
+      region: Region::new(),
       source: source.clone(),
       iter: SourceCursor::new(source.source_code()),
-
+      contextual_keywords: [Token::Invalid, Token::Invalid],
       literal_buffer: [Vec::<u16>::new(), Vec::<u16>::new()],
 
       scanner_state: [Bitset::<u8>::new(), Bitset::<u8>::new()],
@@ -248,6 +246,14 @@ impl Scanner {
       token: self.lookahead_token,
       position: self.position[0].clone(),
     };
+  }
+
+  pub fn contextual_keyword(&self) -> Token {
+    return self.contextual_keywords[Mode::Current as usize];
+  }
+
+  pub fn peek_contextual_keyword(&self) -> Token {
+    return self.contextual_keywords[Mode::Lookahead as usize];
   }
 
   pub fn restore(&mut self, record: &ScannerRecord) {
@@ -333,6 +339,7 @@ impl Scanner {
 
     self.previous_position = self.position[Mode::Current as usize].clone();
     if self.lookahead_token != Token::Invalid {
+      self.contextual_keywords[self.mode as usize] = self.peek_contextual_keyword();
       self.token = self.lookahead_token;
       self.lookahead_token = Token::Invalid;
       self.literal_buffer[Mode::Current as usize] = self.literal_buffer[Mode::Lookahead as usize].clone();
@@ -435,6 +442,7 @@ impl Scanner {
   }
 
   fn prologue(&mut self) {
+    self.contextual_keywords[self.mode as usize] = Token::Invalid;
     self.unset_linebreak_before();
     {
       let cur = self.current_position_mut();
@@ -890,6 +898,7 @@ impl Scanner {
     let mut value = self.iter.uc32();
     self.current_literal_buffer_mut().clear();
     debug_assert!(chars::is_identifier_start(value.code()));
+
     while self.has_more() && chars::is_identifier_continue(value.code(), false) {
       if !value.is_surrogate_pair() && chars::ch(value.code() as u16) == '\\' {
         self.advance();
@@ -938,7 +947,12 @@ impl Scanner {
       value = self.iter.uc32();
     }
 
-    return self.get_identifier_type();
+    let token = self.get_identifier_type();
+    if token.is_contextual_keyword() {
+      self.contextual_keywords[self.mode as usize] = token;
+      return Token::Identifier;
+    }
+    return token;
   }
 
   fn get_identifier_type(&mut self) -> Token {
@@ -988,6 +1002,9 @@ impl Scanner {
     }
 
     _keyword_unroll_check!(buf, 'a' => {
+      "arguments": Arguments,
+      "as": As,
+      "async": Async,
       "await": Await,
     }, 'b' => {
       "break": Break,
@@ -1005,27 +1022,43 @@ impl Scanner {
     }, 'e' => {
       "else": Else,
       "enum": Enum,
+      "eval": Eval,
       "export": Export,
       "extends": Extends,
     }, 'f' => {
       "false": False,
       "finally": Finally,
       "for": For,
+      "from": From,
       "function": Function,
+    }, 'g' => {
+      "get": Get,
     }, 'i' => {
       "if": If,
+      "implements": Implements,
       "import": Import,
       "in": In,
       "instanceof": Instanceof,
+      "interface": Interface,
+    }, 'l' => {
+      "let": Let,
     }, 'n' => {
       "new": New,
       "null": Null,
+    }, 'p' => {
+      "package": Package,
+      "private": Private,
+      "protected": Protected,
+      "public": Public,
     }, 'r' => {
       "return": Return,
     }, 's' => {
+      "set": Set,
+      "static": Static,
       "super": Super,
       "switch": Switch,
     }, 't' => {
+      "target": Target,
       "this": This,
       "throw": Throw,
       "true": True,

@@ -15,7 +15,7 @@ use std::rc::Rc;
 macro_rules! expect {
   (@notadvance $self:tt, $n:expr, $token:expr) => {
     if $n != $token {
-      return parse_error!(format!("'{}' expected", $token.symbol()), $self.source_position());
+      return parse_error!($self.region, format!("'{}' expected", $token.symbol()), $self.source_position());
     }
   };
   ($self:tt, $n:expr, $token:expr) => {
@@ -29,7 +29,7 @@ macro_rules! expect {
         s.push_str(format!("'{}' "$token.symbol()));
       )*;
       s.push_str("expected");
-      return parse_error!(s, $self.source_position());
+      return parse_error!($self.region, s, $self.source_position());
     }
     $self.advance()?;
   };
@@ -132,35 +132,6 @@ macro_rules! next_parse {
   };
 }
 
-struct KeywordStringValues {
-  eval: FixedU16CodePointArray,
-  arguments: FixedU16CodePointArray,
-  k_async: FixedU16CodePointArray,
-  k_let: FixedU16CodePointArray,
-  target: FixedU16CodePointArray,
-  get: FixedU16CodePointArray,
-  set: FixedU16CodePointArray,
-  use_strict: FixedU16CodePointArray,
-  from: FixedU16CodePointArray,
-  k_as: FixedU16CodePointArray,
-}
-impl KeywordStringValues {
-  fn new(context: impl ObjectRecordsInitializedContext) -> Self {
-    KeywordStringValues {
-      eval: FixedU16CodePointArray::from_utf8(context, "eval"),
-      arguments: FixedU16CodePointArray::from_utf8(context, "arguments"),
-      k_async: FixedU16CodePointArray::from_utf8(context, "async"),
-      k_let: FixedU16CodePointArray::from_utf8(context, "let"),
-      target: FixedU16CodePointArray::from_utf8(context, "target"),
-      get: FixedU16CodePointArray::from_utf8(context, "get"),
-      set: FixedU16CodePointArray::from_utf8(context, "set"),
-      use_strict: FixedU16CodePointArray::from_utf8(context, "use strict"),
-      from: FixedU16CodePointArray::from_utf8(context, "from"),
-      k_as: FixedU16CodePointArray::from_utf8(context, "as"),
-    }
-  }
-}
-
 #[derive(PartialEq)]
 pub enum ParserType {
   Script,
@@ -179,7 +150,7 @@ pub struct Parser {
   is_strict_mode: bool,
   debugger: ParserDebugger,
   empty: Node<Empty>,
-  keyword_string_values: KeywordStringValues,
+  use_strict_str: FixedU16CodePointArray,
 }
 
 macro_rules! new_node {
@@ -253,8 +224,8 @@ impl Parser {
       error_reporter: Exotic::new(std::ptr::null_mut()),
       is_strict_mode: false,
       debugger: ParserDebugger::new(),
-      keyword_string_values: KeywordStringValues::new(context),
       empty,
+      use_strict_str: FixedU16CodePointArray::from_utf8(context, "use strict"),
     };
     parser.error_reporter = parser.region.alloc(ErrorReporter::new(parser.source.clone()));
     parser.parser_state = parser.region.alloc(ParserStateStack::new());
@@ -274,7 +245,7 @@ impl Parser {
     self.error_reporter.print_errors();
   }
 
-  pub fn last_error(&self) -> Option<&ErrorDescriptor> {
+  pub fn last_error(&self) -> Option<Exotic<ErrorDescriptor>> {
     return self.error_reporter.last_error();
   }
 
@@ -283,6 +254,16 @@ impl Parser {
     self.parser_type = parser_type;
     self.parse_program();
     return self.result.clone();
+  }
+
+  #[inline(always)]
+  fn contextual_keyword(&self) -> Token {
+    return self.scanner.contextual_keyword();
+  }
+
+  #[inline(always)]
+  fn peek_contextual_keyword(&self) -> Token {
+    return self.scanner.peek_contextual_keyword();
   }
 
   #[inline(always)]
@@ -295,9 +276,9 @@ impl Parser {
     let next = self.scanner.next();
     if next == Token::Invalid {
       if self.error_reporter.has_pending_error() {
-        return Err(self.error_reporter.last_error().unwrap().clone());
+        return Err(self.error_reporter.last_error().unwrap());
       } else {
-        return parse_error!("Invalid token found", self.prev_source_position());
+        return parse_error!(self.region, "Invalid token found", self.prev_source_position());
       }
     }
     return Ok(next);
@@ -409,10 +390,12 @@ impl Parser {
 
 impl ParserDef for Parser {
   fn parse_directive_prologue(&mut self) {
-    if self.cur() == Token::StringLiteral && self.is_value_match_with(self.keyword_string_values.use_strict) {
+    if self.cur() == Token::StringLiteral && self.is_value_match_with(self.use_strict_str) {
+      #[allow(unused_must_use)]
       self.advance();
       self.is_strict_mode = true;
       if self.cur() == Token::Terminate {
+        #[allow(unused_must_use)]
         self.advance();
       } else if !self.has_line_break_before() {
         report_error!(noreturn self, "; expected", self.source_position());
@@ -461,15 +444,30 @@ impl ParserDef for Parser {
       self.advance()?;
       return Ok(expr);
     } else if self.cur() != Token::End && self.cur() != Token::RightBrace && !self.has_line_break_after() {
-      return parse_error!("';' expected", self.source_position());
+      return parse_error!(self.region, "';' expected", self.source_position());
     }
 
     return Ok(expr);
   }
 
   fn parse_identifier(&mut self) -> ParseResult<Expr> {
-    expect!(@notadvance self, self.cur(), Token::Identifier);
-    let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
+    use Token::*;
+    debug_assert!(self.cur().one_of(&[Identifier, Yield, Await]));
+    if self
+      .contextual_keyword()
+      .one_of(&[Implements, Interface, Let, Package, Private, Protected, Public, Static])
+      || self.cur() == Token::Yield
+    {
+      return parse_error!(
+        self.region,
+        format!("'{}' is reserved word", Parser::value_to_utf8(self.value())),
+        &pos_range!(self.prev_source_position(), self.source_position())
+      );
+    }
+    let val = LiteralValue::String(
+      FixedU16CodePointArray::from_u16_vec(self.context, self.value()),
+      self.contextual_keyword(),
+    );
     let node = new_node!(self, Literal, Token::Identifier, val);
     return Ok(node.into());
   }
@@ -481,22 +479,22 @@ impl ParserDef for Parser {
         if self.is_strict_mode {
           if self.cur() == Token::Yield {
             return parse_error!(
+              self.region,
               "Keyword 'yield' is not allowed here in strict mode code",
               self.source_position()
             );
           }
           if self.cur() == Token::Await {
             return parse_error!(
+              self.region,
               "Keyword 'await' is not allowed here in strict mode code",
               self.source_position()
             );
           }
         }
-        let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
-        let node = new_node_with_pos!(self, Literal, &start, Token::Identifier, val);
-        Ok(node.into())
+        next_parse!(self, self.parse_identifier())
       }
-      _ => parse_error!("Literal expected", self.source_position()),
+      _ => parse_error!(self.region, "Literal expected", self.source_position()),
     };
     self.advance()?;
     return result;
@@ -526,10 +524,7 @@ impl ParserDef for Parser {
         return next_parse!(self, self.parse_class_expression());
       }
       Token::Identifier => {
-        if self.is_value_match_with(self.keyword_string_values.k_async)
-          && !self.has_line_break_after()
-          && self.peek() == Token::Function
-        {
+        if self.contextual_keyword() == Token::Async && !self.has_line_break_after() && self.peek() == Token::Function {
           self.advance()?;
           return next_parse!(self, self.parse_function_expression(true, false));
         }
@@ -538,6 +533,7 @@ impl ParserDef for Parser {
       Token::ImplicitOctalLiteral => {
         if self.is_strict_mode {
           return parse_error!(
+            self.region,
             "Implicit octal literal not allowed in strict mode",
             self.source_position()
           );
@@ -563,7 +559,7 @@ impl ParserDef for Parser {
         );
       }
       _ => {
-        return parse_error!("Unexpected token found", self.source_position());
+        return parse_error!(self.region, "Unexpected token found", self.source_position());
       }
     }
   }
@@ -581,10 +577,13 @@ impl ParserDef for Parser {
       }
       Token::StringLiteral => {
         let t = self.cur();
-        let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
+        let val = LiteralValue::String(
+          FixedU16CodePointArray::from_u16_vec(self.context, self.value()),
+          Token::Invalid,
+        );
         Ok(new_node!(self, Literal, t, val).into())
       }
-      _ => parse_error!("Literal expected", self.source_position()),
+      _ => parse_error!(self.region, "Literal expected", self.source_position()),
     };
     self.advance()?;
     return result;
@@ -622,7 +621,7 @@ impl ParserDef for Parser {
         }
       } else {
         if is_spread_seen {
-          return parse_error!("Spread must be last element", self.source_position());
+          return parse_error!(self.region, "Spread must be last element", self.source_position());
         }
         if self.cur() == Token::Spread {
           is_spread_seen = true;
@@ -751,7 +750,7 @@ impl ParserDef for Parser {
         return next_parse!(self, self.parse_method_definition());
       }
 
-      if self.is_value_match_with(self.keyword_string_values.k_async)
+      if self.contextual_keyword() == Token::Async
         && self.peek().one_of(&binding_tokens)
         && !self.has_line_break_after()
       {
@@ -794,7 +793,7 @@ impl ParserDef for Parser {
 
       if self.cur() == Token::OpAssign {
         if constraints.is_binding_pattern_allowed() || is_computed_property_name {
-          return parse_error!("Unexpected '=' detected", self.source_position());
+          return parse_error!(self.region, "Unexpected '=' detected", self.source_position());
         }
         self.advance()?;
         let ident = next_parse!(self, self.parse_identifier_reference())?;
@@ -818,14 +817,14 @@ impl ParserDef for Parser {
             None
           ));
         }
-        return parse_error!("Expression expected", self.source_position());
+        return parse_error!(self.region, "Expression expected", self.source_position());
       }
     } else {
-      return parse_error!(format!("Property name must be one of 'identifier', 'string literal', 'numeric literal' or 'computed property' but got {}", self.cur().symbol()), self.source_position());
+      return parse_error!(self.region, format!("Property name must be one of 'identifier', 'string literal', 'numeric literal' or 'computed property' but got {}", self.cur().symbol()), self.source_position());
     }
 
     if key.is_none() {
-      return parse_error!("Expression expected", self.source_position());
+      return parse_error!(self.region, "Expression expected", self.source_position());
     }
 
     let key_node = key.unwrap();
@@ -853,12 +852,12 @@ impl ParserDef for Parser {
       match value {
         Expr::Literal(node) => {
           if !node.is_identifier() {
-            return parse_error!("Identifier expected", self.source_position());
+            return parse_error!(self.region, "Identifier expected", self.source_position());
           }
         }
         Expr::StructuralLiteral(_) => {}
         _ => {
-          return parse_error!("Identifier expected", self.source_position());
+          return parse_error!(self.region, "Identifier expected", self.source_position());
         }
       }
     }
@@ -898,7 +897,10 @@ impl ParserDef for Parser {
     while self.cur() != Token::Template {
       match self.cur() {
         Token::StringLiteral => {
-          let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
+          let val = LiteralValue::String(
+            FixedU16CodePointArray::from_u16_vec(self.context, self.value()),
+            Token::Invalid,
+          );
           template_literal
             .push(new_node_with_pos!(self, Literal, self.source_position().clone(), Token::StringLiteral, val).into());
           self.advance()?;
@@ -991,7 +993,7 @@ impl ParserDef for Parser {
       if self.cur() == Token::Dot {
         self.advance()?;
         if self.peek() == Token::Identifier {
-          if self.keyword_string_values.target.eq_vec16(self.peek_value()) {
+          if self.peek_contextual_keyword() == Token::Target {
             return Ok(
               new_node!(
                 self,
@@ -1005,11 +1007,16 @@ impl ParserDef for Parser {
             );
           }
           return parse_error!(
+            self.region,
             format!("new.target? but got {}", Parser::value_to_utf8(self.peek_value())),
             self.source_position()
           );
         }
-        return parse_error!("new.target? identifier 'target' expected", self.source_position());
+        return parse_error!(
+          self.region,
+          "new.target? identifier 'target' expected",
+          self.source_position()
+        );
       }
       let start_call = self.source_position().clone();
       let m = next_parse!(self, self.parse_member_expression())?;
@@ -1111,7 +1118,7 @@ impl ParserDef for Parser {
         }
         Token::BackQuote => {
           if !constraints.is_template_allowed() {
-            return parse_error!("Unexpected '`' found", self.source_position());
+            return parse_error!(self.region, "Unexpected '`' found", self.source_position());
           }
           let tmpl = next_parse!(self, self.parse_template_literal())?;
           current = new_node_with_runtime_pos!(
@@ -1127,6 +1134,7 @@ impl ParserDef for Parser {
         _ => {
           if error_if_default {
             return parse_error!(
+              self.region,
               format!("Unexpected {} found", self.cur().symbol()),
               self.source_position()
             );
@@ -1193,7 +1201,7 @@ impl ParserDef for Parser {
 
       if self.cur() == Token::Comma {
         if self.peek() == Token::LeftParen {
-          return parse_error!("Extra ',' found", self.source_position());
+          return parse_error!(self.region, "Extra ',' found", self.source_position());
         }
         self.advance()?;
       } else {
@@ -1315,6 +1323,7 @@ impl ParserDef for Parser {
           .match_states(&[ParserState::InAsyncFunction, ParserState::InAsyncGeneratorFunction])
         {
           return parse_error!(
+            self.region,
             "await is not allowed outside of async function.",
             self.source_position()
           );
@@ -1471,7 +1480,7 @@ impl ParserDef for Parser {
       self.advance()?;
       let lhs = next_parse!(self, self.parse_assignment_expression())?;
       if self.cur() != Token::Colon {
-        return parse_error!("':' expected", self.source_position());
+        return parse_error!(self.region, "':' expected", self.source_position());
       }
       self.advance()?;
       let rhs = next_parse!(self, self.parse_assignment_expression())?;
@@ -1494,6 +1503,7 @@ impl ParserDef for Parser {
       Token::Yield => {
         if !self.match_states(&[ParserState::InGeneratorFunction, ParserState::InAsyncGeneratorFunction]) {
           return parse_error!(
+            self.region,
             "yield only allowed in generator or async generator.",
             self.source_position()
           );
@@ -1520,15 +1530,15 @@ impl ParserDef for Parser {
                 CallReceiverType::New | CallReceiverType::Super => true,
                 _ => false,
               } {
-                return parse_error!("Unexpected token found", self.source_position());
+                return parse_error!(self.region, "Unexpected token found", self.source_position());
               }
               if let Some(callee) = call_node.callee() {
                 match callee {
                   Expr::Literal(literal_node) => {
                     if literal_node.literal_type() == Token::Identifier {
                       match literal_node.value() {
-                        LiteralValue::String(array) => {
-                          if array.to_utf8().eq("async") {
+                        LiteralValue::String(array, contextual_keyword) => {
+                          if contextual_keyword == Token::Async {
                             if let Some(args) = call_node.parameters() {
                               return next_parse!(self, self.parse_concise_body(true, args));
                             } else {
@@ -1540,13 +1550,13 @@ impl ParserDef for Parser {
                           }
                         }
                         _ => {
-                          return parse_error!("Identifier expected", self.source_position());
+                          return parse_error!(self.region, "Identifier expected", self.source_position());
                         }
                       }
                     }
                   }
                   _ => {
-                    return parse_error!("Identifier expected", self.source_position());
+                    return parse_error!(self.region, "Identifier expected", self.source_position());
                   }
                 }
               }
@@ -1555,7 +1565,7 @@ impl ParserDef for Parser {
               return next_parse!(self, self.parse_concise_body(false, exprs.into()));
             }
             _ => {
-              return parse_error!("Unexpected token found", self.source_position());
+              return parse_error!(self.region, "Unexpected token found", self.source_position());
             }
           };
         }
@@ -1576,19 +1586,20 @@ impl ParserDef for Parser {
             false
           };
           if !is_valid {
-            return parse_error!("Invalid left hand side expression", self.source_position());
+            return parse_error!(self.region, "Invalid left hand side expression", self.source_position());
           }
           if self.is_strict_mode {
             if let Ok(l) = maybe_literal {
               if l.is_identifier()
                 && match l.value() {
-                  LiteralValue::String(val) => {
-                    val == self.keyword_string_values.eval || val == self.keyword_string_values.arguments
+                  LiteralValue::String(_, contextual_keyword) => {
+                    contextual_keyword.one_of(&[Token::Eval, Token::Arguments])
                   }
                   _ => false,
                 }
               {
                 return parse_error!(
+                  self.region,
                   "Defining 'eval' or 'arguments' is not allowed in strict mode code",
                   &pos_range!(@just expr_start_pos, self.prev_source_position())
                 );
@@ -1721,7 +1732,7 @@ impl ParserDef for Parser {
     let mut is_async = false;
     match self.cur() {
       Token::Identifier => {
-        if self.is_value_match_with(self.keyword_string_values.k_async) {
+        if self.contextual_keyword() == Token::Async {
           return self.parse_lexical_declaration();
         }
         is_async = true;
@@ -1768,10 +1779,10 @@ impl ParserDef for Parser {
       _ => {
         if self.cur() == Token::Identifier {
           let v = self.value();
-          if (self.is_value_match_with(self.keyword_string_values.k_async)
+          if (self.contextual_keyword() == Token::Async
             && self.peek() == Token::Function
             && !self.has_line_break_after())
-            || self.is_value_match_with(self.keyword_string_values.k_let)
+            || self.contextual_keyword() == Token::Let
           {
             return next_parse!(self, self.parse_declaration());
           }
@@ -1821,31 +1832,30 @@ impl ParserDef for Parser {
     let mut identifier: Expr = self.empty.into();
     match self.cur() {
       Token::Identifier | Token::Yield | Token::Await => {
-        if self.cur() == Token::Identifier && self.is_strict_mode {
-          if self.is_value_match_with(self.keyword_string_values.arguments) {
+        if self.is_strict_mode {
+          if self.cur() == Token::Identifier && self.contextual_keyword().one_of(&[Token::Arguments, Token::Eval]) {
             return parse_error!(
-              "Accessed to 'arguments' is not allowed in strict mode code",
+              self.region,
+              "Accessed to 'arguments' or 'eval' is not allowed in strict mode code",
               self.source_position()
             );
           }
-          if self.is_value_match_with(self.keyword_string_values.eval) {
+          if self.cur() == Token::Yield {
             return parse_error!(
-              "Accessed to 'eval' is not allowed in strict mode code",
+              self.region,
+              "Keyword 'yield' is not allowed here in strict mode code",
               self.source_position()
             );
           }
         }
-        if self.cur() == Token::Yield && self.is_strict_mode {
-          return parse_error!(
-            "Keyword 'yield' is not allowed here in strict mode code",
-            self.source_position()
-          );
-        }
-        let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
+        let val = LiteralValue::String(
+          FixedU16CodePointArray::from_u16_vec(self.context, self.value()),
+          self.contextual_keyword(),
+        );
         identifier = new_node!(self, Literal, Token::Identifier, val).into();
       }
       _ => {
-        return parse_error!("Identifier expected", self.source_position());
+        return parse_error!(self.region, "Identifier expected", self.source_position());
       }
     };
 
@@ -1968,7 +1978,7 @@ impl ParserDef for Parser {
       identifier = Some(Node::<Literal>::try_from(next_parse!(self, self.parse_identifier())?).unwrap());
       self.advance()?;
     } else if !is_default {
-      return parse_error!("Identifier expected", self.source_position());
+      return parse_error!(self.region, "Identifier expected", self.source_position());
     }
 
     let formal_parameter_position = self.source_position().clone();
@@ -2114,8 +2124,8 @@ impl ParserDef for Parser {
 
   fn parse_method_definition(&mut self) -> ParseResult<Node<ObjectPropertyExpression>> {
     let start = self.source_position().clone();
-    let is_getter = self.is_value_match_with(self.keyword_string_values.get);
-    let is_setter = self.is_value_match_with(self.keyword_string_values.set);
+    let is_getter = self.contextual_keyword() == Token::Get;
+    let is_setter = self.contextual_keyword() == Token::Set;
     let mut is_generator = self.cur() == Token::OpMul;
     if ((is_getter || is_setter) && self.cur().one_of(&[Token::Identifier, Token::LeftBracket])) || is_generator {
       self.advance()?;
@@ -2129,8 +2139,7 @@ impl ParserDef for Parser {
       | Token::Identifier => {
         let mut maybe_name: Option<Expr> = None;
         let mut formal_parameters: Option<Expr> = None;
-        let mut is_async =
-          self.cur() == Token::Identifier && self.is_value_match_with(self.keyword_string_values.k_async);
+        let mut is_async = self.cur() == Token::Identifier && self.contextual_keyword() == Token::Async;
         if is_async {
           self.advance()?;
         }
@@ -2144,17 +2153,29 @@ impl ParserDef for Parser {
         expect!(self, self.cur(), Token::LeftParen);
         if is_getter {
           if self.cur() != Token::RightParen {
-            return parse_error!("Getter must not have any formal parameters", self.source_position());
+            return parse_error!(
+              self.region,
+              "Getter must not have any formal parameters",
+              self.source_position()
+            );
           }
           self.advance()?;
           formal_parameters = Some(new_node!(self, Expressions).into());
         } else if is_setter {
           if self.cur() == Token::RightParen {
-            return parse_error!("Setter must have exactly one formal parameter", self.source_position());
+            return parse_error!(
+              self.region,
+              "Setter must have exactly one formal parameter",
+              self.source_position()
+            );
           }
           formal_parameters = Some(next_parse!(self, self.parse_property_set_parameter_list())?);
           if self.cur() != Token::RightParen {
-            return parse_error!("Setter must have exactly one formal parameter", self.source_position());
+            return parse_error!(
+              self.region,
+              "Setter must have exactly one formal parameter",
+              self.source_position()
+            );
           }
           self.advance()?;
         } else {
@@ -2332,7 +2353,10 @@ impl ParserDef for Parser {
     let mut start = self.source_position().clone();
     self.advance()?;
     if self.cur() == Token::StringLiteral {
-      let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
+      let val = LiteralValue::String(
+        FixedU16CodePointArray::from_u16_vec(self.context, self.value()),
+        Token::Invalid,
+      );
       let t = self.cur();
       let str = new_node_with_pos!(self, Literal, start, t, val);
       return Ok(new_node_with_pos!(self, ImportDeclaration, start, None, str.into()).into());
@@ -2353,33 +2377,36 @@ impl ParserDef for Parser {
       Token::OpMul => {
         ib.set_namespace_import(Some(next_parse!(self, self.parse_name_space_import())?));
       }
-      _ => return parse_error!("Unexpected token", self.source_position()),
+      _ => return parse_error!(self.region, "Unexpected token", self.source_position()),
     }
 
-    if self.cur() == Token::Identifier && self.is_value_match_with(self.keyword_string_values.from) {
+    if self.cur() == Token::Identifier && self.contextual_keyword() == Token::From {
       self.advance()?;
       if self.cur() == Token::StringLiteral {
-        let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
+        let val = LiteralValue::String(
+          FixedU16CodePointArray::from_u16_vec(self.context, self.value()),
+          Token::Invalid,
+        );
         let t = self.cur();
         let str = new_node!(self, Literal, t, val);
         if self.cur() == Token::Terminate {
           self.advance()?;
         } else if !self.has_line_break_before() {
-          return parse_error!("';' expected", self.source_position());
+          return parse_error!(self.region, "';' expected", self.source_position());
         }
         return Ok(new_node!(self, ImportDeclaration, Some(ib.into()), str.into()).into());
       }
     }
 
-    return parse_error!("Module specifier expected", self.source_position());
+    return parse_error!(self.region, "Module specifier expected", self.source_position());
   }
 
   fn parse_name_space_import(&mut self) -> ParseResult<Expr> {
     expect!(self, self.cur(), Token::Export);
-    if self.cur() == Token::Identifier && self.is_value_match_with(self.keyword_string_values.k_as) {
+    if self.cur() == Token::Identifier && self.contextual_keyword() == Token::As {
       return Ok(new_node!(self, ImportSpecifier, true, None, None).into());
     }
-    return parse_error!("'as' expected", self.source_position());
+    return parse_error!(self.region, "'as' expected", self.source_position());
   }
 
   fn parse_named_import(&mut self) -> ParseResult<Expr> {
@@ -2419,10 +2446,10 @@ impl ParserDef for Parser {
         export_clause = Some(next_parse!(self, self.parse_declaration())?.into());
       }
       Token::Identifier => {
-        if self.is_value_match_with(self.keyword_string_values.k_let) {
+        if self.contextual_keyword() == Token::Let {
           export_clause = Some(next_parse!(self, self.parse_declaration())?.into());
         }
-        return parse_error!("Unexpected token found", self.source_position());
+        return parse_error!(self.region, "Unexpected token found", self.source_position());
       }
       _ => {
         export_clause = Some(next_parse!(self, self.parse_export_clause())?.into());
@@ -2430,20 +2457,23 @@ impl ParserDef for Parser {
     }
 
     let mut from_clause: Option<Ast> = None;
-    if self.cur() == Token::Identifier && self.is_value_match_with(self.keyword_string_values.from) {
+    if self.cur() == Token::Identifier && self.contextual_keyword() == Token::From {
       self.advance()?;
       if self.cur() == Token::StringLiteral {
-        let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
+        let val = LiteralValue::String(
+          FixedU16CodePointArray::from_u16_vec(self.context, self.value()),
+          Token::Invalid,
+        );
         from_clause = Some(new_node!(self, Literal, Token::StringLiteral, val).into());
       } else {
-        return parse_error!("Module specifier expected", self.source_position());
+        return parse_error!(self.region, "Module specifier expected", self.source_position());
       }
     }
 
     if self.cur() == Token::Terminate {
       self.advance()?;
     } else if self.has_line_break_after() {
-      return parse_error!("';' expected", self.source_position());
+      return parse_error!(self.region, "';' expected", self.source_position());
     }
 
     return Ok(new_node!(self, ExportDeclaration, export_type, export_clause, from_clause).into());
@@ -2458,7 +2488,7 @@ impl ParserDef for Parser {
 
     while self.has_more() && self.cur() != Token::RightBrace {
       let identifier = next_parse!(self, self.parse_identifier_reference())?;
-      if self.cur() == Token::Identifier && self.is_value_match_with(self.keyword_string_values.k_as) {
+      if self.cur() == Token::Identifier && self.contextual_keyword() == Token::As {
         self.advance()?;
         let value_ref = next_parse!(self, self.parse_identifier())?;
         list.push(new_node!(self, ImportSpecifier, false, Some(identifier), Some(value_ref)).into());
@@ -2469,7 +2499,7 @@ impl ParserDef for Parser {
       if self.cur() == Token::Comma {
         self.advance()?;
       } else if self.cur() != Token::RightBrace {
-        return parse_error!("'}' expected", self.source_position());
+        return parse_error!(self.region, "'}' expected", self.source_position());
       }
     }
 

@@ -2,8 +2,9 @@ use super::ast::*;
 use super::error_reporter::ErrorDescriptor;
 use super::source_position::{RuntimeSourcePosition, SourcePosition};
 use super::token::*;
+use crate::utility::Exotic;
 
-pub type ParseResult<T> = Result<T, ErrorDescriptor>;
+pub type ParseResult<T> = Result<T, Exotic<ErrorDescriptor>>;
 
 bitflags! {
   pub struct ParserConstraints: u8 {
