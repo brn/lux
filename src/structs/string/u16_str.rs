@@ -18,6 +18,30 @@ pub fn from_utf8(context: impl ObjectRecordsInitializedContext, str: &str) -> Fi
   return array;
 }
 
+macro_rules! _def_eq {
+  ($name:tt, $type:ty) => {
+    fn $name(&self, a: $type) -> bool {
+      _def_eq!(@body self, a)
+    }
+  };
+  (pub $name:tt, $type:ty) => {
+    pub fn $name(&self, a: $type) -> bool {
+      _def_eq!(@body self, a)
+    }
+  };
+  (@body $self:expr, $a:expr) => {{
+    if $self.len() != $a.len() {
+      return false;
+    }
+    for i in 0..$self.length() {
+      if $self[i] != $a[i] {
+        return false;
+      }
+    }
+    return true;
+  }}
+}
+
 impl FixedU16CodePointArray {
   pub fn null() -> Self {
     return FixedU16CodePointArray::from(Repr::invalid());
@@ -36,21 +60,12 @@ impl FixedU16CodePointArray {
       .map(|r| r.unwrap_or('#'))
       .collect::<String>();
   }
+
+  _def_eq!(pub eq_vec16, &Vec<u16>);
 }
 
 impl std::cmp::PartialEq for FixedU16CodePointArray {
-  fn eq(&self, a: &Self) -> bool {
-    if self.length() != a.length() {
-      return false;
-    }
-    for i in 0..self.length() {
-      //      println!("{} {}", self[i], a[i]);
-      if self[i] != a[i] {
-        return false;
-      }
-    }
-    return true;
-  }
+  _def_eq!(eq, &Self);
 }
 impl std::cmp::Eq for FixedU16CodePointArray {}
 impl Hash for FixedU16CodePointArray {

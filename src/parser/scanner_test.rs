@@ -3,6 +3,8 @@ mod scanner_test {
   use super::super::error_reporter::{ErrorReporter, ReportSyntaxError};
   use super::super::parser_state::{ParserState, ParserStateStack};
   use super::super::scanner::*;
+  use super::super::source::*;
+  use super::super::source_position::SourcePosition;
   use super::super::token::*;
   use crate::context::LuxContext;
   use crate::structs::FixedU16CodePointArray;
@@ -10,6 +12,7 @@ mod scanner_test {
   use crate::utility::Exotic;
   use itertools::Itertools;
   use std::char::decode_utf16;
+  use std::rc::Rc;
   use std::vec::Vec;
 
   fn init_scanner<T>(
@@ -23,9 +26,9 @@ mod scanner_test {
     } else {
       ParserStateStack::new()
     });
-    let u16_source = FixedU16CodePointArray::from_utf8(context, source);
-    let error_reporter = Exotic::from(Box::new(ErrorReporter::new()));
-    let mut scanner = Scanner::new(u16_source, parser_state_stack.into(), error_reporter);
+    let source = Rc::new(Source::new(context, "anonymouse", &source));
+    let error_reporter = Exotic::from(Box::new(ErrorReporter::new(source.clone())));
+    let mut scanner = Scanner::new(source.clone(), parser_state_stack.into(), error_reporter);
     return cb(scanner);
   }
 
@@ -62,7 +65,7 @@ mod scanner_test {
 
   #[test]
   fn scanner_all_token_once_test() {
-    let base_iter = Token::values().filter(|token| !token.is_pseudo_token());
+    let base_iter = Token::values().filter(|token| !token.is_pseudo_token() && **token != Token::BackQuote);
     let source: String = base_iter.clone().map(|token| token.symbol()).intersperse(" ").collect();
     let results = scan(&source);
     let mut expected = base_iter.clone().collect::<Vec<_>>();
@@ -141,7 +144,7 @@ mod scanner_test {
     init_scanner("'test \\'string'", None, |mut scanner| {
       assert_eq!(scanner.next(), Token::StringLiteral);
       let value = chars::to_utf8(scanner.current_literal_buffer());
-      assert_eq!(&value, "test \\'string");
+      assert_eq!(&value, "test \'string");
     });
   }
 
@@ -150,7 +153,7 @@ mod scanner_test {
     init_scanner("'test \\\\'string'", None, |mut scanner| {
       assert_eq!(scanner.next(), Token::StringLiteral);
       let value = chars::to_utf8(scanner.current_literal_buffer());
-      assert_eq!(&value, "test \\\\");
+      assert_eq!(&value, "test \\");
     });
   }
 
@@ -158,6 +161,11 @@ mod scanner_test {
   fn scanner_scan_unterminated_string_literal() {
     init_scanner("'test", None, |mut scanner| {
       assert_eq!(scanner.next(), Token::Invalid);
+      assert!(scanner.error_reporter().last_error().is_some());
+      assert_eq!(
+        *scanner.error_reporter().last_error().unwrap().source_position(),
+        SourcePosition::with(Some(0), Some(5), Some(0), Some(0))
+      );
     });
   }
 
@@ -217,6 +225,11 @@ mod scanner_test {
   fn scanner_scan_invalid_ascii_escaped_string_literal() {
     init_scanner("'\\x6_foo_\\x62_bar_\\x63_baz'", None, |mut scanner| {
       assert_eq!(scanner.next(), Token::Invalid);
+      assert!(scanner.error_reporter().last_error().is_some());
+      assert_eq!(
+        *scanner.error_reporter().last_error().unwrap().source_position(),
+        SourcePosition::with(Some(1), Some(5), Some(0), Some(0))
+      );
     });
   }
 
@@ -224,6 +237,11 @@ mod scanner_test {
   fn scanner_scan_invalid_ascii_escaped_string_literal2() {
     init_scanner("'\\x61_foo_\\x2_bar_\\x63_baz'", None, |mut scanner| {
       assert_eq!(scanner.next(), Token::Invalid);
+      assert!(scanner.error_reporter().last_error().is_some());
+      assert_eq!(
+        *scanner.error_reporter().last_error().unwrap().source_position(),
+        SourcePosition::with(Some(10), Some(14), Some(0), Some(0))
+      );
     });
   }
 
@@ -231,6 +249,35 @@ mod scanner_test {
   fn scanner_scan_invalid_ascii_escaped_string_literal3() {
     init_scanner("'\\x61_foo_\\x62_bar_\\x-63_baz'", None, |mut scanner| {
       assert_eq!(scanner.next(), Token::Invalid);
+      assert!(scanner.error_reporter().last_error().is_some());
+      assert_eq!(
+        *scanner.error_reporter().last_error().unwrap().source_position(),
+        SourcePosition::with(Some(19), Some(22), Some(0), Some(0))
+      );
+    });
+  }
+
+  #[test]
+  fn scanner_scan_invalid_escaped_string_literal4() {
+    init_scanner("'a\\", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Invalid);
+      assert!(scanner.error_reporter().last_error().is_some());
+      assert_eq!(
+        *scanner.error_reporter().last_error().unwrap().source_position(),
+        SourcePosition::with(Some(2), Some(3), Some(0), Some(0))
+      );
+    });
+  }
+
+  #[test]
+  fn scanner_scan_invalid_escaped_string_literal5() {
+    init_scanner("'a\n", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::Invalid);
+      assert!(scanner.error_reporter().last_error().is_some());
+      assert_eq!(
+        *scanner.error_reporter().last_error().unwrap().source_position(),
+        SourcePosition::with(Some(2), Some(3), Some(0), Some(0))
+      );
     });
   }
 
@@ -381,9 +428,10 @@ mod scanner_test {
     let mut state = ParserStateStack::new();
     state.push_state(ParserState::InTemplateLiteral);
     init_scanner("abcdefg`", Some(state), |mut scanner| {
-      assert_eq!(scanner.next(), Token::Template);
+      assert_eq!(scanner.next(), Token::StringLiteral);
       let mut value = chars::to_utf8(scanner.current_literal_buffer());
       assert_eq!(&value, "abcdefg");
+      assert_eq!(scanner.next(), Token::Template);
     });
   }
 
@@ -392,9 +440,10 @@ mod scanner_test {
     let mut state = ParserStateStack::new();
     state.push_state(ParserState::InTemplateLiteral);
     init_scanner("abcdefg${`", Some(state), |mut scanner| {
-      assert_eq!(scanner.next(), Token::TemplateParts);
+      assert_eq!(scanner.next(), Token::StringLiteral);
       let mut value = chars::to_utf8(scanner.current_literal_buffer());
       assert_eq!(&value, "abcdefg");
+      assert_eq!(scanner.next(), Token::TemplateSubstitution);
     });
   }
 }

@@ -1,6 +1,8 @@
 #[macro_use]
 mod error_reporter;
 mod ast;
+#[macro_use]
+mod error_formatter;
 mod parser;
 mod parser_def;
 mod parser_state;
@@ -9,6 +11,7 @@ mod parser_test;
 mod scanner;
 #[cfg(test)]
 mod scanner_test;
+mod source;
 mod source_position;
 mod token;
 

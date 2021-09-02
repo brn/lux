@@ -3,12 +3,14 @@ mod parser_test {
   use super::super::ast::*;
   use super::super::error_reporter::*;
   use super::super::parser::*;
+  use super::super::source::*;
   use super::super::source_position::*;
   use super::super::token::Token;
   use super::*;
   use crate::context::*;
   use crate::utility::*;
   use paste::paste;
+  use std::rc::Rc;
 
   struct TestableAst {
     name: String,
@@ -164,12 +166,6 @@ mod parser_test {
     }};
   }
 
-  macro_rules! computed {
-    ($type:expr, $pos:expr, $prop:expr) => {{
-      ast_with_children!("PropertyAccessExpression", "property_access = element", $pos, $prop)
-    }};
-  }
-
   macro_rules! lit {
     ($attr:expr, $pos:expr) => {{
       ast!("Literal", $attr, $pos)
@@ -273,7 +269,8 @@ mod parser_test {
       }
       let str = format!("{}{}{};PARSER_SENTINEL", env.0.unwrap(), code, env.1);
       let context = LuxContext::new_until_internal_object_records();
-      let mut parser = Parser::new(context, &str);
+      let source = Rc::new(Source::new(context, "anonymouse", &str));
+      let mut parser = Parser::new(context, source);
       match parser.parse(ParserType::Script) {
         Ok(ast) => {
           let tree = ast.to_string_tree();
@@ -288,7 +285,7 @@ mod parser_test {
         Err(err) => {
           parser.print_stack_trace();
           println!("code is {}", str);
-          panic!(err);
+          panic!(err.error_message());
         }
       }
     }
@@ -305,7 +302,8 @@ mod parser_test {
       if env.0.is_some() {
         let str = format!("{}{}{};PARSER_SENTINEL", env.0.unwrap(), code, env.1);
         let context = LuxContext::new_until_internal_object_records();
-        let mut parser = Parser::new(context, &str);
+        let source = Rc::new(Source::new(context, "anonymouse", &str));
+        let mut parser = Parser::new(context, source);
         let ast = parser.parse(ParserType::Script);
         let m = format!("Code {} not generate error", code);
         if !ast.is_err() {
@@ -805,7 +803,7 @@ mod parser_test {
     syntax_error_test(
       &env,
       "'\\u0041_\\u0042_\\u043_\\u0044'",
-      &[&s_pos!(0, 20, 0, 0), &s_pos!(13, 33, 0, 0), &s_pos!(14, 34, 0, 0)],
+      &[&s_pos!(15, 21, 0, 0), &s_pos!(28, 34, 0, 0), &s_pos!(29, 35, 0, 0)],
       false,
     )
   }
@@ -1623,6 +1621,23 @@ mod parser_test {
   _make_assignment_test!(OpPowAssign);
 
   #[test]
+  fn identifier_reference_strict_mode_early_error_test() {
+    let env = [(None, ""), (Some("'use strict';"), ""), (None, "")];
+    syntax_error_test(
+      &env,
+      "eval = 1",
+      &[&s_pos!(0, 0, 0, 0), &s_pos!(13, 17, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
+    syntax_error_test(
+      &env,
+      "arguments = 1",
+      &[&s_pos!(0, 0, 0, 0), &s_pos!(13, 22, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    )
+  }
+
+  #[test]
   fn parser_parse_array_literal_test() {
     single_expression_test(
       |(col, line)| {
@@ -1709,6 +1724,62 @@ mod parser_test {
   }
 
   #[test]
+  fn parser_parse_array_assignment_pattern_with_nested_array() {
+    single_expression_test(
+      |(col, line)| {
+        return exprs!(
+          pos!(col, line),
+          binary!(
+            "OpAssign",
+            pos!(col + 1, line),
+            arraylit!(
+              false,
+              pos!(col + 1, line),
+              arraylit!(
+                false,
+                pos!(col + 2, line),
+                arraylit!(false, pos!(col + 3, line), ident!("a", pos!(col + 4, line)))
+              )
+            ),
+            ident!("y", pos!(col + 11, line))
+          )
+        );
+      },
+      "([[[a]]] = y)",
+    )
+  }
+
+  #[test]
+  fn parser_parse_array_assignment_pattern_with_spread() {
+    single_expression_test(
+      |(col, line)| {
+        return exprs!(
+          pos!(col, line),
+          binary!(
+            "OpAssign",
+            pos!(col + 1, line),
+            arraylit!(
+              false,
+              pos!(col + 1, line),
+              arraylit!(
+                false,
+                pos!(col + 2, line),
+                arraylit!(
+                  true,
+                  pos!(col + 3, line),
+                  unary!("Spread", "Pre", pos!(col + 4, line), ident!("a", pos!(col + 7, line)))
+                )
+              )
+            ),
+            ident!("y", pos!(col + 14, line))
+          )
+        );
+      },
+      "([[[...a]]] = y)",
+    )
+  }
+
+  #[test]
   fn parser_parse_object_literal() {
     single_expression_test(
       |(col, line)| {
@@ -1740,7 +1811,7 @@ mod parser_test {
   }
 
   #[test]
-  fn parser_parse_computed_object_literal() {
+  fn parser_parse_object_literal_computed_property() {
     single_expression_test(
       |(col, line)| {
         return exprs!(
@@ -1750,18 +1821,75 @@ mod parser_test {
             pos!(col + 1, line),
             object_props!(
               pos!(col + 2, line),
-              computed!("element", pos!(col + 2, line), ident!("a", pos!(col + 3, line))),
-              number!("1", pos!(col + 7, line))
+              str!("a", pos!(col + 3, line)),
+              number!("1", pos!(col + 9, line))
             ),
             object_props!(
-              pos!(col + 10, line),
-              ident!("b", pos!(col + 10, line)),
-              number!("2", pos!(col + 13, line))
+              pos!(col + 12, line),
+              ident!("b", pos!(col + 12, line)),
+              number!("2", pos!(col + 15, line))
             ),
           )
         );
       },
-      "({[a]: 1, b: 2})",
+      "({['a']: 1, b: 2})",
+    )
+  }
+
+  #[test]
+  fn parser_parse_object_literal_computed_property_2() {
+    single_expression_test(
+      |(col, line)| {
+        return exprs!(
+          pos!(col, line),
+          objectlit!(
+            ObjectLitType::NONE,
+            pos!(col + 1, line),
+            object_props!(
+              pos!(col + 2, line),
+              callexpr!(
+                "Expr",
+                pos!(col + 3, line),
+                ident!("a", pos!(col + 3, line)),
+                exprs!(pos!(col + 4, line))
+              ),
+              number!("1", pos!(col + 9, line))
+            ),
+            object_props!(
+              pos!(col + 12, line),
+              ident!("b", pos!(col + 12, line)),
+              number!("2", pos!(col + 15, line))
+            ),
+          )
+        );
+      },
+      "({[a()]: 1, b: 2})",
+    )
+  }
+
+  #[test]
+  fn parser_parse_object_literal_number_property() {
+    single_expression_test(
+      |(col, line)| {
+        return exprs!(
+          pos!(col, line),
+          objectlit!(
+            ObjectLitType::NONE,
+            pos!(col + 1, line),
+            object_props!(
+              pos!(col + 2, line),
+              number!("0", pos!(col + 2, line)),
+              number!("1", pos!(col + 5, line))
+            ),
+            object_props!(
+              pos!(col + 8, line),
+              number!("1", pos!(col + 8, line)),
+              number!("2", pos!(col + 11, line))
+            ),
+          )
+        );
+      },
+      "({0: 1, 1: 2})",
     )
   }
 

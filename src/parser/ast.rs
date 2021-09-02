@@ -7,10 +7,6 @@ use std::ops::{Deref, DerefMut};
 
 pub use std::convert::TryFrom;
 
-const EXPRESSION_BIT: usize = 1;
-const STATEMENT_BIT: usize = EXPRESSION_BIT + 1;
-const IS_VALID_LHS: usize = STATEMENT_BIT + 1;
-
 pub trait AstNode {
   fn is_expr(&self) -> bool;
   fn is_stmt(&self) -> bool {
@@ -22,15 +18,17 @@ pub trait AstNode {
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_positon: &RuntimeSourcePosition);
 }
 
+pub trait Is<T> {
+  fn is(value: T) -> bool;
+}
+
 #[derive(Copy, Clone)]
 pub struct AstMetadata {
-  flags: Bitset<u8>,
   source_position: RuntimeSourcePosition,
 }
 impl AstMetadata {
   fn new() -> Self {
     return AstMetadata {
-      flags: Bitset::<u8>::new(),
       source_position: RuntimeSourcePosition::new(0, 0),
     };
   }
@@ -58,12 +56,6 @@ pub trait AstMetaInfo {
   fn is_stmt(&self) -> bool {
     return !self.is_expr();
   }
-
-  fn is_valid_lhs(&self) -> bool;
-
-  fn set_valid_lhs(&mut self);
-
-  fn unset_valid_lhs(&mut self);
 
   fn set_source_position(&mut self, pos: &RuntimeSourcePosition) {
     (*self.source_position_mut()) = *pos;
@@ -152,30 +144,6 @@ macro_rules! _ast_enum {
           )*
         }
       }
-
-      fn is_valid_lhs(&self) -> bool {
-        return match self {
-          $(
-            &$name::$item(ref node) => node.is_valid_lhs(),
-          )*
-        }
-      }
-
-      fn set_valid_lhs(&mut self) {
-        match self {
-          $(
-            &mut $name::$item(ref mut node) => node.set_valid_lhs(),
-          )*
-        }
-      }
-
-      fn unset_valid_lhs(&mut self) {
-        match self {
-          $(
-            &mut $name::$item(ref mut node) => node.unset_valid_lhs(),
-          )*
-        }
-      }
     }
   }
 }
@@ -213,6 +181,7 @@ macro_rules! impl_expr {
 
       $to_string_tree
     }
+
     impl From<Node<$name>> for Expr {
       fn from(a: Node<$name>) -> Expr {
         return Expr::$name(a);
@@ -222,6 +191,24 @@ macro_rules! impl_expr {
     impl From<Node<$name>> for Ast {
       fn from(a: Node<$name>) -> Ast {
         return Ast::Expr(Expr::$name(a));
+      }
+    }
+
+    impl Is<Expr> for Node<$name> {
+      fn is(value: Expr) -> bool {
+        match value {
+          Expr::$name(_) => true,
+          _ => false
+        }
+      }
+    }
+
+    impl Is<Ast> for Node<$name> {
+      fn is(value: Ast) -> bool {
+        match value {
+          Ast::Expr(expr) => Node::<$name>::is(expr),
+          _ => false
+        }
       }
     }
 
@@ -304,6 +291,24 @@ macro_rules! impl_stmt {
       }
     }
 
+    impl Is<Stmt> for Node<$name> {
+      fn is(value: Stmt) -> bool {
+        match value {
+          Stmt::$name(_) => true,
+          _ => false
+        }
+      }
+    }
+
+    impl Is<Ast> for Node<$name> {
+      fn is(value: Ast) -> bool {
+        match value {
+          Ast::Stmt(stmt) => Node::<$name>::is(stmt),
+          _ => false
+        }
+      }
+    }
+
     impl TryFrom<Ast> for Node<$name> {
       type Error = ();
       fn try_from(a: Ast) -> Result<Node<$name>, ()> {
@@ -322,6 +327,7 @@ pub enum Ast {
   Expr(Expr),
   Stmt(Stmt),
 }
+
 impl AstStringifyInternal for Ast {
   fn to_string_internal(&self, indent: &mut String, result: &mut String) {
     return match self {
@@ -373,27 +379,6 @@ impl AstMetaInfo for Ast {
     return match self {
       &Ast::Expr(_) => true,
       &Ast::Stmt(_) => false,
-    };
-  }
-
-  fn is_valid_lhs(&self) -> bool {
-    return match self {
-      &Ast::Expr(ref expr) => expr.is_valid_lhs(),
-      &Ast::Stmt(_) => false,
-    };
-  }
-
-  fn set_valid_lhs(&mut self) {
-    match self {
-      &mut Ast::Expr(ref mut expr) => expr.set_valid_lhs(),
-      _ => {}
-    };
-  }
-
-  fn unset_valid_lhs(&mut self) {
-    match self {
-      &mut Ast::Expr(ref mut expr) => expr.unset_valid_lhs(),
-      _ => {}
     };
   }
 }
@@ -505,18 +490,6 @@ impl<T: AstNode> AstMetaInfo for Node<T> {
 
   fn is_expr(&self) -> bool {
     return self.0.as_ref().kind.is_expr();
-  }
-
-  fn is_valid_lhs(&self) -> bool {
-    return self.0.as_ref().meta.flags.get(IS_VALID_LHS);
-  }
-
-  fn set_valid_lhs(&mut self) {
-    self.0.as_mut().meta.flags.set(IS_VALID_LHS);
-  }
-
-  fn unset_valid_lhs(&mut self) {
-    self.0.as_mut().meta.flags.unset(IS_VALID_LHS);
   }
 }
 impl<T: AstNode> Deref for Node<T> {
@@ -1184,19 +1157,23 @@ impl Elision {
   }
 }
 
-pub enum StructuralLiteralType {
-  Array = 1,
-  Object,
+bitflags! {
+  pub struct StructuralLiteralFlags: u8 {
+    const ARRAY = 1;
+    const OBJECT = 2;
+    const VALID_PATTERN = 4;
+    const VALID_VALUE = 8;
+    const HAS_ACCESSOR = 16;
+    const HAS_GENERATOR = 32;
+    const HAS_SPREAD = 64;
+  }
 }
 
-pub enum StructuralLiteralTrait {
-  HasAccessor = 3,
-  HasGenerator,
-  HasSpread,
-}
-
+#[derive(Property)]
 pub struct StructuralLiteral {
-  flag: Bitset<u8>,
+  flag: StructuralLiteralFlags,
+
+  #[property(get(type = "ref"))]
   properties: Vec<Expr>,
 }
 impl_expr!(
@@ -1238,11 +1215,11 @@ impl NodeCollection<Expr> for StructuralLiteral {
 
 impl StructuralLiteral {
   #[inline]
-  pub fn new(region: &mut Region, literal_type: StructuralLiteralType) -> Node<StructuralLiteral> {
+  pub fn new(region: &mut Region, literal_flag: StructuralLiteralFlags) -> Node<StructuralLiteral> {
     return Node::<StructuralLiteral>::new(
       region,
       StructuralLiteral {
-        flag: Bitset::<u8>::with(literal_type as u8),
+        flag: StructuralLiteralFlags::VALID_VALUE | StructuralLiteralFlags::VALID_PATTERN | literal_flag,
         properties: Vec::new(),
       },
     );
@@ -1250,42 +1227,70 @@ impl StructuralLiteral {
 
   #[inline(always)]
   pub fn is_array_literal(&self) -> bool {
-    return self.flag.get(StructuralLiteralType::Array as usize);
+    return self.flag.contains(StructuralLiteralFlags::ARRAY);
   }
 
   #[inline(always)]
   pub fn is_object_literal(&self) -> bool {
-    return self.flag.get(StructuralLiteralType::Object as usize);
+    return self.flag.contains(StructuralLiteralFlags::OBJECT);
+  }
+
+  #[inline(always)]
+  pub fn is_valid_pattern(&self) -> bool {
+    return self.flag.contains(StructuralLiteralFlags::VALID_PATTERN);
+  }
+
+  #[inline(always)]
+  pub fn set_valid_pattern(&mut self, is_valid_pattern: bool) {
+    if is_valid_pattern {
+      self.flag |= StructuralLiteralFlags::VALID_PATTERN;
+    } else {
+      self.flag -= StructuralLiteralFlags::VALID_PATTERN;
+    }
+  }
+
+  #[inline(always)]
+  pub fn is_valid_value(&self) -> bool {
+    return self.flag.contains(StructuralLiteralFlags::VALID_VALUE);
+  }
+
+  #[inline(always)]
+  pub fn set_valid_value(&mut self, is_valid_value: bool) {
+    if is_valid_value {
+      self.flag |= StructuralLiteralFlags::VALID_VALUE;
+    } else {
+      self.flag -= StructuralLiteralFlags::VALID_VALUE;
+    }
   }
 
   #[inline(always)]
   pub fn set_accessor(&mut self) {
-    return self.flag.set(StructuralLiteralTrait::HasAccessor as usize);
+    self.flag |= StructuralLiteralFlags::HAS_ACCESSOR;
   }
 
   #[inline(always)]
   pub fn has_accessor(&self) -> bool {
-    return self.flag.get(StructuralLiteralTrait::HasAccessor as usize);
+    return self.flag.contains(StructuralLiteralFlags::HAS_ACCESSOR);
   }
 
   #[inline(always)]
   pub fn set_generator(&mut self) {
-    return self.flag.set(StructuralLiteralTrait::HasGenerator as usize);
+    self.flag |= StructuralLiteralFlags::HAS_GENERATOR;
   }
 
   #[inline(always)]
   pub fn has_generator(&self) -> bool {
-    return self.flag.get(StructuralLiteralTrait::HasGenerator as usize);
+    return self.flag.contains(StructuralLiteralFlags::HAS_GENERATOR);
   }
 
   #[inline(always)]
   pub fn set_spread(&mut self) {
-    return self.flag.set(StructuralLiteralTrait::HasSpread as usize);
+    self.flag |= StructuralLiteralFlags::HAS_SPREAD;
   }
 
   #[inline(always)]
   pub fn has_spread(&self) -> bool {
-    return self.flag.get(StructuralLiteralTrait::HasSpread as usize);
+    return self.flag.contains(StructuralLiteralFlags::HAS_SPREAD);
   }
 }
 

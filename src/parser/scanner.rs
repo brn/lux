@@ -1,7 +1,9 @@
 use super::super::structs::{FixedU16CodePointArray, FixedU16CodePointArrayIterator};
 use super::super::unicode::chars;
+use super::error_formatter::*;
 use super::error_reporter::*;
 use super::parser_state::{ParserState, ParserStateStack};
+use super::source::Source;
 use super::source_position::SourcePosition;
 use super::token::Token;
 use crate::utility::*;
@@ -10,6 +12,7 @@ use std::cmp::{Eq, PartialEq};
 use std::iter::Peekable;
 use std::marker::PhantomPinned;
 use std::pin::Pin;
+use std::rc::Rc;
 use std::vec::Vec;
 
 enum ScannerState {
@@ -175,7 +178,7 @@ pub struct Scanner {
   token: Token,
   lookahead_token: Token,
   iter: SourceCursor,
-  source: FixedU16CodePointArray,
+  source: Rc<Source>,
 
   numeric_value: [f64; 2],
 
@@ -207,15 +210,15 @@ impl ReportSyntaxError for Scanner {
 
 impl Scanner {
   pub fn new(
-    source: FixedU16CodePointArray,
+    source: Rc<Source>,
     parser_state_stack: Exotic<ParserStateStack>,
     error_reporter: Exotic<ErrorReporter>,
   ) -> Scanner {
     let mut scanner = Scanner {
       token: Token::Invalid,
       lookahead_token: Token::Invalid,
-      source,
-      iter: SourceCursor::new(source),
+      source: source.clone(),
+      iter: SourceCursor::new(source.source_code()),
 
       literal_buffer: [Vec::<u16>::new(), Vec::<u16>::new()],
 
@@ -311,6 +314,10 @@ impl Scanner {
     self.lookahead_token = Token::Invalid;
   }
 
+  fn record_position(&mut self) -> SourcePosition {
+    return self.current_position().clone();
+  }
+
   pub fn next(&mut self) -> Token {
     self.mode = Mode::Current;
     if !self.has_more() {
@@ -378,12 +385,12 @@ impl Scanner {
         if let Ok(hex) = chars::to_hex(*self.iter) {
           ret = ret * 16 + hex;
         } else {
-          report_syntax_error!(self, "Unrecognized hex token", Err(()));
+          return Err(());
         }
         self.advance();
       }
       if self.iter.as_char() != '}' {
-        report_syntax_error!(noreturn self, "'}' expected");
+        return Err(());
       } else {
         self.advance();
       }
@@ -392,7 +399,7 @@ impl Scanner {
         if let Ok(hex) = chars::to_hex(*self.iter) {
           ret = ret * 16 + hex;
         } else {
-          report_syntax_error!(self, "Unrecognized hex token", Err(()));
+          return Err(());
         }
         self.advance();
       }
@@ -797,6 +804,7 @@ impl Scanner {
           if !is_escaped {
             if let Some(lookahead) = self.iter.peek() {
               if chars::is_start_escape_sequence(lookahead) {
+                let escape_sequence_start_pos = self.record_position();
                 if let Ok(ret) = self.decode_escape_sequence() {
                   if let Ok((hi, low)) = chars::uc32_to_uc16(ret) {
                     self.current_literal_buffer_mut().push(hi);
@@ -804,17 +812,34 @@ impl Scanner {
                       self.current_literal_buffer_mut().push(low);
                     }
                   } else {
-                    report_syntax_error!(self, "Invalid unicode escape sequence found", Token::Invalid);
+                    report_error!(
+                      self,
+                      "Invalid escape sequence",
+                      &pos_range!(escape_sequence_start_pos, self.current_position()),
+                      Token::Invalid
+                    );
                   }
                 } else {
-                  report_syntax_error!(self, "Invalid unicode escape sequence found", Token::Invalid);
+                  report_error!(
+                    self,
+                    "Invalid escape sequence",
+                    &pos_range!(escape_sequence_start_pos, self.current_position()),
+                    Token::Invalid
+                  );
                 }
               } else {
                 is_escaped = true;
                 self.advance();
               }
             } else {
-              report_syntax_error!(self, "Unterminated string literal", Token::Invalid);
+              let start = self.record_position();
+              self.advance();
+              report_error!(
+                self,
+                "Unterminated string literal",
+                &pos_range!(start, start),
+                Token::Invalid
+              );
             }
           } else {
             self.advance_and_push_buffer();
@@ -822,12 +847,19 @@ impl Scanner {
           }
         }
         INVALID_CHAR => {
-          report_syntax_error!(self, "Unexpected token found", Token::Invalid);
+          report_error!(self, "Unexpected token found", self.source_position(), Token::Invalid);
         }
         _ => {
           if chars::is_cr_or_lf(*self.iter) {
             if !is_escaped {
-              report_syntax_error!(self, "Unterminated string literal", Token::Invalid);
+              let start = self.record_position();
+              self.advance();
+              report_error!(
+                self,
+                "Unterminated string literal",
+                &pos_range!(start, start),
+                Token::Invalid
+              );
             }
             self.collect_line_break();
             continue;
@@ -846,7 +878,12 @@ impl Scanner {
         }
       }
     }
-    report_syntax_error!(self, "Unterminated string literal", Token::Invalid);
+    report_error!(
+      self,
+      "Unterminated string literal",
+      self.current_position(),
+      Token::Invalid
+    );
   }
 
   fn tokenize_identifier(&mut self) -> Token {
@@ -858,11 +895,17 @@ impl Scanner {
         self.advance();
         let unicode_keyword = self.iter.uc32();
         if !unicode_keyword.is_surrogate_pair() && chars::ch(unicode_keyword.code() as u16) == 'u' {
+          let before_decode_pos = self.record_position();
           self.advance();
           if let Ok(u) = self.decode_hex_escape(4) {
             if !chars::is_identifier_continue(u, false) {
               self.current_literal_buffer_mut().clear();
-              report_syntax_error!(self, "Invalid unicode escape sequence", Token::Invalid);
+              report_error!(
+                self,
+                "Invalid unicode escape sequence",
+                &pos_range!(before_decode_pos, self.current_position()),
+                Token::Invalid
+              );
             }
             if let Ok((hi, low)) = chars::uc32_to_uc16(u) {
               self.current_literal_buffer_mut().push(hi);
@@ -870,11 +913,21 @@ impl Scanner {
                 self.current_literal_buffer_mut().push(low);
               }
             } else {
-              report_syntax_error!(self, "Invalid unicode escape sequence", Token::Invalid);
+              report_error!(
+                self,
+                "Invalid unicode escape sequence",
+                &pos_range!(before_decode_pos, self.current_position()),
+                Token::Invalid
+              );
             }
           } else {
             self.current_literal_buffer_mut().clear();
-            report_syntax_error!(self, "Invalid unicode escape sequence", Token::Invalid);
+            report_error!(
+              self,
+              "Invalid unicode escape sequence",
+              &pos_range!(before_decode_pos, self.current_position()),
+              Token::Invalid
+            );
           }
         } else {
           self.advance_and_push_buffer();
@@ -892,7 +945,7 @@ impl Scanner {
     use Token::*;
     let buf = self.current_literal_buffer();
     if buf.len() == 0 {
-      report_syntax_error!(self, "Unexpected end of input", Token::Invalid);
+      report_error!(self, "Unexpected end of input", self.source_position(), Token::Invalid);
     }
     if buf.len() < 2 || buf.len() > 10 {
       return Token::Identifier;
@@ -1017,13 +1070,18 @@ impl Scanner {
     let err = result.unwrap_err();
     match err {
       chars::NumericConvertionError::UnexpectedTokenFound | chars::NumericConvertionError::NotANumber => {
-        report_syntax_error!(self, "Unexpected token found", Token::Invalid);
+        report_error!(self, "Unexpected token found", self.source_position(), Token::Invalid);
       }
       chars::NumericConvertionError::ExponentsExpectedNumber => {
-        report_syntax_error!(self, "Number expected after exponents", Token::Invalid);
+        report_error!(
+          self,
+          "Number expected after exponents",
+          self.source_position(),
+          Token::Invalid
+        );
       }
       chars::NumericConvertionError::UnexpectedEndOfInput => {
-        report_syntax_error!(self, "Unexpected end of input", Token::Invalid);
+        report_error!(self, "Unexpected end of input", self.source_position(), Token::Invalid);
       }
     };
   }
@@ -1046,7 +1104,7 @@ impl Scanner {
         }
         self.advance();
       } else {
-        report_syntax_error!(self, "Unexpected end of input", Token::Invalid);
+        report_error!(self, "Unexpected end of input", self.source_position(), Token::Invalid);
       }
     }
   }
@@ -1063,6 +1121,7 @@ impl Scanner {
           let mut value = *self.iter;
           if !is_escaped {
             if let Some(lookahead) = self.iter.peek() {
+              let escape_sequence_start_pos = self.record_position();
               if chars::is_start_escape_sequence(lookahead) {
                 if let Ok(ret) = self.decode_hex_escape(4) {
                   if let Ok((hi, low)) = chars::uc32_to_uc16(ret) {
@@ -1071,17 +1130,32 @@ impl Scanner {
                       self.current_literal_buffer_mut().push(low);
                     }
                   } else {
-                    report_syntax_error!(self, "Invalid unicode escape sequence found.", Token::Invalid);
+                    report_error!(
+                      self,
+                      "Invalid unicode escape sequence",
+                      &pos_range!(escape_sequence_start_pos, self.current_position()),
+                      Token::Invalid
+                    );
                   }
                 } else {
-                  report_syntax_error!(self, "Invalid unicode escape sequence found.", Token::Invalid);
+                  report_error!(
+                    self,
+                    "Invalid unicode escape sequence",
+                    &pos_range!(escape_sequence_start_pos, self.current_position()),
+                    Token::Invalid
+                  );
                 }
               } else {
                 is_escaped = true;
                 self.advance();
               }
             } else {
-              report_syntax_error!(self, "Unexpected end of input.", Token::Invalid);
+              report_error!(
+                self,
+                "Unexpected end of input.",
+                self.current_position(),
+                Token::Invalid
+              );
             }
           } else {
             is_escaped = !is_escaped;
@@ -1099,7 +1173,12 @@ impl Scanner {
                 return Token::TemplateSubstitution;
               }
             } else {
-              report_syntax_error!(self, "Unexpected end of input.", Token::Invalid);
+              report_error!(
+                self,
+                "Unexpected end of input.",
+                self.current_position(),
+                Token::Invalid
+              );
             }
           } else {
             is_escaped = false;
@@ -1139,7 +1218,12 @@ impl Scanner {
       }
     }
 
-    report_syntax_error!(self, "Unterminated template literal.", Token::Invalid);
+    report_error!(
+      self,
+      "Unterminated template literal.",
+      self.source_position(),
+      Token::Invalid
+    );
   }
 
   fn collect_line_break(&mut self) {

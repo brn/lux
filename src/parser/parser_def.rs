@@ -1,8 +1,9 @@
 use super::ast::*;
+use super::error_reporter::ErrorDescriptor;
 use super::source_position::{RuntimeSourcePosition, SourcePosition};
 use super::token::*;
 
-pub type ParseResult<T> = Result<T, String>;
+pub type ParseResult<T> = Result<T, ErrorDescriptor>;
 
 bitflags! {
   pub struct ParserConstraints: u8 {
@@ -78,7 +79,10 @@ pub trait ParserDef {
   fn parse_element_list(&mut self) -> ParseResult<Expr>;
   fn parse_spread_element(&mut self) -> ParseResult<Expr>;
   fn parse_object_literal(&mut self, constraints: ParserConstraints) -> ParseResult<Expr>;
-  fn parse_object_literal_property(&mut self, constraints: ParserConstraints) -> ParseResult<Expr>;
+  fn parse_object_literal_property(
+    &mut self,
+    constraints: ParserConstraints,
+  ) -> ParseResult<Node<ObjectPropertyExpression>>;
   fn parse_property_name(&mut self) -> ParseResult<Expr>;
   fn parse_template_literal(&mut self) -> ParseResult<Expr>;
   fn parse_cover_parenthesized_expression_and_arrow_parameter_list(&mut self) -> ParseResult<Expr>;
@@ -168,7 +172,7 @@ pub trait ParserDef {
   fn parse_arrow_function(&mut self, is_async: bool) -> ParseResult<Expr>;
   fn parse_arrow_parameter(&mut self) -> ParseResult<Expr>;
   fn parse_concise_body(&mut self, is_async: bool, args: Expr) -> ParseResult<Expr>;
-  fn parse_method_definition(&mut self) -> ParseResult<Expr>;
+  fn parse_method_definition(&mut self) -> ParseResult<Node<ObjectPropertyExpression>>;
   fn parse_property_set_parameter_list(&mut self) -> ParseResult<Expr>;
   fn parse_generator_method(&mut self) -> ParseResult<Expr>;
   fn parse_generator_declaration(&mut self) -> ParseResult<Stmt>;
