@@ -1,4 +1,6 @@
+use super::scope::Scope;
 use super::source_position::RuntimeSourcePosition;
+use super::source_position::*;
 use super::token::Token;
 use crate::property::Property;
 use crate::structs::{FixedU16CodePointArray, Repr};
@@ -573,7 +575,8 @@ pub trait NodeCollection<T> {
 bitflags! {
   pub struct ExpressionsType: u8 {
     const None = 0;
-    const Arguments = 1;
+    const UniqueParameters = 1;
+    const Parameters = 2;
   }
 }
 
@@ -605,12 +608,16 @@ impl Expressions {
     );
   }
 
-  pub fn mark_as_arguments(&mut self) {
-    self.expr_type |= ExpressionsType::Arguments;
+  pub fn set_exprs_type(&mut self, exprs_type: ExpressionsType) {
+    self.expr_type |= exprs_type;
   }
 
-  pub fn is_arguments(&self) -> bool {
-    return self.expr_type.contains(ExpressionsType::Arguments);
+  pub fn is_parameters(&self) -> bool {
+    return self.expr_type.contains(ExpressionsType::Parameters);
+  }
+
+  pub fn is_unique_parameters(&self) -> bool {
+    return self.expr_type.contains(ExpressionsType::UniqueParameters);
   }
 }
 
@@ -1034,12 +1041,15 @@ pub struct FunctionExpression {
 
   #[property(get(type = "copy"))]
   function_body: Ast,
+
+  #[property(get(type = "copy"))]
+  scope: Exotic<Scope>,
 }
 impl_expr!(
   FunctionExpression,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
-      "{}[FunctionExpression type = {}{} {}]\n",
+      "{}[FunctionExpression type = {}{} {:?} {}]\n",
       indent,
       if self.is_arrow_function() {
         "ArrowFunction"
@@ -1049,7 +1059,8 @@ impl_expr!(
         "Function"
       },
       if self.is_async { " async = true" } else { "" },
-      source_position.to_string()
+      *self.scope,
+      source_position.to_string(),
     );
     result.push_str(&str);
   },
@@ -1070,6 +1081,7 @@ impl FunctionExpression {
     is_async: bool,
     name: Option<Node<Literal>>,
     function_type: FunctionType,
+    scope: Exotic<Scope>,
     accessor: FunctionAccessor,
     formal_parameters: Node<Expressions>,
     function_body: Ast,
@@ -1079,6 +1091,7 @@ impl FunctionExpression {
       FunctionExpression {
         name,
         is_async,
+        scope,
         function_type,
         accessor,
         formal_parameters,
@@ -1108,6 +1121,9 @@ pub struct ObjectPropertyExpression {
 
   #[property(get(type = "copy"))]
   init: Option<Expr>,
+
+  #[property(skip)]
+  object_property_name_initializer_position: Option<SourcePosition>,
 }
 impl_expr!(
   ObjectPropertyExpression,
@@ -1135,7 +1151,25 @@ impl ObjectPropertyExpression {
     value: Option<Expr>,
     init: Option<Expr>,
   ) -> Node<ObjectPropertyExpression> {
-    return Node::new(region, ObjectPropertyExpression { key, value, init });
+    return Node::new(
+      region,
+      ObjectPropertyExpression {
+        key,
+        value,
+        init,
+        object_property_name_initializer_position: None,
+      },
+    );
+  }
+
+  #[inline(always)]
+  pub fn set_object_property_name_initializer_position(&mut self, pos: &SourcePosition) {
+    self.object_property_name_initializer_position = Some(pos.clone());
+  }
+
+  #[inline(always)]
+  pub fn object_property_name_initializer_position(&self) -> Option<&SourcePosition> {
+    return self.object_property_name_initializer_position.as_ref();
   }
 }
 
@@ -1171,7 +1205,11 @@ bitflags! {
 
 #[derive(Property)]
 pub struct StructuralLiteral {
+  #[property(skip)]
   flag: StructuralLiteralFlags,
+
+  #[property(skip)]
+  first_object_property_name_initializer_position: Option<SourcePosition>,
 
   #[property(get(type = "ref"))]
   properties: Vec<Expr>,
@@ -1220,9 +1258,20 @@ impl StructuralLiteral {
       region,
       StructuralLiteral {
         flag: StructuralLiteralFlags::VALID_VALUE | StructuralLiteralFlags::VALID_PATTERN | literal_flag,
+        first_object_property_name_initializer_position: None,
         properties: Vec::new(),
       },
     );
+  }
+
+  #[inline(always)]
+  pub fn set_first_object_property_name_initializer_position(&mut self, pos: &SourcePosition) {
+    self.first_object_property_name_initializer_position = Some(pos.clone());
+  }
+
+  #[inline(always)]
+  pub fn first_object_property_name_initializer_position(&self) -> Option<&SourcePosition> {
+    return self.first_object_property_name_initializer_position.as_ref();
   }
 
   #[inline(always)]

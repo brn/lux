@@ -31,6 +31,7 @@ default = []
 nogc = []
 debug = []
 print_ast = []
+print_ast_when_called = []
 
 [[bench]]
 name = "hashmap_benchmark"

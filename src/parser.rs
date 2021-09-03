@@ -11,6 +11,7 @@ mod parser_test;
 mod scanner;
 #[cfg(test)]
 mod scanner_test;
+mod scope;
 mod source;
 mod source_position;
 mod token;

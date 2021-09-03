@@ -10,6 +10,12 @@ impl<T> Clone for Exotic<T> {
   }
 }
 
+impl<T> std::cmp::PartialEq for Exotic<T> {
+  fn eq(&self, other: &Exotic<T>) -> bool {
+    return other.0 == self.0;
+  }
+}
+impl<T> std::cmp::Eq for Exotic<T> {}
 impl<T> std::ops::Deref for Exotic<T> {
   type Target = T;
   #[inline(always)]

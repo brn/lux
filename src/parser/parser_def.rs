@@ -1,5 +1,6 @@
 use super::ast::*;
 use super::error_reporter::ErrorDescriptor;
+use super::scope::*;
 use super::source_position::{RuntimeSourcePosition, SourcePosition};
 use super::token::*;
 use crate::utility::Exotic;
@@ -13,6 +14,7 @@ bitflags! {
     const Call = 2;
     const BindingPattern = 4;
     const Initializer = 8;
+    const KeywordIdentifier = 16;
   }
 }
 
@@ -65,14 +67,18 @@ impl ParserConstraints {
   pub fn is_initializer_allowed(&self) -> bool {
     return self.contains(ParserConstraints::Initializer);
   }
+
+  pub fn is_keyword_identifier_allowed(&self) -> bool {
+    return self.contains(ParserConstraints::KeywordIdentifier);
+  }
 }
 
 pub trait ParserDef {
-  fn parse_directive_prologue(&mut self);
+  fn parse_directive_prologue(&mut self, scope: Exotic<Scope>);
   fn parse_program(&mut self);
   fn parse_terminator<T>(&mut self, expr: T) -> ParseResult<T>;
-  fn parse_identifier(&mut self) -> ParseResult<Expr>;
-  fn parse_identifier_reference(&mut self) -> ParseResult<Expr>;
+  fn parse_identifier(&mut self, constraints: ParserConstraints) -> ParseResult<Expr>;
+  fn parse_identifier_reference(&mut self, constraints: ParserConstraints) -> ParseResult<Expr>;
   fn parse_primary_expression(&mut self) -> ParseResult<Expr>;
   fn parse_literal(&mut self) -> ParseResult<Expr>;
   fn parse_regular_expression(&mut self) -> ParseResult<Expr>;

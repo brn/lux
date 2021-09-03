@@ -172,10 +172,10 @@ macro_rules! report_error {
 
 #[cfg(not(debug_assertions))]
 macro_rules! parse_error {
-  ($message:expr, $pos:expr) => {{
+  ($region:expr, $message:expr, $pos:expr) => {{
     let pos = $pos;
     let message = $message;
-    let mut e = ErrorDescriptor::new($pos);
+    let mut e = $region.alloc(ErrorDescriptor::new($pos));
     e.append_message(message);
     Err(e)
   }};
