@@ -1,8 +1,11 @@
 use super::exotic::Exotic;
 use crate::def::*;
 use std::alloc::{alloc, dealloc, Layout};
+use std::cell::RefCell;
 use std::marker::PhantomData;
+use std::ops::{Deref, DerefMut};
 use std::ptr;
+use std::rc::Rc;
 
 const BLOCK_SIZE: usize = kb!(1);
 const IDEAL_STORABLE_OBJECT_COUNT: usize = 20;
@@ -80,7 +83,7 @@ pub struct RegionalAllocator {
 }
 
 impl RegionalAllocator {
-  pub fn new() -> RegionalAllocator {
+  fn new() -> RegionalAllocator {
     let tmp_block = Block::new(BLOCK_SIZE);
     let leak = Box::leak(tmp_block);
     return RegionalAllocator {
@@ -105,7 +108,7 @@ impl RegionalAllocator {
     return self.alloc(object);
   }
 
-  pub fn grow(&mut self, failed_size: usize) {
+  fn grow(&mut self, failed_size: usize) {
     let new_block = Block::new(if failed_size < BLOCK_SIZE {
       if self.alloc_count > (IDEAL_STORABLE_OBJECT_COUNT as u64) {
         ((self.sum_size / (self.alloc_count as f64)) as usize) * IDEAL_STORABLE_OBJECT_COUNT
@@ -121,15 +124,15 @@ impl RegionalAllocator {
   }
 }
 
-pub struct Region(RegionalAllocator);
-
+#[derive(Clone)]
+pub struct Region(Rc<RefCell<RegionalAllocator>>);
 impl Region {
   pub fn new() -> Self {
-    return Region(RegionalAllocator::new());
+    return Region(Rc::new(RefCell::new(RegionalAllocator::new())));
   }
 
   pub fn alloc<O>(&mut self, object: O) -> Exotic<O> {
-    return Exotic::new(self.0.alloc(object));
+    return Exotic::new(self.0.borrow_mut().alloc(object));
   }
 }
 

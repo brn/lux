@@ -9,7 +9,7 @@ mod scanner_test {
   use crate::context::LuxContext;
   use crate::structs::FixedU16CodePointArray;
   use crate::unicode::chars;
-  use crate::utility::Exotic;
+  use crate::utility::*;
   use itertools::Itertools;
   use std::char::decode_utf16;
   use std::rc::Rc;
@@ -26,9 +26,9 @@ mod scanner_test {
     } else {
       ParserStateStack::new()
     });
-    let source = Rc::new(Source::new(context, "anonymouse", &source));
+    let source = Source::new(context, "anonymouse", &source);
     let error_reporter = Exotic::from(Box::new(ErrorReporter::new(source.clone())));
-    let mut scanner = Scanner::new(source.clone(), parser_state_stack.into(), error_reporter);
+    let mut scanner = Scanner::new(Region::new(), source.clone(), parser_state_stack.into(), error_reporter);
     return cb(scanner);
   }
 

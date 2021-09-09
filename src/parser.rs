@@ -15,6 +15,10 @@ mod scope;
 mod source;
 mod source_position;
 mod token;
+#[macro_use]
+mod node_ops;
+mod ast_builder;
+mod skip_tree_builder;
 
 pub use parser::*;
 pub use source_position::*;

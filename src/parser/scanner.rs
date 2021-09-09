@@ -174,7 +174,7 @@ pub struct Scanner {
   lookahead_token: Token,
   iter: SourceCursor,
   region: Region,
-  source: Rc<Source>,
+  source: Source,
   contextual_keywords: [Token; 2],
 
   numeric_value: [f64; 2],
@@ -207,14 +207,15 @@ impl ReportSyntaxError for Scanner {
 
 impl Scanner {
   pub fn new(
-    source: Rc<Source>,
+    region: Region,
+    source: Source,
     parser_state_stack: Exotic<ParserStateStack>,
     error_reporter: Exotic<ErrorReporter>,
   ) -> Scanner {
     let mut scanner = Scanner {
       token: Token::Invalid,
       lookahead_token: Token::Invalid,
-      region: Region::new(),
+      region: region.clone(),
       source: source.clone(),
       iter: SourceCursor::new(source.source_code()),
       contextual_keywords: [Token::Invalid, Token::Invalid],

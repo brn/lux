@@ -37,7 +37,7 @@ pub struct Scope {
 }
 
 impl Scope {
-  pub fn new(region: &mut Region, scope_flag: ScopeFlag) -> Exotic<Self> {
+  pub fn new(mut region: Region, scope_flag: ScopeFlag) -> Exotic<Self> {
     return region.alloc(Scope {
       scope_flag,
       children: Vec::new(),
@@ -49,7 +49,9 @@ impl Scope {
   }
 
   pub fn set_first_super_call_position(&mut self, pos: &SourcePosition) {
-    self.first_super_call_position = Some(pos.clone());
+    if self.first_super_call_position.is_none() {
+      self.first_super_call_position = Some(pos.clone());
+    }
   }
 
   pub fn first_super_call_position(&mut self) -> Option<&SourcePosition> {

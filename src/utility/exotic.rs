@@ -52,6 +52,11 @@ impl<T> Exotic<T> {
   }
 
   #[inline]
+  pub fn from_self(r: &T) -> Exotic<T> {
+    return Exotic((r as *const T) as usize, PhantomData);
+  }
+
+  #[inline]
   pub fn to_box(&self) -> Result<Box<T>, &'static str> {
     if self.0 & 1 == 1 {
       return unsafe { Ok(Box::from_raw((self.0 & !1_usize) as *mut T)) };

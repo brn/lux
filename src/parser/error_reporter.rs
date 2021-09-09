@@ -4,7 +4,6 @@ use super::source_position::SourcePosition;
 use crate::utility::Exotic;
 use property::Property;
 use std::boxed::Box;
-use std::rc::Rc;
 use std::vec::Vec;
 
 #[derive(Clone, Property)]
@@ -16,7 +15,7 @@ pub struct ErrorDescriptor {
   #[property(get(type = "ref"))]
   source_position: SourcePosition,
   #[property(get(type = "ref"), set(type = "ref"))]
-  source: Option<Rc<Source>>,
+  source: Option<Source>,
 }
 
 impl ErrorDescriptor {
@@ -72,11 +71,11 @@ pub struct ErrorReporter {
   #[property(get(type = "ref"))]
   pending_errors: Vec<Exotic<ErrorDescriptor>>,
 
-  source: Rc<Source>,
+  source: Source,
 }
 
 impl ErrorReporter {
-  pub fn new(source: Rc<Source>) -> ErrorReporter {
+  pub fn new(source: Source) -> ErrorReporter {
     return ErrorReporter {
       pending_errors: Vec::new(),
       source,
@@ -148,12 +147,15 @@ macro_rules! report_error {
 #[cfg(debug_assertions)]
 macro_rules! parse_error {
   ($region:expr, $message:expr, $pos:expr) => {{
+    Err(parse_error!(@raw, $region, $message, $pos))
+  }};
+  (@raw, $region:expr, $message:expr, $pos:expr) => {{
     debug_log!("===SYNTAX ERROR FOUND===");
     let pos = $pos;
     let message = $message;
     let mut e = $region.alloc(ErrorDescriptor::new($pos));
     e.append_message(&format!("[Debug] line: {}\n{}", line!(), message));
-    Err(e)
+    e
   }};
 }
 
@@ -173,10 +175,13 @@ macro_rules! report_error {
 #[cfg(not(debug_assertions))]
 macro_rules! parse_error {
   ($region:expr, $message:expr, $pos:expr) => {{
+    Err(parse_error!(@raw, $region, $message, $pos))
+  }};
+  (@raw, $region:expr, $message:expr, $pos:expr) => {{
     let pos = $pos;
     let message = $message;
     let mut e = $region.alloc(ErrorDescriptor::new($pos));
     e.append_message(message);
-    Err(e)
+    e
   }};
 }

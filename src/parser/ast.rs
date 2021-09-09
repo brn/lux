@@ -170,6 +170,7 @@ _ast_enum! {
     NewExpression(Node<NewExpression>),
     TemplateLiteral(Node<TemplateLiteral>),
     ClassExpression(Node<ClassExpression>),
+    SkipExpr(Node<SkipExpr>),
   }
 }
 macro_rules! impl_expr {
@@ -255,6 +256,7 @@ _ast_enum! {
     LabelledStatement(Node<LabelledStatement>),
     WithStatement(Node<WithStatement>),
     VariableDeclaration(Node<VariableDeclaration>),
+    SkipStmt(Node<SkipStmt>),
   }
 }
 macro_rules! impl_stmt_conv {
@@ -598,12 +600,12 @@ impl_expr!(
 
 impl Expressions {
   #[inline]
-  pub fn new(region: &mut Region) -> Node<Expressions> {
+  pub fn new(region: &mut Region, items: Vec<Expr>) -> Node<Expressions> {
     return Node::<Expressions>::new(
       region,
       Expressions {
         expr_type: ExpressionsType::None,
-        items: Vec::<Expr>::new(),
+        items,
       },
     );
   }
@@ -627,6 +629,14 @@ impl NodeCollection<Expr> for Expressions {
   }
   fn list_mut(&mut self) -> &mut Vec<Expr> {
     return &mut self.items;
+  }
+}
+impl NodeCollection<Expr> for Node<Expressions> {
+  fn list(&self) -> &Vec<Expr> {
+    return self.0.list();
+  }
+  fn list_mut(&mut self) -> &mut Vec<Expr> {
+    return self.0.list_mut();
   }
 }
 
@@ -663,13 +673,8 @@ impl IntoIterator for Statements {
 
 impl Statements {
   #[inline]
-  pub fn new(region: &mut Region) -> Node<Statements> {
-    return Node::<Statements>::new(
-      region,
-      Statements {
-        items: Vec::<Stmt>::new(),
-      },
-    );
+  pub fn new(region: &mut Region, items: Vec<Stmt>) -> Node<Statements> {
+    return Node::<Statements>::new(region, Statements { items });
   }
 
   #[inline]
@@ -684,6 +689,14 @@ impl NodeCollection<Stmt> for Statements {
   }
   fn list_mut(&mut self) -> &mut Vec<Stmt> {
     return &mut self.items;
+  }
+}
+impl NodeCollection<Stmt> for Node<Statements> {
+  fn list(&self) -> &Vec<Stmt> {
+    return self.0.list();
+  }
+  fn list_mut(&mut self) -> &mut Vec<Stmt> {
+    return self.0.list_mut();
   }
 }
 
@@ -1025,7 +1038,7 @@ pub enum FunctionAccessor {
 #[derive(Property)]
 pub struct FunctionExpression {
   #[property(get(type = "copy"))]
-  name: Option<Node<Literal>>,
+  name: Option<Expr>,
 
   #[property(get(type = "copy"))]
   is_async: bool,
@@ -1040,16 +1053,22 @@ pub struct FunctionExpression {
   formal_parameters: Node<Expressions>,
 
   #[property(get(type = "copy"))]
-  function_body: Ast,
+  function_body: Option<Ast>,
 
   #[property(get(type = "copy"))]
   scope: Exotic<Scope>,
+
+  #[property(get(type = "copy"), set(type = "ref"))]
+  function_body_start: u32,
+
+  #[property(get(type = "copy"), set(type = "ref"))]
+  function_body_end: u32,
 }
 impl_expr!(
   FunctionExpression,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
-      "{}[FunctionExpression type = {}{} {:?} {}]\n",
+      "{}[FunctionExpression type = {}{} body_start = {} body_end = {} {:?} {}]\n",
       indent,
       if self.is_arrow_function() {
         "ArrowFunction"
@@ -1059,6 +1078,8 @@ impl_expr!(
         "Function"
       },
       if self.is_async { " async = true" } else { "" },
+      self.function_body_start,
+      self.function_body_end,
       *self.scope,
       source_position.to_string(),
     );
@@ -1071,7 +1092,9 @@ impl_expr!(
       name.to_string_tree_internal(&mut ni, result);
     }
     self.formal_parameters.to_string_tree_internal(&mut ni, result);
-    self.function_body.to_string_tree_internal(&mut ni, result);
+    if let Some(body) = self.function_body {
+      body.to_string_tree_internal(&mut ni, result);
+    }
   }
 );
 
@@ -1079,12 +1102,14 @@ impl FunctionExpression {
   pub fn new(
     region: &mut Region,
     is_async: bool,
-    name: Option<Node<Literal>>,
+    name: Option<Expr>,
     function_type: FunctionType,
     scope: Exotic<Scope>,
     accessor: FunctionAccessor,
     formal_parameters: Node<Expressions>,
-    function_body: Ast,
+    function_body: Option<Ast>,
+    function_body_start: u32,
+    function_body_end: u32,
   ) -> Node<FunctionExpression> {
     return Node::new(
       region,
@@ -1096,6 +1121,8 @@ impl FunctionExpression {
         accessor,
         formal_parameters,
         function_body,
+        function_body_start,
+        function_body_end,
       },
     );
   }
@@ -1193,6 +1220,7 @@ impl Elision {
 
 bitflags! {
   pub struct StructuralLiteralFlags: u8 {
+    const NONE = 0;
     const ARRAY = 1;
     const OBJECT = 2;
     const VALID_PATTERN = 4;
@@ -1251,27 +1279,30 @@ impl NodeCollection<Expr> for StructuralLiteral {
   }
 }
 
+impl NodeCollection<Expr> for Node<StructuralLiteral> {
+  fn list(&self) -> &Vec<Expr> {
+    return self.0.list();
+  }
+  fn list_mut(&mut self) -> &mut Vec<Expr> {
+    return self.0.list_mut();
+  }
+}
+
 impl StructuralLiteral {
   #[inline]
-  pub fn new(region: &mut Region, literal_flag: StructuralLiteralFlags) -> Node<StructuralLiteral> {
+  pub fn new(
+    region: &mut Region,
+    literal_flag: StructuralLiteralFlags,
+    properties: Vec<Expr>,
+  ) -> Node<StructuralLiteral> {
     return Node::<StructuralLiteral>::new(
       region,
       StructuralLiteral {
         flag: StructuralLiteralFlags::VALID_VALUE | StructuralLiteralFlags::VALID_PATTERN | literal_flag,
         first_object_property_name_initializer_position: None,
-        properties: Vec::new(),
+        properties,
       },
     );
-  }
-
-  #[inline(always)]
-  pub fn set_first_object_property_name_initializer_position(&mut self, pos: &SourcePosition) {
-    self.first_object_property_name_initializer_position = Some(pos.clone());
-  }
-
-  #[inline(always)]
-  pub fn first_object_property_name_initializer_position(&self) -> Option<&SourcePosition> {
-    return self.first_object_property_name_initializer_position.as_ref();
   }
 
   #[inline(always)]
@@ -1285,56 +1316,13 @@ impl StructuralLiteral {
   }
 
   #[inline(always)]
-  pub fn is_valid_pattern(&self) -> bool {
-    return self.flag.contains(StructuralLiteralFlags::VALID_PATTERN);
-  }
-
-  #[inline(always)]
-  pub fn set_valid_pattern(&mut self, is_valid_pattern: bool) {
-    if is_valid_pattern {
-      self.flag |= StructuralLiteralFlags::VALID_PATTERN;
-    } else {
-      self.flag -= StructuralLiteralFlags::VALID_PATTERN;
-    }
-  }
-
-  #[inline(always)]
-  pub fn is_valid_value(&self) -> bool {
-    return self.flag.contains(StructuralLiteralFlags::VALID_VALUE);
-  }
-
-  #[inline(always)]
-  pub fn set_valid_value(&mut self, is_valid_value: bool) {
-    if is_valid_value {
-      self.flag |= StructuralLiteralFlags::VALID_VALUE;
-    } else {
-      self.flag -= StructuralLiteralFlags::VALID_VALUE;
-    }
-  }
-
-  #[inline(always)]
-  pub fn set_accessor(&mut self) {
-    self.flag |= StructuralLiteralFlags::HAS_ACCESSOR;
-  }
-
-  #[inline(always)]
   pub fn has_accessor(&self) -> bool {
     return self.flag.contains(StructuralLiteralFlags::HAS_ACCESSOR);
   }
 
   #[inline(always)]
-  pub fn set_generator(&mut self) {
-    self.flag |= StructuralLiteralFlags::HAS_GENERATOR;
-  }
-
-  #[inline(always)]
   pub fn has_generator(&self) -> bool {
     return self.flag.contains(StructuralLiteralFlags::HAS_GENERATOR);
-  }
-
-  #[inline(always)]
-  pub fn set_spread(&mut self) {
-    self.flag |= StructuralLiteralFlags::HAS_SPREAD;
   }
 
   #[inline(always)]
@@ -1413,10 +1401,18 @@ impl NodeCollection<Expr> for TemplateLiteral {
     return &mut self.parts;
   }
 }
+impl NodeCollection<Expr> for Node<TemplateLiteral> {
+  fn list(&self) -> &Vec<Expr> {
+    return self.0.list();
+  }
+  fn list_mut(&mut self) -> &mut Vec<Expr> {
+    return self.0.list_mut();
+  }
+}
 
 impl TemplateLiteral {
-  pub fn new(region: &mut Region) -> Node<TemplateLiteral> {
-    return Node::new(region, TemplateLiteral { parts: Vec::new() });
+  pub fn new(region: &mut Region, parts: Vec<Expr>) -> Node<TemplateLiteral> {
+    return Node::new(region, TemplateLiteral { parts });
   }
 }
 
@@ -1489,10 +1485,18 @@ impl NodeCollection<Expr> for NamedImportList {
     return &mut self.list;
   }
 }
+impl NodeCollection<Expr> for Node<NamedImportList> {
+  fn list(&self) -> &Vec<Expr> {
+    return self.0.list();
+  }
+  fn list_mut(&mut self) -> &mut Vec<Expr> {
+    return self.0.list_mut();
+  }
+}
 
 impl NamedImportList {
-  pub fn new(region: &mut Region) -> Node<NamedImportList> {
-    return Node::new(region, NamedImportList { list: Vec::new() });
+  pub fn new(region: &mut Region, list: Vec<Expr>) -> Node<NamedImportList> {
+    return Node::new(region, NamedImportList { list });
   }
 }
 
@@ -1661,7 +1665,7 @@ impl ExportDeclaration {
 }
 
 pub struct ClassExpression {
-  name: Node<Literal>,
+  name: Option<Expr>,
   heritage: Option<Expr>,
   static_fields: Node<Expressions>,
   instance_fields: Node<Expressions>,
@@ -1682,6 +1686,22 @@ impl_expr!(
     self.instance_fields.to_string_tree_internal(&mut ni, result);
   }
 );
+
+impl ClassExpression {
+  pub fn new(region: &mut Region, name: Option<Expr>, heritage: Option<Expr>) -> Node<Self> {
+    let static_fields = Expressions::new(region, Vec::new());
+    let instance_fields = Expressions::new(region, Vec::new());
+    return Node::<ClassExpression>::new(
+      region,
+      ClassExpression {
+        name,
+        heritage,
+        static_fields,
+        instance_fields,
+      },
+    );
+  }
+}
 
 pub struct ForStatement {
   declarations: Node<Statements>,
@@ -1901,6 +1921,100 @@ impl_stmt!(
   }
 );
 
+bitflags! {
+  pub struct SkipExprType: u32 {
+    const EXPR = 0;
+    const IDENTIFIER = 0x1;
+    const LITERAL = 0x2;
+    const BINARY_EXPR = 0x4;
+    const CALL = 0x8;
+    const NEW_RECEIVER_CALL = 0x10;
+    const SUPER_RECEIVER_CALL = 0x20;
+    const ARRAY = 0x40;
+    const OBJECT = 0x80;
+    const EXPRS = 0x100;
+    const TEMPLATE = 0x200;
+    const SPREAD = 0x400;
+  }
+}
+pub struct SkipExpr(SkipExprType);
+impl SkipExpr {
+  pub fn new(region: &mut Region, skip_expr_type: SkipExprType) -> Node<Self> {
+    return Node::<Self>::new(region, SkipExpr(skip_expr_type));
+  }
+
+  pub fn is_exprs(&self) -> bool {
+    return self.0.contains(SkipExprType::EXPRS);
+  }
+
+  pub fn is_binary_expr(&self) -> bool {
+    return self.0.contains(SkipExprType::BINARY_EXPR);
+  }
+
+  pub fn is_identifier(&self) -> bool {
+    return self.0.contains(SkipExprType::IDENTIFIER);
+  }
+
+  pub fn is_literal(&self) -> bool {
+    return self.0.contains(SkipExprType::LITERAL);
+  }
+
+  pub fn is_object(&self) -> bool {
+    return self.0.contains(SkipExprType::OBJECT);
+  }
+
+  pub fn is_array(&self) -> bool {
+    return self.0.contains(SkipExprType::OBJECT);
+  }
+
+  pub fn is_call(&self) -> bool {
+    return self.0.contains(SkipExprType::CALL);
+  }
+
+  pub fn is_new_receiver_call(&self) -> bool {
+    return self.0.contains(SkipExprType::NEW_RECEIVER_CALL);
+  }
+
+  pub fn is_super_receiver_call(&self) -> bool {
+    return self.0.contains(SkipExprType::SUPER_RECEIVER_CALL);
+  }
+
+  pub fn is_template(&self) -> bool {
+    return self.0.contains(SkipExprType::TEMPLATE);
+  }
+
+  pub fn is_spread(&self) -> bool {
+    return self.0.contains(SkipExprType::SPREAD);
+  }
+}
+impl_expr!(
+  SkipExpr,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    let str = format!("{}[SkipExpr {}]\n", indent, source_position.to_string());
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    self.to_string(indent, result, source_position);
+  }
+);
+
+pub struct SkipStmt;
+impl SkipStmt {
+  pub fn new(region: &mut Region) -> Node<Self> {
+    return Node::<Self>::new(region, SkipStmt);
+  }
+}
+impl_stmt!(
+  SkipStmt,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    let str = format!("{}[SkipStmt {}]\n", indent, source_position.to_string());
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    self.to_string(indent, result, source_position);
+  }
+);
+
 #[cfg(test)]
 mod ast_test {
   use super::*;
@@ -1908,7 +2022,7 @@ mod ast_test {
   #[test]
   fn expressions_test() {
     let mut region = Region::new();
-    let mut expressions = Expressions::new(&mut region);
+    let mut expressions = Expressions::new(&mut region, Vec::new());
     let elision = Elision::new(&mut region);
     let elision2 = Elision::new(&mut region);
     expressions.push(elision.into());

@@ -146,15 +146,15 @@ mod parser_test {
   }
 
   macro_rules! fnexpr {
-    ($pos:expr, $type:expr, $scope:expr, $($asts:expr),*$(,)*) => {{
-      let attr = format!("type = {} {}", $type, $scope);
+    ($pos:expr, $type:expr, $start:expr, $end:expr, $scope:expr, $($asts:expr),*$(,)*) => {{
+      let attr = format!("type = {} body_start = {} body_end = {} {}", $type, $start, $end, $scope);
       ast_with_children!("FunctionExpression", &attr, $pos, $($asts,)*)
     }}
   }
 
   macro_rules! afnexpr {
-    ($pos:expr, $type:expr, $scope:expr, $($asts:expr),*$(,)*) => {{
-      let attr = format!("type = {} async = true {}", $type, $scope);
+    ($pos:expr, $type:expr, $start:expr, $end:expr, $scope:expr, $($asts:expr),*$(,)*) => {{
+      let attr = format!("type = {} async = true body_start = {} body_end = {} {}", $type, $start, $end, $scope);
       ast_with_children!("FunctionExpression", &attr, $pos, $($asts,)*)
     }}
   }
@@ -296,8 +296,8 @@ mod parser_test {
       }
       let str = format!("{}{}{};PARSER_SENTINEL", env.0.unwrap(), code, env.1);
       let context = LuxContext::new_until_internal_object_records();
-      let source = Rc::new(Source::new(context, "anonymouse", &str));
-      let mut parser = Parser::new(context, source);
+      let source = Source::new(context, "anonymouse", &str);
+      let mut parser = Parser::new(context, source.clone());
       match parser.parse(ParserType::Script) {
         Ok(ast) => {
           let tree = ast.to_string_tree();
@@ -329,8 +329,8 @@ mod parser_test {
       if env.0.is_some() {
         let str = format!("{}{}{};PARSER_SENTINEL", env.0.unwrap(), code, env.1);
         let context = LuxContext::new_until_internal_object_records();
-        let source = Rc::new(Source::new(context, "anonymouse", &str));
-        let mut parser = Parser::new(context, source);
+        let source = Source::new(context, "anonymouse", &str);
+        let mut parser = Parser::new(context, source.clone());
         let ast = parser.parse(ParserType::Script);
         let m = format!("Code {} not generate error", code);
         if !ast.is_err() {
@@ -367,11 +367,11 @@ mod parser_test {
     let buf = String::new();
     let original_blb_cc = before_line_break_col_count;
     if before_line_break_col_count > 0 {
-      before_line_break_col_count += 14;
+      before_line_break_col_count += 15;
     }
 
-    let base_position = 9;
-    let func_exit = (13 + expr_size) - before_line_break_col_count + 2;
+    let base_position = 10;
+    let func_exit = (14 + expr_size) - before_line_break_col_count + 2;
     let sentinel_start = if original_blb_cc > 0 {
       (expr_size - original_blb_cc) + 2
     } else {
@@ -382,16 +382,23 @@ mod parser_test {
       pos!(0, 0),
       stmt!(
         pos!(0, 0),
-        fnexpr!(
+        unary!(
+          "OpNot",
+          "Pre",
           pos!(0, 0),
-          "Function",
-          scope!(@opaque scope_count, true),
-          ident!("X", pos!(base_position, 0)),
-          exprs!(pos!(base_position + 1, 0)),
-          stmts!(
-            pos!(base_position + 4, 0),
-            stmt!(pos!(base_position + 5, 0), ast_builder((base_position + 5, 0, false)))
-          ),
+          fnexpr!(
+            pos!(1, 0),
+            "Function",
+            0,
+            0,
+            scope!(@opaque scope_count, true),
+            ident!("X", pos!(base_position, 0)),
+            exprs!(pos!(base_position + 1, 0)),
+            stmts!(
+              pos!(base_position + 4, 0),
+              stmt!(pos!(base_position + 5, 0), ast_builder((base_position + 5, 0, false)))
+            ),
+          )
         )
       ),
       stmt!(
@@ -432,7 +439,7 @@ mod parser_test {
         },
         "",
       ),
-      (Some("function X() {"), "}"),
+      (Some("!function X() {"), "}"),
     ];
 
     let size = value.len() as u32;
@@ -573,7 +580,11 @@ mod parser_test {
 
   #[test]
   fn numeric_literal_error_test() {
-    let env = [(Some(""), ""), (Some("'use strict'"), ""), (Some("function X() {"), "")];
+    let env = [
+      (Some(""), ""),
+      (Some("'use strict'"), ""),
+      (Some("!function X() {"), ""),
+    ];
     syntax_error_test(
       &env,
       "0x_",
@@ -808,7 +819,7 @@ mod parser_test {
     let env = [
       (Some(""), ""),
       (Some("'use strict';"), ""),
-      (Some("function X() {"), ""),
+      (Some("!function X() {"), ""),
     ];
     syntax_error_test(
       &env,
@@ -823,7 +834,7 @@ mod parser_test {
     let env = [
       (Some(""), ""),
       (Some("'use strict';"), ""),
-      (Some("function X() {"), ""),
+      (Some("!function X() {"), ""),
     ];
     syntax_error_test(
       &env,
@@ -838,7 +849,7 @@ mod parser_test {
     let env = [
       (Some(""), ""),
       (Some("'use strict';"), ""),
-      (Some("function X() {"), ""),
+      (Some("!function X() {"), ""),
     ];
     syntax_error_test(
       &env,
@@ -1928,6 +1939,8 @@ mod parser_test {
             fnexpr!(
               pos!(col + 2, line),
               "Function",
+              0,
+              0,
               scope!(@opaque is_strict, 0, true),
               ident!("a", pos!(col + 2, line)),
               exprs!(pos!(col + 4, line)),
@@ -1940,6 +1953,8 @@ mod parser_test {
             fnexpr!(
               pos!(col + 10, line),
               "Function",
+              0,
+              0,
               scope!(@opaque is_strict, 0, true),
               ident!("b", pos!(col + 10, line)),
               exprs!(pos!(col + 12, line)),
@@ -1966,6 +1981,8 @@ mod parser_test {
             fnexpr!(
               pos!(col + 5, line),
               "ArrowFunction",
+              0,
+              0,
               scope!(@transparent is_strict, 0, true),
               exprs!(pos!(col + 5, line)),
               stmts!(pos!(col + 12, line))
@@ -1991,6 +2008,8 @@ mod parser_test {
             afnexpr!(
               pos!(col + 2, line),
               "Function",
+              0,
+              0,
               scope!(@opaque is_strict,0, true),
               ident!("a", pos!(col + 8, line)),
               exprs!(pos!(col + 10, line)),
@@ -2003,6 +2022,8 @@ mod parser_test {
             fnexpr!(
               pos!(col + 16, line),
               "Function",
+              0,
+              0,
               scope!(@opaque is_strict,0, true),
               ident!("b", pos!(col + 16, line)),
               exprs!(pos!(col + 18, line)),
@@ -2029,6 +2050,8 @@ mod parser_test {
             afnexpr!(
               pos!(col + 2, line),
               "Function",
+              0,
+              0,
               scope!(@opaque is_strict,0, true),
               ident!("a", pos!(col + 8, line)),
               exprs!(pos!(col + 10, line)),
@@ -2071,6 +2094,8 @@ mod parser_test {
             fnexpr!(
               pos!(col + 2, line),
               "Generator",
+              0,
+              0,
               scope!(@opaque is_strict,0, true),
               ident!("a", pos!(col + 3, line)),
               exprs!(pos!(col + 5, line)),
@@ -2113,6 +2138,8 @@ mod parser_test {
             afnexpr!(
               pos!(col + 2, line),
               "Generator",
+              0,
+              0,
               scope!(@opaque is_strict,0, true),
               ident!("a", pos!(col + 9, line)),
               exprs!(pos!(col + 11, line)),
@@ -2345,12 +2372,12 @@ mod parser_test {
     let env = [
       (Some(""), ""),
       (Some("'use strict';"), ""),
-      (Some("function X() {"), ""),
+      (Some("!function X() {"), ""),
     ];
     syntax_error_test(
       &env,
       "([...a, b]) = x",
-      &[&s_pos!(2, 6, 0, 0), &s_pos!(15, 19, 0, 0), &s_pos!(16, 20, 0, 0)],
+      &[&s_pos!(2, 6, 0, 0), &s_pos!(15, 19, 0, 0), &s_pos!(17, 21, 0, 0)],
       false,
     );
   }
@@ -2371,19 +2398,19 @@ mod parser_test {
     let env = [
       (Some(""), ""),
       (Some("'use strict';"), ""),
-      (Some("function X() {"), ""),
+      (Some("!function X() {"), ""),
     ];
     syntax_error_test(
       &env,
       "({a(a, b, super) {}})",
-      &[&s_pos!(10, 15, 0, 0), &s_pos!(23, 28, 0, 0), &s_pos!(24, 29, 0, 0)],
+      &[&s_pos!(10, 15, 0, 0), &s_pos!(23, 28, 0, 0), &s_pos!(25, 30, 0, 0)],
       false,
     );
 
     syntax_error_test(
       &env,
       "({a(a, b) { super() }})",
-      &[&s_pos!(12, 17, 0, 0), &s_pos!(25, 30, 0, 0), &s_pos!(26, 31, 0, 0)],
+      &[&s_pos!(12, 17, 0, 0), &s_pos!(25, 30, 0, 0), &s_pos!(27, 32, 0, 0)],
       false,
     );
   }
@@ -2393,12 +2420,12 @@ mod parser_test {
     let env = [
       (Some(""), ""),
       (Some("'use strict';"), ""),
-      (Some("function X() {"), ""),
+      (Some("!function X() {"), ""),
     ];
     syntax_error_test(
       &env,
       "({a = 1, b})",
-      &[&s_pos!(4, 5, 0, 0), &s_pos!(17, 18, 0, 0), &s_pos!(18, 19, 0, 0)],
+      &[&s_pos!(4, 5, 0, 0), &s_pos!(17, 18, 0, 0), &s_pos!(19, 20, 0, 0)],
       false,
     );
   }
