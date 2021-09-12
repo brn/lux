@@ -192,7 +192,7 @@ pub struct Scanner {
 
   mode: Mode,
 
-  skipped: u32,
+  skipped: u64,
 }
 
 impl ReportSyntaxError for Scanner {
@@ -424,6 +424,28 @@ impl Scanner {
     return Ok(u as u16);
   }
 
+  fn decode_octal_escape(&mut self) -> u16 {
+    let start = *self.iter;
+    let followable_count = chars::octal_hex_followable_count(start);
+    let mut sum = start as u16;
+    for _ in 0..followable_count {
+      if let Some(u) = self.iter.peek() {
+        if !chars::is_octal_digits(u) {
+          return sum;
+        } else {
+          if let Ok(v) = chars::to_int_from_octal(u) {
+            sum = sum * 8 + v as u16;
+          } else {
+            return sum;
+          }
+        }
+        self.advance();
+      }
+    }
+
+    return sum;
+  }
+
   fn decode_escape_sequence(&mut self) -> Result<u32, ()> {
     self.advance();
 
@@ -456,7 +478,7 @@ impl Scanner {
           let end_line_number = self.current_position().end_line_number();
           self
             .current_position_mut()
-            .set_start_line_number(end_line_number + skipped);
+            .set_start_line_number(end_line_number + skipped as u32);
           self.current_position_mut().set_end_col(0_u32);
           self.current_position_mut().set_start_col(0_u32);
           self.current_position_mut().set_end_col(0_u32);
@@ -523,7 +545,10 @@ impl Scanner {
   }
 
   fn tokenize(&mut self) -> Token {
-    if self.parser_state_stack.match_state(ParserState::InTemplateLiteral) {
+    if self
+      .parser_state_stack
+      .match_states(&[ParserState::InTemplateLiteral, ParserState::InTaggedTemplateLiteral])
+    {
       return self.tokenize_template_literal_characters();
     } else if self.parser_state_stack.is_in_state(ParserState::RegexpExpected) {
       return self.tokenize_regexp_characters();
@@ -836,6 +861,24 @@ impl Scanner {
                     Token::Invalid
                   );
                 }
+              } else if chars::is_octal_digits(lookahead) {
+                self.advance();
+                if chars::ch(lookahead) == '0' {
+                  if !chars::is_octal_digits(*self.iter) {
+                    self.current_literal_buffer_mut().push(0_u16);
+                  }
+                } else {
+                  if self.parser_state_stack.is_in_state(ParserState::InStrictMode) {
+                    report_error!(
+                      self,
+                      "In strict mode code, octal escape is not allowed",
+                      self.current_position(),
+                      Token::Invalid
+                    );
+                  }
+                  let octal_value = self.decode_octal_escape();
+                  self.current_literal_buffer_mut().push(octal_value);
+                }
               } else {
                 is_escaped = true;
                 self.advance();
@@ -1104,6 +1147,7 @@ impl Scanner {
     let err = result.unwrap_err();
     match err {
       chars::NumericConvertionError::UnexpectedTokenFound | chars::NumericConvertionError::NotANumber => {
+        self.advance();
         report_error!(self, "Unexpected token found", self.source_position(), Token::Invalid);
       }
       chars::NumericConvertionError::ExponentsExpectedNumber => {
@@ -1143,39 +1187,102 @@ impl Scanner {
     }
   }
 
+  fn decode_template_literal_escape_sequence(
+    &mut self,
+    escape_sequence_start_pos: &SourcePosition,
+    start_index: u32,
+    count: u32,
+  ) -> bool {
+    if let Ok(ret) = self.decode_hex_escape(count) {
+      if let Ok((hi, low)) = chars::uc32_to_uc16(ret) {
+        self.current_literal_buffer_mut().push(hi);
+        if low != 0 {
+          self.current_literal_buffer_mut().push(low);
+        }
+      } else {
+        report_error!(
+          noreturn
+          self,
+          "Invalid unicode escape sequence",
+          &pos_range!(escape_sequence_start_pos, self.current_position())
+        );
+        return false;
+      }
+    } else {
+      if self
+        .parser_state_stack
+        .match_state(ParserState::InTaggedTemplateLiteral)
+      {
+        let end = self.iter.index() as u32;
+        for _ in start_index..end {
+          self.iter.back();
+        }
+        for _ in start_index..end {
+          let value = *self.iter;
+          self.current_literal_buffer_mut().push(value);
+          self.iter.next();
+        }
+        return true;
+      }
+      report_error!(
+        noreturn
+        self,
+        "Invalid unicode escape sequence",
+        &pos_range!(escape_sequence_start_pos, self.current_position())
+      );
+      return false;
+    }
+    return true;
+  }
+
   fn tokenize_template_literal_characters(&mut self) -> Token {
     self.current_literal_buffer_mut().clear();
     let mut is_escaped = false;
     if self.iter.as_char() == '{' {
       self.advance();
     }
+    let tmpl_start_pos = self.record_position();
+    let mut parts_len = 0_u64;
     while self.has_more() {
+      let start_index = self.iter.index();
+      if parts_len > (std::u32::MAX as u64) && self.parser_state_stack.match_state(ParserState::InTemplateLiteral) {
+        report_error!(
+          self,
+          "No-raw template literal substitution exceeds max size limit",
+          &pos_range!(tmpl_start_pos, self.current_position()),
+          Token::Invalid
+        );
+      }
+      println!("{}", parts_len);
       match self.iter.as_char() {
         '\\' => {
-          let mut value = *self.iter;
           if !is_escaped {
             if let Some(lookahead) = self.iter.peek() {
               let escape_sequence_start_pos = self.record_position();
               if chars::is_start_escape_sequence(lookahead) {
-                if let Ok(ret) = self.decode_hex_escape(4) {
-                  if let Ok((hi, low)) = chars::uc32_to_uc16(ret) {
-                    self.current_literal_buffer_mut().push(hi);
-                    if low != 0 {
-                      self.current_literal_buffer_mut().push(low);
-                    }
+                self.advance();
+                if !self.decode_template_literal_escape_sequence(
+                  &escape_sequence_start_pos,
+                  start_index as u32,
+                  if chars::is_start_unicode_escape_sequence(lookahead) {
+                    4
                   } else {
-                    report_error!(
-                      self,
-                      "Invalid unicode escape sequence",
-                      &pos_range!(escape_sequence_start_pos, self.current_position()),
-                      Token::Invalid
-                    );
-                  }
+                    2
+                  },
+                ) {
+                  return Token::Invalid;
+                }
+              } else if chars::is_octal_digits(lookahead) {
+                self.advance();
+                if chars::ch(lookahead) == '0' && !chars::is_decimal_digits(self.iter.peek().unwrap_or('a' as u16)) {
+                  self.advance();
+                  self.current_literal_buffer_mut().push(0_u16);
                 } else {
+                  self.advances(2);
                   report_error!(
                     self,
-                    "Invalid unicode escape sequence",
-                    &pos_range!(escape_sequence_start_pos, self.current_position()),
+                    "In template literal, octal escape is not allowed",
+                    self.current_position(),
                     Token::Invalid
                   );
                 }
@@ -1204,6 +1311,7 @@ impl Scanner {
                 }
                 self.advance();
                 self.advance();
+                parts_len += 1;
                 return Token::TemplateSubstitution;
               }
             } else {
@@ -1279,6 +1387,12 @@ impl Scanner {
     self.iter.next();
     self.current_position_mut().inc_end_col();
     return *self.iter;
+  }
+
+  fn advances(&mut self, count: usize) {
+    for _ in 0..count {
+      self.advance();
+    }
   }
 
   fn skip_line_break(&mut self) -> bool {

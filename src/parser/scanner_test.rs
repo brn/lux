@@ -276,6 +276,15 @@ mod scanner_test {
   }
 
   #[test]
+  fn scanner_scan_octal_escaped_string_literal() {
+    init_scanner("'foo_\\141_bar_\\142_baz_\\143'", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::StringLiteral);
+      let value = chars::to_utf8(scanner.current_literal_buffer());
+      assert_eq!(&value, "foo_a_bar_b_baz_c");
+    });
+  }
+
+  #[test]
   fn scanner_scan_invalid_unicode_escaped_string_literal() {
     init_scanner("'\\u006_foo_\\u0062_bar_\\u0063_baz'", None, |mut scanner| {
       assert_eq!(scanner.next(), Token::Invalid);

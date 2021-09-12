@@ -5,9 +5,9 @@ use std::fmt::{Debug, Formatter, Result as FmtResult};
 #[derive(PartialEq, Eq, Property, Copy, Clone)]
 pub struct SourcePosition {
   #[property(get(type = "copy"), set(type = "none"))]
-  start_col: u32,
+  start_col: u64,
   #[property(get(type = "copy"), set(type = "none"))]
-  end_col: u32,
+  end_col: u64,
   #[property(get(type = "copy"), set(type = "none"))]
   start_line_number: u32,
   #[property(get(type = "copy"), set(type = "none"))]
@@ -25,8 +25,8 @@ impl SourcePosition {
   }
 
   pub fn with(
-    start_col: Option<u32>,
-    end_col: Option<u32>,
+    start_col: Option<u64>,
+    end_col: Option<u64>,
     start_line_number: Option<u32>,
     end_line_number: Option<u32>,
   ) -> SourcePosition {
@@ -46,11 +46,11 @@ impl SourcePosition {
     };
   }
 
-  pub fn add_start_col(&mut self, v: u32) {
+  pub fn add_start_col(&mut self, v: u64) {
     self.start_col += v;
   }
 
-  pub fn add_end_col(&mut self, v: u32) {
+  pub fn add_end_col(&mut self, v: u64) {
     self.end_col += v;
   }
 
@@ -105,13 +105,13 @@ impl PartialOrd for SourcePosition {
 #[derive(PartialEq, Eq, Property, Copy, Clone)]
 pub struct RuntimeSourcePosition {
   #[property(get(type = "copy"), set(type = "none"))]
-  col: u32,
+  col: u64,
   #[property(get(type = "copy"), set(type = "none"))]
   line_number: u32,
 }
 
 impl RuntimeSourcePosition {
-  pub fn new(col: u32, line_number: u32) -> RuntimeSourcePosition {
+  pub fn new(col: u64, line_number: u32) -> RuntimeSourcePosition {
     return RuntimeSourcePosition { col, line_number };
   }
 

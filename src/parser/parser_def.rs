@@ -73,7 +73,7 @@ impl ParserConstraints {
   }
 }
 
-#[derive(Property, Debug, Clone)]
+#[derive(Property, Clone)]
 pub struct ExpressionContext {
   #[property(skip)]
   first_pattern_error: Option<Exotic<ErrorDescriptor>>,
@@ -115,9 +115,15 @@ impl ExpressionContext {
   }
 
   pub fn propagate(&self, ec: &mut ExprCtx) {
-    ec.first_pattern_error = self.first_pattern_error.clone();
-    ec.first_value_error = self.first_value_error.clone();
-    ec.first_strict_mode_error = self.first_strict_mode_error.clone();
+    if self.first_pattern_error.is_some() {
+      ec.first_pattern_error = self.first_pattern_error.clone();
+    }
+    if self.first_value_error.is_some() {
+      ec.first_value_error = self.first_value_error.clone();
+    }
+    if self.first_strict_mode_error.is_some() {
+      ec.first_strict_mode_error = self.first_strict_mode_error.clone();
+    }
   }
 
   pub fn reset(&mut self) -> ExpressionContext {
@@ -128,8 +134,20 @@ impl ExpressionContext {
   _get_set!(first_value_error);
   _get_set!(first_strict_mode_error);
 }
+impl std::fmt::Debug for ExpressionContext {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    return write!(
+      f,
+      "pattern_error = {} value_errr = {} strict_mode_error = {}, imm_fn = {}",
+      self.first_pattern_error.is_some(),
+      self.first_value_error.is_some(),
+      self.first_strict_mode_error.is_some(),
+      self.is_maybe_immediate_function
+    );
+  }
+}
 
-#[derive(Property, Debug, Clone)]
+#[derive(Property, Clone)]
 pub struct ArrowFunctionContext {
   #[property(mut(public, suffix = "_mut"))]
   expression_context: ExpressionContext,
@@ -137,8 +155,23 @@ pub struct ArrowFunctionContext {
   #[property(skip)]
   first_arrow_parameter_error: Option<Exotic<ErrorDescriptor>>,
 
-  #[property(get(type = "ref"), set(disable))]
+  #[property(get(type = "copy"), set(type = "ref"))]
+  is_simple_parameter: bool,
+
+  #[property(mut(public, suffix = "_mut"), set(disable))]
   var_list: Vec<(Vec<u16>, SourcePosition)>,
+}
+
+impl std::fmt::Debug for ArrowFunctionContext {
+  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    return write!(
+      f,
+      "{:?} arrow_param_error = {} var_list = {:?}",
+      self.expression_context,
+      self.first_arrow_parameter_error.is_some(),
+      self.var_list
+    );
+  }
 }
 
 impl ArrowFunctionContext {
@@ -146,6 +179,7 @@ impl ArrowFunctionContext {
     ArrowFunctionContext {
       expression_context: ExpressionContext::new(),
       first_arrow_parameter_error: None,
+      is_simple_parameter: true,
       var_list: Vec::new(),
     }
   }
@@ -155,7 +189,10 @@ impl ArrowFunctionContext {
   pub fn propagate(&self, ec: &mut ExprCtx) {
     self.expression_context.propagate(ec);
     if let Ok(ctx) = ec.to_arrow_ctx_mut() {
-      ctx.first_arrow_parameter_error = self.first_arrow_parameter_error;
+      if self.first_arrow_parameter_error.is_some() {
+        ctx.first_arrow_parameter_error = self.first_arrow_parameter_error;
+      }
+      ctx.is_simple_parameter = self.is_simple_parameter;
       ctx.var_list.append(&mut self.var_list.clone());
     }
   }
@@ -182,11 +219,21 @@ impl ArrowFunctionContext {
 
 macro_rules! context_enum {
   ($name:ident { $($item:ident($type:ty),)* }) => {
-    #[derive(Debug, Clone)]
+    #[derive(Clone)]
     pub enum $name {
       $(
         $item($type),
       )*
+    }
+
+    impl std::fmt::Debug for $name {
+      fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        return write!(f, "{}", match self {
+          $(
+            &$name::$item(ref n) => format!("{:?}", n),
+          )*
+        });
+      }
     }
 
     impl $name {
@@ -211,10 +258,26 @@ macro_rules! context_enum {
         }
       }
 
+      pub fn to_arrow_ctx_mut_unchecked(&mut self) -> &mut ArrowFunctionContext {
+        return self.to_arrow_ctx_mut().unwrap();
+      }
+
       pub fn to_arrow_ctx(&self) -> Result<&ArrowFunctionContext, ()> {
         match self {
           &$name::Expr(_) => Err(()),
           &$name::Arrow(ref ctx) => Ok(ctx)
+        }
+      }
+
+      pub fn to_arrow_ctx_unchecked(&mut self) -> &ArrowFunctionContext {
+        return self.to_arrow_ctx().unwrap();
+      }
+
+      pub fn propagate(&mut self, ec: &mut ExprCtx) {
+        match self {
+          $(
+            &mut $name::$item(ref mut e) => e.propagate(ec),
+          )*
         }
       }
 

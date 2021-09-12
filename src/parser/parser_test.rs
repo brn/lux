@@ -94,6 +94,12 @@ mod parser_test {
     }};
   }
 
+  macro_rules! void {
+    () => {
+      ast!("", "", pos!(0, 0));
+    };
+  }
+
   macro_rules! stmts {
     ($pos:expr, $($asts:expr),*$(,)*) => {
       ast_with_children!("Statements", "", $pos, $($asts,)*)
@@ -154,7 +160,14 @@ mod parser_test {
 
   macro_rules! afnexpr {
     ($pos:expr, $type:expr, $start:expr, $end:expr, $scope:expr, $($asts:expr),*$(,)*) => {{
-      let attr = format!("type = {} async = true body_start = {} body_end = {} {}", $type, $start, $end, $scope);
+      let attr = format!("type = {} async body_start = {} body_end = {} {}", $type, $start, $end, $scope);
+      ast_with_children!("FunctionExpression", &attr, $pos, $($asts,)*)
+    }}
+  }
+
+  macro_rules! getset_fnexpr {
+    ($pos:expr, $type:expr, $accessor:expr, $start:expr, $end:expr, $scope:expr, $($asts:expr),*$(,)*) => {{
+      let attr = format!("type = {} {} body_start = {} body_end = {} {}", $type, $accessor, $start, $end, $scope);
       ast_with_children!("FunctionExpression", &attr, $pos, $($asts,)*)
     }}
   }
@@ -288,7 +301,12 @@ mod parser_test {
 
   type Expectations<'a> = [&'a str; 3];
 
-  fn parse_test<'a>(env_list: &[(Option<&'a str>, &'a str); 3], code: &str, expectations: &'a Expectations) {
+  fn parse_test<'a>(
+    env_list: &[(Option<&'a str>, &'a str); 3],
+    code: &str,
+    expectations: &'a Expectations,
+    parser_option: ParserOption,
+  ) {
     for i in 0..3 {
       let env = env_list[i];
       if env.0.is_none() {
@@ -297,7 +315,7 @@ mod parser_test {
       let str = format!("{}{}{};PARSER_SENTINEL", env.0.unwrap(), code, env.1);
       let context = LuxContext::new_until_internal_object_records();
       let source = Source::new(context, "anonymouse", &str);
-      let mut parser = Parser::new(context, source.clone());
+      let mut parser = Parser::new(context, source.clone(), parser_option.clone());
       match parser.parse(ParserType::Script) {
         Ok(ast) => {
           let tree = ast.to_string_tree();
@@ -324,45 +342,49 @@ mod parser_test {
     source_positions: &[&SourcePosition],
     show_error: bool,
   ) {
-    for i in 0..3 {
-      let env = env_list[i];
-      if env.0.is_some() {
-        let str = format!("{}{}{};PARSER_SENTINEL", env.0.unwrap(), code, env.1);
-        let context = LuxContext::new_until_internal_object_records();
-        let source = Source::new(context, "anonymouse", &str);
-        let mut parser = Parser::new(context, source.clone());
-        let ast = parser.parse(ParserType::Script);
-        let m = format!("Code {} not generate error", code);
-        if !ast.is_err() {
-          parser.print_stack_trace();
-          println!("code is {}", str);
-          assert!(ast.is_err(), m);
-        }
-        assert!(parser.error_reporter().has_pending_error());
-        for ed in parser.error_reporter().pending_errors().iter() {
-          match compare_position(ed.source_position(), source_positions[i]) {
-            Err(err) => {
-              let e = ed.clone();
-              parser.print_stack_trace();
-              println!("error is {:?}", *e);
-              println!("code is {}", str);
-              panic!(err);
-            }
-            _ => {}
-          };
-        }
-        if show_error {
-          parser.error_reporter().print_errors();
+    let parser_options = [ParserOption::new(), ParserOption::with(true)];
+    for opt in (&parser_options).iter() {
+      for i in 0..3 {
+        let env = env_list[i];
+        if env.0.is_some() {
+          let str = format!("{}{}{};PARSER_SENTINEL", env.0.unwrap(), code, env.1);
+          let context = LuxContext::new_until_internal_object_records();
+          let source = Source::new(context, "anonymouse", &str);
+          let mut parser = Parser::new(context, source.clone(), opt.clone());
+          let ast = parser.parse(ParserType::Script);
+          let m = format!("Code {} not generate error", code);
+          if !ast.is_err() {
+            parser.print_stack_trace();
+            println!("code is {}", str);
+            assert!(ast.is_err(), m);
+          }
+          assert!(parser.error_reporter().has_pending_error());
+          for ed in parser.error_reporter().pending_errors().iter() {
+            match compare_position(ed.source_position(), source_positions[i]) {
+              Err(err) => {
+                let e = ed.clone();
+                parser.print_stack_trace();
+                println!("error is {:?}", *e);
+                println!("code is {}", str);
+                panic!(err);
+              }
+              _ => {}
+            };
+          }
+          if show_error {
+            parser.error_reporter().print_errors();
+          }
         }
       }
     }
   }
 
-  fn wrap_with_function_expr<F: Fn((u32, u32, bool)) -> TestableAst>(
-    expr_size: u32,
+  fn wrap_with_function_expr<F: Fn((u64, u32, bool, bool)) -> TestableAst>(
+    expr_size: u64,
     ast_builder: F,
     scope_count: u32,
-    mut before_line_break_col_count: u32,
+    parser_option: ParserOption,
+    mut before_line_break_col_count: u64,
   ) -> (F, String) {
     let buf = String::new();
     let original_blb_cc = before_line_break_col_count;
@@ -396,7 +418,10 @@ mod parser_test {
             exprs!(pos!(base_position + 1, 0)),
             stmts!(
               pos!(base_position + 4, 0),
-              stmt!(pos!(base_position + 5, 0), ast_builder((base_position + 5, 0, false)))
+              stmt!(
+                pos!(base_position + 5, 0),
+                ast_builder((base_position + 5, 0, false, !parser_option.disable_skip_parser()))
+              )
             ),
           )
         )
@@ -410,25 +435,28 @@ mod parser_test {
     return (ast_builder, ast.to_string());
   }
 
-  fn single_expression_test<F: Fn((u32, u32, bool)) -> TestableAst>(ast_builder: F, value: &str) {
-    single_expression_test_with_options(ast_builder, value, 0, false, 0);
+  fn single_expression_test<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str) {
+    let ast_b = single_expression_test_with_options(ast_builder, value, ParserOption::new(), 0, false, 0);
+    single_expression_test_with_options(ast_b, value, ParserOption::with(true), 0, false, 0);
   }
 
-  fn single_expression_test_with_scope<F: Fn((u32, u32, bool)) -> TestableAst>(
+  fn single_expression_test_with_scope<F: Fn((u64, u32, bool, bool)) -> TestableAst>(
     ast_builder: F,
     value: &str,
     scope_count: u32,
   ) {
-    single_expression_test_with_options(ast_builder, value, scope_count, false, 0);
+    let ast_b = single_expression_test_with_options(ast_builder, value, ParserOption::new(), scope_count, false, 0);
+    single_expression_test_with_options(ast_b, value, ParserOption::with(true), scope_count, false, 0);
   }
 
-  fn single_expression_test_with_options<F: Fn((u32, u32, bool)) -> TestableAst>(
+  fn single_expression_test_with_options<F: Fn((u64, u32, bool, bool)) -> TestableAst>(
     ast_builder: F,
     value: &str,
+    parser_option: ParserOption,
     scope_count: u32,
     is_skip_strict_mode: bool,
-    before_line_break_count: u32,
-  ) {
+    before_line_break_count: u64,
+  ) -> F {
     let env: [(Option<&str>, &str); 3] = [
       (Some(""), ""),
       (
@@ -442,9 +470,15 @@ mod parser_test {
       (Some("!function X() {"), "}"),
     ];
 
-    let size = value.len() as u32;
-    let product1 = ast_builder((0, 0, false));
-    let (ast_b, f) = wrap_with_function_expr(size, ast_builder, scope_count, before_line_break_count);
+    let size = value.len() as u64;
+    let product1 = ast_builder((0, 0, false, !parser_option.disable_skip_parser()));
+    let (ast_b, f) = wrap_with_function_expr(
+      size,
+      ast_builder,
+      scope_count,
+      parser_option.clone(),
+      before_line_break_count,
+    );
     let normal = stmts!(
       pos!(0, 0),
       stmt!(pos!(0, 0), product1),
@@ -460,7 +494,7 @@ mod parser_test {
     } else {
       (size + 14) - before_line_break_count
     };
-    let product2 = ast_b((13, 0, true));
+    let product2 = ast_b((13, 0, true, !parser_option.disable_skip_parser()));
     let strict = stmts!(
       pos!(13, 0),
       stmt!(pos!(13, 0), product2),
@@ -472,13 +506,20 @@ mod parser_test {
     .to_string();
 
     let expected: Expectations = [&normal, &strict, &f];
-    parse_test(&env, value, &expected);
+    parse_test(&env, value, &expected, parser_option);
+    return ast_b;
   }
+
+  const BASIC_ENV: [(Option<&str>, &str); 3] = [
+    (Some(""), ""),
+    (Some("'use strict';"), ""),
+    (Some("!function X() {"), ""),
+  ];
 
   #[test]
   fn parse_single_decimal_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return number!("1", pos!(col, line));
       },
       "1",
@@ -488,7 +529,7 @@ mod parser_test {
   #[test]
   fn parse_multi_decimal_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return number!("1024", pos!(col, line));
       },
       "1024",
@@ -498,7 +539,7 @@ mod parser_test {
   #[test]
   fn parse_multi_decimal_exponent_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return number!("130000000000", pos!(col, line));
       },
       "13e+10",
@@ -508,7 +549,7 @@ mod parser_test {
   #[test]
   fn parse_float_leading_zero_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return number!("0.12", pos!(col, line));
       },
       "0.12",
@@ -518,7 +559,7 @@ mod parser_test {
   #[test]
   fn parse_float_not_leading_zero_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return number!("0.12", pos!(col, line));
       },
       ".12",
@@ -528,7 +569,7 @@ mod parser_test {
   #[test]
   fn parse_hex_decimal_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return number!("12379813812177893000", pos!(col, line));
       },
       "0xabcdef1234567890",
@@ -538,7 +579,7 @@ mod parser_test {
   #[test]
   fn parse_binary_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return number!("21", pos!(col, line));
       },
       "0b010101",
@@ -548,7 +589,7 @@ mod parser_test {
   #[test]
   fn parse_octal_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return number!("511", pos!(col, line));
       },
       "0o777",
@@ -558,10 +599,11 @@ mod parser_test {
   #[test]
   fn parse_implicit_octal_literal_test() {
     single_expression_test_with_options(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return octal!("511", pos!(col, line));
       },
       "0777",
+      ParserOption::new(),
       0,
       true,
       0,
@@ -571,7 +613,7 @@ mod parser_test {
   #[test]
   fn parse_decimal_leading_zero_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return number!("7778", pos!(col, line));
       },
       "07778",
@@ -580,43 +622,38 @@ mod parser_test {
 
   #[test]
   fn numeric_literal_error_test() {
-    let env = [
-      (Some(""), ""),
-      (Some("'use strict'"), ""),
-      (Some("!function X() {"), ""),
-    ];
     syntax_error_test(
-      &env,
+      &BASIC_ENV,
       "0x_",
-      &[&s_pos!(0, 2, 0, 0), &s_pos!(12, 14, 0, 0), &s_pos!(14, 16, 0, 0)],
+      &[&s_pos!(0, 3, 0, 0), &s_pos!(13, 16, 0, 0), &s_pos!(15, 18, 0, 0)],
       false,
     );
 
     syntax_error_test(
-      &env,
+      &BASIC_ENV,
       "0b_",
-      &[&s_pos!(0, 2, 0, 0), &s_pos!(12, 14, 0, 0), &s_pos!(14, 16, 0, 0)],
+      &[&s_pos!(0, 3, 0, 0), &s_pos!(13, 16, 0, 0), &s_pos!(15, 18, 0, 0)],
       false,
     );
 
     syntax_error_test(
-      &env,
+      &BASIC_ENV,
       "0o_",
-      &[&s_pos!(0, 2, 0, 0), &s_pos!(12, 14, 0, 0), &s_pos!(14, 16, 0, 0)],
+      &[&s_pos!(0, 3, 0, 0), &s_pos!(13, 16, 0, 0), &s_pos!(15, 18, 0, 0)],
       false,
     );
 
     syntax_error_test(
-      &env,
+      &BASIC_ENV,
       "13e",
-      &[&s_pos!(0, 3, 0, 0), &s_pos!(12, 15, 0, 0), &s_pos!(14, 17, 0, 0)],
+      &[&s_pos!(0, 3, 0, 0), &s_pos!(13, 16, 0, 0), &s_pos!(15, 18, 0, 0)],
       false,
     );
 
     syntax_error_test(
-      &env,
+      &BASIC_ENV,
       "13e+",
-      &[&s_pos!(0, 4, 0, 0), &s_pos!(12, 16, 0, 0), &s_pos!(14, 18, 0, 0)],
+      &[&s_pos!(0, 4, 0, 0), &s_pos!(13, 17, 0, 0), &s_pos!(15, 19, 0, 0)],
       false,
     );
   }
@@ -635,7 +672,7 @@ mod parser_test {
   #[test]
   fn parse_single_quote_string_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return str!("test", pos!(col, line));
       },
       "'test'",
@@ -645,7 +682,7 @@ mod parser_test {
   #[test]
   fn parse_double_quote_string_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return str!("test", pos!(col, line));
       },
       "\"test\"",
@@ -655,7 +692,7 @@ mod parser_test {
   #[test]
   fn parse_single_quote_escaped_string_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return str!("test 'value", pos!(col, line));
       },
       "'test \\'value'",
@@ -665,7 +702,7 @@ mod parser_test {
   #[test]
   fn parse_double_quote_escaped_string_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return str!("test \"value", pos!(col, line));
       },
       "\"test \\\"value\"",
@@ -675,7 +712,7 @@ mod parser_test {
   #[test]
   fn parse_single_quote_backslash_escaped_string_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return str!("test\\ value", pos!(col, line));
       },
       "'test\\\\ value'",
@@ -685,7 +722,7 @@ mod parser_test {
   #[test]
   fn parse_double_quote_backslash_escaped_string_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return str!("test\\ value", pos!(col, line));
       },
       "\"test\\\\ value\"",
@@ -695,7 +732,7 @@ mod parser_test {
   #[test]
   fn parse_string_literal_unicode_escape_sequence_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return str!("A_B_C_D", pos!(col, line));
       },
       "'\\u0041_\\u0042_\\u0043_\\u0044'",
@@ -705,7 +742,7 @@ mod parser_test {
   #[test]
   fn parse_string_literal_ascii_escape_sequence_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return str!("A_B_C_D", pos!(col, line));
       },
       "'\\x41_\\x42_\\x43_\\x44'",
@@ -713,9 +750,19 @@ mod parser_test {
   }
 
   #[test]
+  fn parse_valid_octal_like_escape_literal_test() {
+    single_expression_test(
+      |(col, line, _, _)| {
+        return tmpl!(pos!(col, line), str!("a_\0", pos!(col + 1, line)));
+      },
+      "`a_\\0`",
+    );
+  }
+
+  #[test]
   fn parse_template_literal_without_interpolation_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return tmpl!(pos!(col, line), str!("test", pos!(col + 1, line)));
       },
       "`test`",
@@ -725,7 +772,7 @@ mod parser_test {
   #[test]
   fn parse_template_literal_escaped_without_interpolation_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return tmpl!(pos!(col, line), str!("test${aaa}", pos!(col + 1, line)));
       },
       "`test\\${aaa}`",
@@ -735,10 +782,11 @@ mod parser_test {
   #[test]
   fn parse_template_literal_linebreak_without_interpolation_test() {
     single_expression_test_with_options(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return tmpl!(pos!(col, line), str!("test\ntest", pos!(col + 1, line)));
       },
       "`test\ntest`",
+      ParserOption::new(),
       0,
       false,
       6,
@@ -748,7 +796,7 @@ mod parser_test {
   #[test]
   fn parse_template_literal_with_empty_suffix_interpolation_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return tmpl!(
           pos!(col, line),
           str!("test", pos!(col + 1, line)),
@@ -762,7 +810,7 @@ mod parser_test {
   #[test]
   fn parse_template_literal_with_suffix_interpolation_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return tmpl!(
           pos!(col, line),
           str!("foo", pos!(col + 1, line)),
@@ -777,7 +825,7 @@ mod parser_test {
   #[test]
   fn parse_template_literal_with_many_suffix_interpolation_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return tmpl!(
           pos!(col, line),
           str!("foo", pos!(col + 1, line)),
@@ -799,7 +847,7 @@ mod parser_test {
   #[test]
   fn parse_nested_template_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return tmpl!(
           pos!(col, line),
           str!("foo", pos!(col + 1, line)),
@@ -815,46 +863,146 @@ mod parser_test {
   }
 
   #[test]
+  fn parse_tagged_template_literal_special_valid_hex_escape_test() {
+    single_expression_test(
+      |(col, line, _, _)| {
+        return callexpr!(
+          "Template",
+          pos!(col, line),
+          ident!("a", pos!(col, line)),
+          tmpl!(pos!(col + 1, line), str!("\\xzzz", pos!(col + 2, line)))
+        );
+      },
+      "a`\\xzzz`",
+    );
+  }
+
+  #[test]
+  fn parse_tagged_template_literal_special_valid_unicode_escape_test() {
+    single_expression_test(
+      |(col, line, _, _)| {
+        return callexpr!(
+          "Template",
+          pos!(col, line),
+          ident!("a", pos!(col, line)),
+          tmpl!(pos!(col + 1, line), str!("\\uzzz", pos!(col + 2, line)))
+        );
+      },
+      "a`\\uzzz`",
+    );
+  }
+
+  #[test]
+  fn parse_tagged_template_literal_special_valid_unicode_escape_test_2() {
+    single_expression_test(
+      |(col, line, _, _)| {
+        return callexpr!(
+          "Template",
+          pos!(col, line),
+          ident!("a", pos!(col, line)),
+          tmpl!(pos!(col + 1, line), str!("\\u{xxx}", pos!(col + 2, line)))
+        );
+      },
+      "a`\\u{xxx}`",
+    );
+  }
+
+  #[test]
+  fn parse_tagged_template_literal_special_valid_unicode_escape_test_3() {
+    single_expression_test(
+      |(col, line, _, _)| {
+        return callexpr!(
+          "Template",
+          pos!(col, line),
+          ident!("a", pos!(col, line)),
+          tmpl!(pos!(col + 1, line), str!("\\u{xxx", pos!(col + 2, line)))
+        );
+      },
+      "a`\\u{xxx`",
+    );
+  }
+
+  #[test]
+  fn parse_tagged_template_literal_special_valid_unicode_escape_test_4() {
+    single_expression_test(
+      |(col, line, _, _)| {
+        return callexpr!(
+          "Template",
+          pos!(col, line),
+          ident!("a", pos!(col, line)),
+          tmpl!(pos!(col + 1, line), str!("\\u6", pos!(col + 2, line)))
+        );
+      },
+      "a`\\u6`",
+    );
+  }
+
+  #[test]
+  fn parse_tagged_template_literal_special_valid_unicode_escape_test_5() {
+    single_expression_test(
+      |(col, line, _, _)| {
+        return callexpr!(
+          "Template",
+          pos!(col, line),
+          ident!("a", pos!(col, line)),
+          tmpl!(pos!(col + 1, line), str!("\\u66", pos!(col + 2, line)))
+        );
+      },
+      "a`\\u66`",
+    );
+  }
+
+  #[test]
+  fn parse_tagged_template_literal_special_valid_unicode_escape_test_6() {
+    single_expression_test(
+      |(col, line, _, _)| {
+        return callexpr!(
+          "Template",
+          pos!(col, line),
+          ident!("a", pos!(col, line)),
+          tmpl!(pos!(col + 1, line), str!("\\u665", pos!(col + 2, line)))
+        );
+      },
+      "a`\\u665`",
+    );
+  }
+
+  #[test]
   fn parse_unterminated_string_error_test() {
-    let env = [
-      (Some(""), ""),
-      (Some("'use strict';"), ""),
-      (Some("!function X() {"), ""),
-    ];
     syntax_error_test(
-      &env,
+      &BASIC_ENV,
       "'test",
-      &[&s_pos!(0, 21, 0, 0), &s_pos!(13, 34, 0, 0), &s_pos!(14, 35, 0, 0)],
+      &[&s_pos!(0, 21, 0, 0), &s_pos!(13, 34, 0, 0), &s_pos!(15, 36, 0, 0)],
       false,
     )
   }
 
   #[test]
   fn parse_unterminated_string_error_with_linebreak_test() {
-    let env = [
-      (Some(""), ""),
-      (Some("'use strict';"), ""),
-      (Some("!function X() {"), ""),
-    ];
     syntax_error_test(
-      &env,
+      &BASIC_ENV,
       "'test\\n",
-      &[&s_pos!(0, 23, 0, 0), &s_pos!(13, 36, 0, 0), &s_pos!(14, 37, 0, 0)],
+      &[&s_pos!(0, 23, 0, 0), &s_pos!(13, 36, 0, 0), &s_pos!(15, 38, 0, 0)],
       false,
     )
   }
 
   #[test]
   fn parse_invalid_unicode_sequence_error_test() {
-    let env = [
-      (Some(""), ""),
-      (Some("'use strict';"), ""),
-      (Some("!function X() {"), ""),
-    ];
     syntax_error_test(
-      &env,
+      &BASIC_ENV,
       "'\\u0041_\\u0042_\\u043_\\u0044'",
-      &[&s_pos!(15, 21, 0, 0), &s_pos!(28, 34, 0, 0), &s_pos!(29, 35, 0, 0)],
+      &[&s_pos!(15, 21, 0, 0), &s_pos!(28, 34, 0, 0), &s_pos!(30, 36, 0, 0)],
+      false,
+    )
+  }
+
+  #[test]
+  fn template_literal_not_allow_octal_escape_early_error_test() {
+    syntax_error_test(
+      &BASIC_ENV,
+      "`\\071`",
+      &[&s_pos!(1, 4, 0, 0), &s_pos!(14, 17, 0, 0), &s_pos!(16, 19, 0, 0)],
       false,
     )
   }
@@ -862,7 +1010,7 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_plus_pre_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return unary!("OpPlus", "Pre", pos!(col, line), number!("1", pos!(col + 1, line)));
       },
       "+1",
@@ -872,7 +1020,7 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_minus_pre_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return unary!("OpMinus", "Pre", pos!(col, line), number!("1", pos!(col + 1, line)));
       },
       "-1",
@@ -882,7 +1030,7 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_not_pre_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return unary!("OpNot", "Pre", pos!(col, line), number!("1", pos!(col + 1, line)));
       },
       "!1",
@@ -892,7 +1040,7 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_tilde_pre_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return unary!("OpTilde", "Pre", pos!(col, line), number!("1", pos!(col + 1, line)));
       },
       "~1",
@@ -902,7 +1050,7 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_delete_pre_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return unary!("Delete", "Pre", pos!(col, line), number!("1", pos!(col + 7, line)));
       },
       "delete 1",
@@ -912,7 +1060,7 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_typeof_pre_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return unary!("Typeof", "Pre", pos!(col, line), number!("1", pos!(col + 7, line)));
       },
       "typeof 1",
@@ -922,7 +1070,7 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_void_pre_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return unary!("Void", "Pre", pos!(col, line), number!("1", pos!(col + 5, line)));
       },
       "void 1",
@@ -932,7 +1080,7 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_increments_pre_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return unary!("OpIncrement", "Pre", pos!(col, line), number!("1", pos!(col + 2, line)));
       },
       "++1",
@@ -942,7 +1090,7 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_decrements_pre_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return unary!("OpDecrement", "Pre", pos!(col, line), number!("1", pos!(col + 2, line)));
       },
       "--1",
@@ -952,7 +1100,7 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_increments_post_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return unary!("OpIncrement", "Post", pos!(col, line), number!("1", pos!(col, line)));
       },
       "1++",
@@ -962,7 +1110,7 @@ mod parser_test {
   #[test]
   fn parse_unary_expression_decrements_post_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return unary!("OpDecrement", "Post", pos!(col, line), number!("1", pos!(col, line)));
       },
       "1--",
@@ -972,7 +1120,7 @@ mod parser_test {
   #[test]
   fn parse_new_expression_no_args_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return newexpr!(pos!(col, line), ident!("X", pos!(col + 4, line)));
       },
       "new X",
@@ -982,7 +1130,7 @@ mod parser_test {
   #[test]
   fn parse_new_expression_with_args_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return newexpr!(
           pos!(col, line),
           callexpr!(
@@ -1000,7 +1148,7 @@ mod parser_test {
   #[test]
   fn parse_new_expression_with_props_call_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return newexpr!(
           pos!(col, line),
           callexpr!(
@@ -1023,7 +1171,7 @@ mod parser_test {
   #[test]
   fn parse_new_expression_with_element_call_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return newexpr!(
           pos!(col, line),
           callexpr!(
@@ -1046,7 +1194,7 @@ mod parser_test {
   #[test]
   fn parse_new_expression_with_props_chain_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return newexpr!(
           pos!(col, line),
           callexpr!(
@@ -1074,7 +1222,7 @@ mod parser_test {
   #[test]
   fn parse_new_expression_with_props_and_element_chain_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return newexpr!(
           pos!(col, line),
           callexpr!(
@@ -1102,7 +1250,7 @@ mod parser_test {
   #[test]
   fn parse_new_expression_with_tagged_template_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return callexpr!(
           "Template",
           pos!(col, line),
@@ -1130,7 +1278,7 @@ mod parser_test {
   #[test]
   fn parse_exponentiation_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpPow",
           pos!(col, line),
@@ -1145,7 +1293,7 @@ mod parser_test {
   #[test]
   fn parse_multiplicative_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpMul",
           pos!(col, line),
@@ -1160,7 +1308,7 @@ mod parser_test {
   #[test]
   fn parse_division_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpDiv",
           pos!(col, line),
@@ -1175,7 +1323,7 @@ mod parser_test {
   #[test]
   fn parse_addition_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpPlus",
           pos!(col, line),
@@ -1190,7 +1338,7 @@ mod parser_test {
   #[test]
   fn parse_subtraction_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpMinus",
           pos!(col, line),
@@ -1205,7 +1353,7 @@ mod parser_test {
   #[test]
   fn parse_shift_left_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpShl",
           pos!(col, line),
@@ -1220,7 +1368,7 @@ mod parser_test {
   #[test]
   fn parse_shift_right_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpShr",
           pos!(col, line),
@@ -1235,7 +1383,7 @@ mod parser_test {
   #[test]
   fn parse_u_shift_right_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpUShr",
           pos!(col, line),
@@ -1250,7 +1398,7 @@ mod parser_test {
   #[test]
   fn parse_in_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "In",
           pos!(col, line),
@@ -1265,7 +1413,7 @@ mod parser_test {
   #[test]
   fn parse_instanceof_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "Instanceof",
           pos!(col, line),
@@ -1280,7 +1428,7 @@ mod parser_test {
   #[test]
   fn parse_greater_than_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpGreaterThan",
           pos!(col, line),
@@ -1295,7 +1443,7 @@ mod parser_test {
   #[test]
   fn parse_greater_than_or_eq_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpGreaterThanOrEq",
           pos!(col, line),
@@ -1310,7 +1458,7 @@ mod parser_test {
   #[test]
   fn parse_less_than_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpLessThan",
           pos!(col, line),
@@ -1325,7 +1473,7 @@ mod parser_test {
   #[test]
   fn parse_less_than_or_eq_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpLessThanOrEq",
           pos!(col, line),
@@ -1340,7 +1488,7 @@ mod parser_test {
   #[test]
   fn parse_equal_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpEq",
           pos!(col, line),
@@ -1355,7 +1503,7 @@ mod parser_test {
   #[test]
   fn parse_strict_equal_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpStrictEq",
           pos!(col, line),
@@ -1370,7 +1518,7 @@ mod parser_test {
   #[test]
   fn parse_not_equal_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpNotEq",
           pos!(col, line),
@@ -1385,7 +1533,7 @@ mod parser_test {
   #[test]
   fn parse_strict_not_equal_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpStrictNotEq",
           pos!(col, line),
@@ -1400,7 +1548,7 @@ mod parser_test {
   #[test]
   fn parse_bitwise_and_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpAnd",
           pos!(col, line),
@@ -1415,7 +1563,7 @@ mod parser_test {
   #[test]
   fn parse_bitwise_or_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpOr",
           pos!(col, line),
@@ -1430,7 +1578,7 @@ mod parser_test {
   #[test]
   fn parse_bitwise_xor_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpXor",
           pos!(col, line),
@@ -1445,7 +1593,7 @@ mod parser_test {
   #[test]
   fn parse_logical_and_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpLogicalAnd",
           pos!(col, line),
@@ -1460,7 +1608,7 @@ mod parser_test {
   #[test]
   fn parse_logical_or_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpLogicalOr",
           pos!(col, line),
@@ -1475,7 +1623,7 @@ mod parser_test {
   #[test]
   fn parser_operator_priority_test_1() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpOr",
           pos!(col, line),
@@ -1510,7 +1658,7 @@ mod parser_test {
   #[test]
   fn parser_operator_priority_test_2() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpOr",
           pos!(col, line),
@@ -1545,7 +1693,7 @@ mod parser_test {
   #[test]
   fn parser_operator_priority_test_3() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpMul",
           pos!(col + 2, line),
@@ -1580,7 +1728,7 @@ mod parser_test {
   #[test]
   fn parser_conditional_expression_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return cond!(
           pos!(col, line),
           ident!("x", pos!(col, line)),
@@ -1595,7 +1743,7 @@ mod parser_test {
   #[test]
   fn parser_conditional_expression_test_2() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return cond!(
           pos!(col, line),
           binary!(
@@ -1632,11 +1780,11 @@ mod parser_test {
         fn [<parser_parse_ $token _test>]() {
           use Token::*;
           single_expression_test(
-            |(col, line, _)| {
+            |(col, line, _, _)| {
               return binary!(stringify!($token),
                              pos!(col, line),
                              ident!("x", pos!(col, line)),
-                                    number!("1", pos!(col + ($token.symbol().len() as u32) + 3, line)));
+                                    number!("1", pos!(col + ($token.symbol().len() as u64) + 3, line)));
             },
             &format!("x {} 1", $token.symbol())
           );
@@ -1679,7 +1827,7 @@ mod parser_test {
   #[test]
   fn parser_parse_array_literal_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return arraylit!(
           false,
           pos!(col, line),
@@ -1694,7 +1842,7 @@ mod parser_test {
   #[test]
   fn parser_parse_array_literal_spread_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return arraylit!(
           true,
           pos!(col, line),
@@ -1709,7 +1857,7 @@ mod parser_test {
   #[test]
   fn parser_parse_array_literal_empty_test() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, is_skip_parser)| {
         return arraylit!(
           false,
           pos!(col, line),
@@ -1724,7 +1872,7 @@ mod parser_test {
   #[test]
   fn parser_parse_array_literal_empty_test_2() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return arraylit!(
           false,
           pos!(col, line),
@@ -1741,7 +1889,7 @@ mod parser_test {
   #[test]
   fn parser_parse_array_assignment_pattern() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpAssign",
           pos!(col + 1, line),
@@ -1762,7 +1910,7 @@ mod parser_test {
   #[test]
   fn parser_parse_array_assignment_pattern_with_nested_array() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpAssign",
           pos!(col + 1, line),
@@ -1785,7 +1933,7 @@ mod parser_test {
   #[test]
   fn parser_parse_array_assignment_pattern_with_spread() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpAssign",
           pos!(col + 1, line),
@@ -1812,7 +1960,7 @@ mod parser_test {
   #[test]
   fn parser_parse_object_literal() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return objectlit!(
           ObjectLitType::NONE,
           pos!(col + 1, line),
@@ -1840,7 +1988,7 @@ mod parser_test {
   #[test]
   fn parser_parse_object_literal_computed_property() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, is_skip_parser)| {
         return objectlit!(
           ObjectLitType::NONE,
           pos!(col + 1, line),
@@ -1863,7 +2011,7 @@ mod parser_test {
   #[test]
   fn parser_parse_object_literal_computed_property_2() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return objectlit!(
           ObjectLitType::NONE,
           pos!(col + 1, line),
@@ -1891,7 +2039,7 @@ mod parser_test {
   #[test]
   fn parser_parse_object_literal_number_property() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return objectlit!(
           ObjectLitType::NONE,
           pos!(col + 1, line),
@@ -1914,7 +2062,7 @@ mod parser_test {
   #[test]
   fn parser_parse_key_only_object_literal() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return objectlit!(
           ObjectLitType::NONE,
           pos!(col + 1, line),
@@ -1929,7 +2077,7 @@ mod parser_test {
   #[test]
   fn parser_parse_method_object_literal() {
     single_expression_test_with_scope(
-      |(col, line, is_strict)| {
+      |(col, line, is_strict, is_skip_parser)| {
         return objectlit!(
           ObjectLitType::NONE,
           pos!(col + 1, line),
@@ -1939,12 +2087,16 @@ mod parser_test {
             fnexpr!(
               pos!(col + 2, line),
               "Function",
-              0,
-              0,
+              if is_skip_parser { col + 8 } else { 0 },
+              if is_skip_parser { col + 8 } else { 0 },
               scope!(@opaque is_strict, 0, true),
               ident!("a", pos!(col + 2, line)),
               exprs!(pos!(col + 4, line)),
-              stmts!(pos!(col + 7, line))
+              if is_skip_parser {
+                void!()
+              } else {
+                stmts!(pos!(col + 7, line))
+              }
             )
           ),
           object_props!(
@@ -1953,12 +2105,16 @@ mod parser_test {
             fnexpr!(
               pos!(col + 10, line),
               "Function",
-              0,
-              0,
+              if is_skip_parser { col + 16 } else { 0 },
+              if is_skip_parser { col + 16 } else { 0 },
               scope!(@opaque is_strict, 0, true),
               ident!("b", pos!(col + 10, line)),
               exprs!(pos!(col + 12, line)),
-              stmts!(pos!(col + 15, line))
+              if is_skip_parser {
+                void!()
+              } else {
+                stmts!(pos!(col + 15, line))
+              }
             )
           ),
         );
@@ -1969,9 +2125,61 @@ mod parser_test {
   }
 
   #[test]
+  fn parser_parse_get_set_method_object_literal() {
+    single_expression_test_with_scope(
+      |(col, line, is_strict, is_skip_parser)| {
+        return objectlit!(
+          ObjectLitType::NONE,
+          pos!(col + 1, line),
+          object_props!(
+            pos!(col + 2, line),
+            ident!("a", pos!(col + 6, line)),
+            getset_fnexpr!(
+              pos!(col + 2, line),
+              "Function",
+              "get",
+              if is_skip_parser { col + 12 } else { 0 },
+              if is_skip_parser { col + 12 } else { 0 },
+              scope!(@opaque is_strict, 0, true),
+              ident!("a", pos!(col + 6, line)),
+              exprs!(pos!(col + 7, line)),
+              if is_skip_parser {
+                void!()
+              } else {
+                stmts!(pos!(col + 11, line))
+              }
+            )
+          ),
+          object_props!(
+            pos!(col + 14, line),
+            ident!("b", pos!(col + 18, line)),
+            getset_fnexpr!(
+              pos!(col + 14, line),
+              "Function",
+              "set",
+              if is_skip_parser { col + 25 } else { 0 },
+              if is_skip_parser { col + 25 } else { 0 },
+              scope!(@opaque is_strict, 0, true),
+              ident!("b", pos!(col + 18, line)),
+              exprs!(pos!(col + 20, line), ident!("x", pos!(col + 20, line))),
+              if is_skip_parser {
+                void!()
+              } else {
+                stmts!(pos!(col + 24, line))
+              }
+            )
+          ),
+        );
+      },
+      "({get a() {}, set b(x) {}})",
+      2,
+    )
+  }
+
+  #[test]
   fn parser_parse_object_literal_function_expr_value() {
     single_expression_test_with_scope(
-      |(col, line, is_strict)| {
+      |(col, line, is_strict, is_skip_parser)| {
         return objectlit!(
           ObjectLitType::NONE,
           pos!(col + 1, line),
@@ -1981,11 +2189,15 @@ mod parser_test {
             fnexpr!(
               pos!(col + 5, line),
               "ArrowFunction",
-              0,
-              0,
+              if is_skip_parser { col + 13 } else { 0 },
+              if is_skip_parser { col + 13 } else { 0 },
               scope!(@transparent is_strict, 0, true),
               exprs!(pos!(col + 5, line)),
-              stmts!(pos!(col + 12, line))
+              if is_skip_parser {
+                void!()
+              } else {
+                stmts!(pos!(col + 12, line))
+              }
             )
           ),
         );
@@ -1998,7 +2210,7 @@ mod parser_test {
   #[test]
   fn parser_parse_async_method_object_literal() {
     single_expression_test_with_scope(
-      |(col, line, is_strict)| {
+      |(col, line, is_strict, is_skip_parser)| {
         return objectlit!(
           ObjectLitType::NONE,
           pos!(col + 1, line),
@@ -2008,12 +2220,16 @@ mod parser_test {
             afnexpr!(
               pos!(col + 2, line),
               "Function",
-              0,
-              0,
+              if is_skip_parser { col + 14 } else { 0 },
+              if is_skip_parser { col + 14 } else { 0 },
               scope!(@opaque is_strict,0, true),
               ident!("a", pos!(col + 8, line)),
               exprs!(pos!(col + 10, line)),
-              stmts!(pos!(col + 13, line))
+              if is_skip_parser {
+                void!()
+              } else {
+                stmts!(pos!(col + 13, line))
+              }
             )
           ),
           object_props!(
@@ -2022,12 +2238,16 @@ mod parser_test {
             fnexpr!(
               pos!(col + 16, line),
               "Function",
-              0,
-              0,
+              if is_skip_parser { col + 22 } else { 0 },
+              if is_skip_parser { col + 22 } else { 0 },
               scope!(@opaque is_strict,0, true),
               ident!("b", pos!(col + 16, line)),
               exprs!(pos!(col + 18, line)),
-              stmts!(pos!(col + 21, line))
+              if is_skip_parser {
+                void!()
+              } else {
+                stmts!(pos!(col + 21, line))
+              }
             )
           ),
         );
@@ -2040,7 +2260,7 @@ mod parser_test {
   #[test]
   fn parser_parse_async_method_object_literal_with_await_expression_test() {
     single_expression_test_with_scope(
-      |(col, line, is_strict)| {
+      |(col, line, is_strict, is_skip_parser)| {
         return objectlit!(
           ObjectLitType::NONE,
           pos!(col + 1, line),
@@ -2050,28 +2270,32 @@ mod parser_test {
             afnexpr!(
               pos!(col + 2, line),
               "Function",
-              0,
-              0,
+              if is_skip_parser { col + 18 } else { 0 },
+              if is_skip_parser { col + 23 } else { 0 },
               scope!(@opaque is_strict,0, true),
               ident!("a", pos!(col + 8, line)),
               exprs!(pos!(col + 10, line)),
-              stmts!(
-                pos!(col + 13, line),
-                stmt!(
+              if is_skip_parser {
+                void!()
+              } else {
+                stmts!(
                   pos!(col + 13, line),
-                  unary!(
-                    "Await",
-                    "Pre",
+                  stmt!(
                     pos!(col + 13, line),
-                    callexpr!(
-                      "Expr",
-                      pos!(col + 19, line),
-                      ident!("x", pos!(col + 19, line)),
-                      exprs!(pos!(col + 20, line))
+                    unary!(
+                      "Await",
+                      "Pre",
+                      pos!(col + 13, line),
+                      callexpr!(
+                        "Expr",
+                        pos!(col + 19, line),
+                        ident!("x", pos!(col + 19, line)),
+                        exprs!(pos!(col + 20, line))
+                      )
                     )
                   )
                 )
-              )
+              }
             )
           )
         );
@@ -2082,9 +2306,9 @@ mod parser_test {
   }
 
   #[test]
-  fn parser_parse_generator_method_object_literal_with_await_expression_test() {
+  fn parser_parse_generator_method_object_literal_with_yield_expression_test() {
     single_expression_test_with_scope(
-      |(col, line, is_strict)| {
+      |(col, line, is_strict, is_skip_parser)| {
         return objectlit!(
           ObjectLitType::NONE,
           pos!(col + 1, line),
@@ -2094,28 +2318,32 @@ mod parser_test {
             fnexpr!(
               pos!(col + 2, line),
               "Generator",
-              0,
-              0,
+              if is_skip_parser { col + 13 } else { 0 },
+              if is_skip_parser { col + 18 } else { 0 },
               scope!(@opaque is_strict,0, true),
               ident!("a", pos!(col + 3, line)),
               exprs!(pos!(col + 5, line)),
-              stmts!(
-                pos!(col + 8, line),
-                stmt!(
+              if is_skip_parser {
+                void!()
+              } else {
+                stmts!(
                   pos!(col + 8, line),
-                  unary!(
-                    "Yield",
-                    "Pre",
+                  stmt!(
                     pos!(col + 8, line),
-                    callexpr!(
-                      "Expr",
-                      pos!(col + 14, line),
-                      ident!("x", pos!(col + 14, line)),
-                      exprs!(pos!(col + 15, line))
+                    unary!(
+                      "Yield",
+                      "Pre",
+                      pos!(col + 8, line),
+                      callexpr!(
+                        "Expr",
+                        pos!(col + 14, line),
+                        ident!("x", pos!(col + 14, line)),
+                        exprs!(pos!(col + 15, line))
+                      )
                     )
                   )
                 )
-              )
+              }
             )
           )
         );
@@ -2128,7 +2356,7 @@ mod parser_test {
   #[test]
   fn parser_parse_async_generator_method_object_literal_with_await_expression_test() {
     single_expression_test_with_scope(
-      |(col, line, is_strict)| {
+      |(col, line, is_strict, is_skip_parser)| {
         return objectlit!(
           ObjectLitType::NONE,
           pos!(col + 1, line),
@@ -2138,42 +2366,46 @@ mod parser_test {
             afnexpr!(
               pos!(col + 2, line),
               "Generator",
-              0,
-              0,
+              if is_skip_parser { col + 19 } else { 0 },
+              if is_skip_parser { col + 36 } else { 0 },
               scope!(@opaque is_strict,0, true),
               ident!("a", pos!(col + 9, line)),
               exprs!(pos!(col + 11, line)),
-              stmts!(
-                pos!(col + 14, line),
-                stmt!(
+              if is_skip_parser {
+                void!()
+              } else {
+                stmts!(
                   pos!(col + 14, line),
-                  unary!(
-                    "Await",
-                    "Pre",
+                  stmt!(
                     pos!(col + 14, line),
-                    callexpr!(
-                      "Expr",
-                      pos!(col + 20, line),
-                      ident!("x", pos!(col + 20, line)),
-                      exprs!(pos!(col + 21, line))
+                    unary!(
+                      "Await",
+                      "Pre",
+                      pos!(col + 14, line),
+                      callexpr!(
+                        "Expr",
+                        pos!(col + 20, line),
+                        ident!("x", pos!(col + 20, line)),
+                        exprs!(pos!(col + 21, line))
+                      )
                     )
-                  )
-                ),
-                stmt!(
-                  pos!(col + 25, line),
-                  unary!(
-                    "Yield",
-                    "Pre",
+                  ),
+                  stmt!(
                     pos!(col + 25, line),
-                    callexpr!(
-                      "Expr",
-                      pos!(col + 31, line),
-                      ident!("y", pos!(col + 31, line)),
-                      exprs!(pos!(col + 32, line))
+                    unary!(
+                      "Yield",
+                      "Pre",
+                      pos!(col + 25, line),
+                      callexpr!(
+                        "Expr",
+                        pos!(col + 31, line),
+                        ident!("y", pos!(col + 31, line)),
+                        exprs!(pos!(col + 32, line))
+                      )
                     )
                   )
                 )
-              )
+              }
             )
           )
         );
@@ -2186,7 +2418,7 @@ mod parser_test {
   #[test]
   fn parse_simple_object_pattern() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpAssign",
           pos!(col + 1, line),
@@ -2205,7 +2437,7 @@ mod parser_test {
   #[test]
   fn parse_simple_object_pattern_2() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpAssign",
           pos!(col + 1, line),
@@ -2225,7 +2457,7 @@ mod parser_test {
   #[test]
   fn parse_object_pattern_with_initializer() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpAssign",
           pos!(col + 1, line),
@@ -2249,7 +2481,7 @@ mod parser_test {
   #[test]
   fn parse_object_pattern_with_value_and_initializer() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpAssign",
           pos!(col + 1, line),
@@ -2277,7 +2509,7 @@ mod parser_test {
   #[test]
   fn parse_object_pattern_with_spread() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpAssign",
           pos!(col + 1, line),
@@ -2299,7 +2531,7 @@ mod parser_test {
   #[test]
   fn parse_object_pattern_with_nested() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpAssign",
           pos!(col + 1, line),
@@ -2334,7 +2566,7 @@ mod parser_test {
   #[test]
   fn parse_object_pattern_and_array_pattern() {
     single_expression_test(
-      |(col, line, _)| {
+      |(col, line, _, _)| {
         return binary!(
           "OpAssign",
           pos!(col + 1, line),
@@ -2368,15 +2600,10 @@ mod parser_test {
   }
 
   #[test]
-  fn obejct_pattern_spread_is_not_last_element_early_error_test() {
-    let env = [
-      (Some(""), ""),
-      (Some("'use strict';"), ""),
-      (Some("!function X() {"), ""),
-    ];
+  fn object_pattern_spread_is_not_last_element_early_error_test() {
     syntax_error_test(
-      &env,
-      "([...a, b]) = x",
+      &BASIC_ENV,
+      "([...a, b] = x)",
       &[&s_pos!(2, 6, 0, 0), &s_pos!(15, 19, 0, 0), &s_pos!(17, 21, 0, 0)],
       false,
     );
@@ -2395,20 +2622,15 @@ mod parser_test {
 
   #[test]
   fn method_has_direct_super_early_error_test() {
-    let env = [
-      (Some(""), ""),
-      (Some("'use strict';"), ""),
-      (Some("!function X() {"), ""),
-    ];
     syntax_error_test(
-      &env,
+      &BASIC_ENV,
       "({a(a, b, super) {}})",
       &[&s_pos!(10, 15, 0, 0), &s_pos!(23, 28, 0, 0), &s_pos!(25, 30, 0, 0)],
       false,
     );
 
     syntax_error_test(
-      &env,
+      &BASIC_ENV,
       "({a(a, b) { super() }})",
       &[&s_pos!(12, 17, 0, 0), &s_pos!(25, 30, 0, 0), &s_pos!(27, 32, 0, 0)],
       false,
@@ -2416,16 +2638,101 @@ mod parser_test {
   }
 
   #[test]
-  fn object_literal_has_propery_name_initializer_early_error_test() {
-    let env = [
-      (Some(""), ""),
-      (Some("'use strict';"), ""),
-      (Some("!function X() {"), ""),
-    ];
+  fn method_has_duplicated_parameters_error_test() {
     syntax_error_test(
-      &env,
+      &BASIC_ENV,
+      "({a(a, a) {}})",
+      &[&s_pos!(7, 8, 0, 0), &s_pos!(20, 21, 0, 0), &s_pos!(22, 23, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn method_has_duplicated_parameters_with_simple_object_pattern_error_test() {
+    syntax_error_test(
+      &BASIC_ENV,
+      "({a(a, {a}) {}})",
+      &[&s_pos!(8, 9, 0, 0), &s_pos!(21, 22, 0, 0), &s_pos!(23, 24, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn method_has_duplicated_parameters_with_simple_object_pattern_error_test_2() {
+    syntax_error_test(
+      &BASIC_ENV,
+      "({a(a, {a, b}) {}})",
+      &[&s_pos!(8, 9, 0, 0), &s_pos!(21, 22, 0, 0), &s_pos!(23, 24, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn method_has_duplicated_parameters_with_nested_object_pattern_error_test() {
+    syntax_error_test(
+      &BASIC_ENV,
+      "({a(a, {b: {c: {a}}}) {}})",
+      &[&s_pos!(16, 17, 0, 0), &s_pos!(29, 30, 0, 0), &s_pos!(31, 32, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn method_has_duplicated_parameters_with_complex_pattern_error_test() {
+    syntax_error_test(
+      &BASIC_ENV,
+      "({a(a, {[((a, b) => {})()]: [{c: {o: [{a}]}}]}) {}})",
+      &[&s_pos!(39, 40, 0, 0), &s_pos!(52, 53, 0, 0), &s_pos!(54, 55, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn method_has_duplicated_parameters_skip_parser_error_test() {
+    syntax_error_test(
+      &BASIC_ENV,
+      "({a(a, b) { ({b(a, a) {}}) }})",
+      &[&s_pos!(19, 20, 0, 0), &s_pos!(32, 33, 0, 0), &s_pos!(34, 35, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn method_has_not_simple_parameter_but_declare_strict() {
+    syntax_error_test(
+      &BASIC_ENV,
+      "({a({a}) {'use strict'}})",
+      &[&s_pos!(10, 22, 0, 0), &s_pos!(23, 35, 0, 0), &s_pos!(25, 37, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn setter_has_not_simple_parameter_but_declare_strict() {
+    syntax_error_test(
+      &BASIC_ENV,
+      "({set a({a}) {'use strict'}})",
+      &[&s_pos!(14, 26, 0, 0), &s_pos!(27, 39, 0, 0), &s_pos!(29, 41, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn object_literal_has_propery_name_initializer_early_error_test() {
+    syntax_error_test(
+      &BASIC_ENV,
       "({a = 1, b})",
       &[&s_pos!(4, 5, 0, 0), &s_pos!(17, 18, 0, 0), &s_pos!(19, 20, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn generator_method_not_allowed_to_use_yield_param_early_error_test() {
+    syntax_error_test(
+      &BASIC_ENV,
+      "({*a(yield) {}})",
+      &[&s_pos!(5, 10, 0, 0), &s_pos!(18, 23, 0, 0), &s_pos!(20, 25, 0, 0)],
       false,
     );
   }

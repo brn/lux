@@ -35,7 +35,7 @@ pub trait NodeOps {
     function_type: FunctionType,
     scope: Exotic<Scope>,
     accessor: FunctionAccessor,
-    formal_parameters: Node<Expressions>,
+    formal_parameters: Expr,
     function_body: Option<Ast>,
     function_body_start: u32,
     function_body_end: u32,

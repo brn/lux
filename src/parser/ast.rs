@@ -24,13 +24,22 @@ pub trait Is<T> {
   fn is(value: T) -> bool;
 }
 
+bitflags! {
+  pub struct AstMetaFlag: u8 {
+    const NONE = 0;
+    const PARENTHESIZED = 1;
+  }
+}
+
 #[derive(Copy, Clone)]
 pub struct AstMetadata {
+  flag: AstMetaFlag,
   source_position: RuntimeSourcePosition,
 }
 impl AstMetadata {
   fn new() -> Self {
     return AstMetadata {
+      flag: AstMetaFlag::NONE,
       source_position: RuntimeSourcePosition::new(0, 0),
     };
   }
@@ -78,6 +87,26 @@ pub trait AstMetaInfo {
 }
 
 macro_rules! _ast_enum {
+  (@expr, $name:ident { $($item:ident(Node<$type:ty>),)* }) => {
+    _ast_enum!($name { $($item(Node<$type>),)* });
+    impl $name {
+      pub fn set_parenthesized(&mut self) {
+        return match self {
+          $(
+            &mut $name::$item(mut node) => node.set_parenthesized(),
+          )*
+        }
+      }
+
+      pub fn is_parenthesized(&self) -> bool {
+        return match self {
+          $(
+            &$name::$item(node) => node.is_parenthesized(),
+          )*
+        }
+      }
+    }
+  };
   ($name:ident { $($item:ident(Node<$type:ty>),)* }) => {
     #[derive(Copy, Clone, Debug)]
     pub enum $name {
@@ -151,6 +180,7 @@ macro_rules! _ast_enum {
 }
 
 _ast_enum! {
+  @expr,
   Expr {
     Empty(Node<Empty>),
     FunctionExpression(Node<FunctionExpression>),
@@ -183,6 +213,16 @@ macro_rules! impl_expr {
       $to_string
 
       $to_string_tree
+    }
+
+    impl Node<$name> {
+      fn set_parenthesized(&mut self) {
+        self.0.meta.flag |= AstMetaFlag::PARENTHESIZED;
+      }
+
+      fn is_parenthesized(&self) -> bool {
+        return self.0.meta.flag.contains(AstMetaFlag::PARENTHESIZED);
+      }
     }
 
     impl From<Node<$name>> for Expr {
@@ -1050,7 +1090,7 @@ pub struct FunctionExpression {
   accessor: FunctionAccessor,
 
   #[property(get(type = "copy"))]
-  formal_parameters: Node<Expressions>,
+  formal_parameters: Expr,
 
   #[property(get(type = "copy"))]
   function_body: Option<Ast>,
@@ -1068,7 +1108,7 @@ impl_expr!(
   FunctionExpression,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
-      "{}[FunctionExpression type = {}{} body_start = {} body_end = {} {:?} {}]\n",
+      "{}[FunctionExpression type = {}{}{} body_start = {} body_end = {} {:?} {}]\n",
       indent,
       if self.is_arrow_function() {
         "ArrowFunction"
@@ -1077,7 +1117,12 @@ impl_expr!(
       } else {
         "Function"
       },
-      if self.is_async { " async = true" } else { "" },
+      if self.is_async { " async" } else { "" },
+      match self.accessor {
+        FunctionAccessor::Getter => " get",
+        FunctionAccessor::Setter => " set",
+        _ => "",
+      },
       self.function_body_start,
       self.function_body_end,
       *self.scope,
@@ -1106,7 +1151,7 @@ impl FunctionExpression {
     function_type: FunctionType,
     scope: Exotic<Scope>,
     accessor: FunctionAccessor,
-    formal_parameters: Node<Expressions>,
+    formal_parameters: Expr,
     function_body: Option<Ast>,
     function_body_start: u32,
     function_body_end: u32,
@@ -1148,9 +1193,6 @@ pub struct ObjectPropertyExpression {
 
   #[property(get(type = "copy"))]
   init: Option<Expr>,
-
-  #[property(skip)]
-  object_property_name_initializer_position: Option<SourcePosition>,
 }
 impl_expr!(
   ObjectPropertyExpression,
@@ -1178,25 +1220,7 @@ impl ObjectPropertyExpression {
     value: Option<Expr>,
     init: Option<Expr>,
   ) -> Node<ObjectPropertyExpression> {
-    return Node::new(
-      region,
-      ObjectPropertyExpression {
-        key,
-        value,
-        init,
-        object_property_name_initializer_position: None,
-      },
-    );
-  }
-
-  #[inline(always)]
-  pub fn set_object_property_name_initializer_position(&mut self, pos: &SourcePosition) {
-    self.object_property_name_initializer_position = Some(pos.clone());
-  }
-
-  #[inline(always)]
-  pub fn object_property_name_initializer_position(&self) -> Option<&SourcePosition> {
-    return self.object_property_name_initializer_position.as_ref();
+    return Node::new(region, ObjectPropertyExpression { key, value, init });
   }
 }
 

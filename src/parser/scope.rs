@@ -24,13 +24,16 @@ pub struct Scope {
   scope_flag: ScopeFlag,
 
   #[property(skip)]
-  var_map: HashMap<FixedU16CodePointArray, Ast>,
+  var_list: Vec<(Vec<u16>, SourcePosition)>,
 
   #[property(skip)]
   children: Vec<Exotic<Scope>>,
 
   #[property(get(type = "copy"), set(type = "ref"))]
   parent_scope: Option<Exotic<Scope>>,
+
+  #[property(get(type = "copy"), set(type = "ref"))]
+  is_simple_parameter: bool,
 
   #[property(skip)]
   nearest_opaque_scope: Option<Exotic<Scope>>,
@@ -41,10 +44,11 @@ impl Scope {
     return region.alloc(Scope {
       scope_flag,
       children: Vec::new(),
-      var_map: HashMap::new(),
+      var_list: Vec::new(),
       parent_scope: None,
       nearest_opaque_scope: None,
       first_super_call_position: None,
+      is_simple_parameter: true,
     });
   }
 
@@ -93,12 +97,18 @@ impl Scope {
     return self.children.iter();
   }
 
-  pub fn declare_var(&mut self, name: FixedU16CodePointArray, value: Ast) {
+  pub fn declare_vars(&mut self, vars: &Vec<(Vec<u16>, SourcePosition)>) {
+    for var in vars.iter() {
+      self.declare_var(var.clone());
+    }
+  }
+
+  pub fn declare_var(&mut self, var: (Vec<u16>, SourcePosition)) {
     if self.is_opaque() {
-      self.var_map.insert(name, value);
+      self.var_list.push(var);
     } else {
       if let Some(mut scope) = self.nearest_opaque_scope {
-        scope.declare_var(name, value);
+        scope.declare_var(var);
         return;
       }
       let mut parent = self.parent_scope;
@@ -106,12 +116,8 @@ impl Scope {
         parent = parent.unwrap().parent_scope;
       }
       self.nearest_opaque_scope = parent;
-      parent.unwrap().declare_var(name, value);
+      parent.unwrap().declare_var(var);
     }
-  }
-
-  pub fn is_declared(&self, name: FixedU16CodePointArray) -> Option<&Ast> {
-    return self.var_map.get(&name);
   }
 }
 
