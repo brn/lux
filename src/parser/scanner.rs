@@ -427,22 +427,17 @@ impl Scanner {
   fn decode_octal_escape(&mut self) -> u16 {
     let start = *self.iter;
     let followable_count = chars::octal_hex_followable_count(start);
-    let mut sum = start as u16;
+    let mut sum = chars::to_int_from_octal(start).unwrap() as u16;
     for _ in 0..followable_count {
-      if let Some(u) = self.iter.peek() {
-        if !chars::is_octal_digits(u) {
-          return sum;
-        } else {
-          if let Ok(v) = chars::to_int_from_octal(u) {
-            sum = sum * 8 + v as u16;
-          } else {
-            return sum;
-          }
-        }
-        self.advance();
+      let u = self.advance();
+      if !chars::is_octal_digits(u) {
+        return sum;
+      } else {
+        sum = sum * 8 + chars::to_int_from_octal(u).unwrap() as u16;
       }
     }
 
+    self.advance();
     return sum;
   }
 
@@ -1253,7 +1248,6 @@ impl Scanner {
           Token::Invalid
         );
       }
-      println!("{}", parts_len);
       match self.iter.as_char() {
         '\\' => {
           if !is_escaped {
