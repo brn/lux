@@ -202,6 +202,10 @@ pub trait NodeOps {
     return new_node!(ClassExpression, self.region(), pos, name, heritage).into();
   }
 
+  fn new_import_meta(&mut self, pos: Option<&RuntimeSourcePosition>) -> Expr {
+    return new_node!(ImportMetaExpression, self.region(), pos).into();
+  }
+
   fn is_binary_expr(&self, expr: Expr) -> bool {
     return match expr {
       Expr::BinaryExpression(_) => true,
@@ -247,6 +251,13 @@ pub trait NodeOps {
   fn is_literal(&self, expr: Expr) -> bool {
     return match expr {
       Expr::Literal(_) => true,
+      _ => false,
+    };
+  }
+
+  fn is_string_literal(&self, expr: Expr) -> bool {
+    return match expr {
+      Expr::Literal(lit) => lit.literal_type() == Token::StringLiteral,
       _ => false,
     };
   }

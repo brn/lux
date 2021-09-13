@@ -62,7 +62,7 @@ macro_rules! token_enum {
       pub fn is_assignment_operator(&self) -> bool {
         use $name::*;
         return match self {
-          OpMulAssign | OpDivAssign | OpPlusAssign | OpMinusAssign | OpShlAssign | OpShrAssign | OpUShrAssign | OpAndAssign | OpOrAssign | OpXorAssign | OpPowAssign |OpAssign | OpModAssign => true,
+          OpLogicalAndAssign | OpLogicalOrAssign | OpMulAssign | OpDivAssign | OpPlusAssign | OpMinusAssign | OpShlAssign | OpShrAssign | OpUShrAssign | OpAndAssign | OpOrAssign | OpXorAssign | OpPowAssign |OpAssign | OpModAssign => true,
           _ => false
         }
       }
@@ -134,7 +134,9 @@ token_enum! {
     (OpLessThan,           false, false, false, "<"),
     (OpLessThanOrEq,       false, false, false, "<="),
     (OpLogicalAnd,         false, false, false, "&&"),
+    (OpLogicalAndAssign,   false, false, false, "&&="),
     (OpLogicalOr,          false, false, false, "||"),
+    (OpLogicalOrAssign,    false, false, false, "||="),
     (OpMinus,              false, false, false, "-"),
     (OpMinusAssign,        false, false, false, "-="),
     (OpMod,                false, false, false, "%"),
@@ -198,6 +200,7 @@ token_enum! {
     (Target,               false, true,  true,  "target"),
     (Get,                  false, true,  true,  "get"),
     (Set,                  false, true,  true,  "set"),
+    (Meta,                 false, true,  true,  "meta"),
     (From,                 false, true,  true,  "from"),
     (As,                   false, true,  true,  "as"),
     (Implements,           false, true,  true,  "implements"),

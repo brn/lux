@@ -14,10 +14,12 @@ pub struct SkipTreeBuilder {
   skip_super_call: Expr,
   skip_identifier: Expr,
   skip_literal: Expr,
+  skip_string: Expr,
   skip_binary_expr: Expr,
   skip_exprs: Expr,
   skip_expr: Expr,
   skip_template: Expr,
+  skip_import_meta: Expr,
   skip_stmt: Stmt,
 }
 
@@ -32,9 +34,11 @@ impl SkipTreeBuilder {
       skip_object: SkipExpr::new(&mut region, SkipExprType::OBJECT).into(),
       skip_identifier: SkipExpr::new(&mut region, SkipExprType::IDENTIFIER).into(),
       skip_literal: SkipExpr::new(&mut region, SkipExprType::LITERAL).into(),
+      skip_string: SkipExpr::new(&mut region, SkipExprType::STRING_LITERAL).into(),
       skip_binary_expr: SkipExpr::new(&mut region, SkipExprType::BINARY_EXPR).into(),
       skip_expr: SkipExpr::new(&mut region, SkipExprType::EXPR).into(),
       skip_template: SkipExpr::new(&mut region, SkipExprType::TEMPLATE).into(),
+      skip_import_meta: SkipExpr::new(&mut region, SkipExprType::IMPORT_META).into(),
       skip_stmt: SkipStmt::new(&mut region).into(),
       skip_exprs: SkipExpr::new(&mut region, SkipExprType::EXPRS).into(),
     };
@@ -106,10 +110,11 @@ impl NodeOps for SkipTreeBuilder {
     literal_value: LiteralValue,
     pos: Option<&RuntimeSourcePosition>,
   ) -> Expr {
-    if literal_type == Token::Identifier {
-      return self.skip_identifier;
-    }
-    return self.skip_literal;
+    return match literal_type {
+      Token::Identifier => self.skip_identifier,
+      Token::StringLiteral => self.skip_string,
+      _ => self.skip_literal,
+    };
   }
 
   fn new_object_property_expression(
@@ -218,6 +223,13 @@ impl NodeOps for SkipTreeBuilder {
     };
   }
 
+  fn is_string_literal(&self, expr: Expr) -> bool {
+    return match expr {
+      Expr::SkipExpr(e) => e.is_string_literal(),
+      _ => false,
+    };
+  }
+
   fn is_identifier(&self, expr: Expr) -> bool {
     return match expr {
       Expr::SkipExpr(e) => e.is_identifier(),
@@ -279,6 +291,10 @@ impl NodeOps for SkipTreeBuilder {
     pos: Option<&RuntimeSourcePosition>,
   ) -> Stmt {
     return self.skip_stmt;
+  }
+
+  fn new_import_meta(&mut self, pos: Option<&RuntimeSourcePosition>) -> Expr {
+    return self.skip_import_meta;
   }
 
   fn new_export_decl(

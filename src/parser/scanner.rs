@@ -711,6 +711,10 @@ impl Scanner {
         }
         if self.iter.as_char() == '|' {
           self.advance();
+          if self.iter.as_char() == '=' {
+            self.advance();
+            return OpLogicalOrAssign;
+          }
           return OpLogicalOr;
         }
         return OpOr;
@@ -723,6 +727,10 @@ impl Scanner {
         }
         if self.iter.as_char() == '&' {
           self.advance();
+          if self.iter.as_char() == '=' {
+            self.advance();
+            return OpLogicalAndAssign;
+          }
           return OpLogicalAnd;
         }
         return OpAnd;
@@ -778,7 +786,7 @@ impl Scanner {
       }
       '?' => {
         self.advance();
-        if self.iter.as_char() == '.' {
+        if self.iter.as_char() == '.' && !chars::is_decimal_digits(self.iter.peek().unwrap_or(INVALID)) {
           self.advance();
           return OpOptionalChaining;
         }
@@ -1081,6 +1089,8 @@ impl Scanner {
       "interface": Interface,
     }, 'l' => {
       "let": Let,
+    }, 'm' => {
+      "meta": Meta,
     }, 'n' => {
       "new": New,
       "null": Null,

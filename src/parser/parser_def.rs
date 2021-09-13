@@ -1,9 +1,7 @@
 use super::ast::*;
 use super::error_reporter::ErrorDescriptor;
-use super::scope::*;
 use super::source_position::{RuntimeSourcePosition, SourcePosition};
-use super::token::*;
-use crate::utility::Exotic;
+use crate::utility::{Exotic, Region};
 
 pub type ParseResult<T> = Result<T, Exotic<ErrorDescriptor>>;
 
@@ -21,6 +19,7 @@ bitflags! {
 #[derive(PartialEq, PartialOrd, Copy, Clone)]
 pub enum OperatorPriority {
   None,
+  NullCoalescing,
   LogicalOr,
   LogicalAnd,
   BitwiseOr,
@@ -73,6 +72,12 @@ impl ParserConstraints {
   }
 }
 
+#[derive(Debug, PartialEq, Eq, Copy, Clone)]
+pub enum AssignmentTargetType {
+  Simple,
+  Invalid,
+}
+
 #[derive(Property, Clone)]
 pub struct ExpressionContext {
   #[property(skip)]
@@ -83,6 +88,12 @@ pub struct ExpressionContext {
 
   #[property(skip)]
   first_strict_mode_error: Option<Exotic<ErrorDescriptor>>,
+
+  #[property(get(type = "copy"), set(type = "ref"))]
+  assignment_target_type: AssignmentTargetType,
+
+  #[property(get(type = "copy"), set(type = "ref"))]
+  is_in_allowed: bool,
 
   #[property(get(type = "copy"), set(type = "ref"))]
   is_maybe_immediate_function: bool,
@@ -111,7 +122,25 @@ impl ExpressionContext {
       first_value_error: None,
       first_strict_mode_error: None,
       is_maybe_immediate_function: false,
+      is_in_allowed: false,
+      assignment_target_type: AssignmentTargetType::Simple,
     }
+  }
+
+  pub fn create_child_context(&self) -> ExpressionContext {
+    let mut child = ExpressionContext::new();
+    child.set_is_in_allowed(self.is_in_allowed);
+    child.set_is_maybe_immediate_function(self.is_maybe_immediate_function);
+    return child;
+  }
+
+  pub fn create_child_arrow_context(&self) -> ArrowFunctionContext {
+    let mut child = ArrowFunctionContext::new();
+    child.expression_context.set_is_in_allowed(self.is_in_allowed);
+    child
+      .expression_context
+      .set_is_maybe_immediate_function(self.is_maybe_immediate_function);
+    return child;
   }
 
   pub fn propagate(&self, ec: &mut ExprCtx) {
@@ -124,6 +153,7 @@ impl ExpressionContext {
     if self.first_strict_mode_error.is_some() {
       ec.first_strict_mode_error = self.first_strict_mode_error.clone();
     }
+    ec.assignment_target_type = self.assignment_target_type;
   }
 
   pub fn reset(&mut self) -> ExpressionContext {
@@ -182,6 +212,19 @@ impl ArrowFunctionContext {
       is_simple_parameter: true,
       var_list: Vec::new(),
     }
+  }
+
+  pub fn create_child_context(&self) -> ExpressionContext {
+    let mut child = ExpressionContext::new();
+    child.set_is_in_allowed(self.expression_context.is_in_allowed);
+    child.set_is_maybe_immediate_function(self.expression_context.is_maybe_immediate_function);
+    return child;
+  }
+
+  pub fn create_child_arrow_context(&self) -> ArrowFunctionContext {
+    let mut child = ArrowFunctionContext::new();
+    child.expression_context = self.expression_context.create_child_context();
+    return child;
   }
 
   _get_set!(first_arrow_parameter_error);
@@ -269,7 +312,7 @@ macro_rules! context_enum {
         }
       }
 
-      pub fn to_arrow_ctx_unchecked(&mut self) -> &ArrowFunctionContext {
+      pub fn to_arrow_ctx_unchecked(&self) -> &ArrowFunctionContext {
         return self.to_arrow_ctx().unwrap();
       }
 
@@ -277,6 +320,22 @@ macro_rules! context_enum {
         match self {
           $(
             &mut $name::$item(ref mut e) => e.propagate(ec),
+          )*
+        }
+      }
+
+      pub fn create_child_context(&self) -> ExpressionContext {
+        match self {
+          $(
+            &$name::$item(ref e) => e.create_child_context(),
+          )*
+        }
+      }
+
+      pub fn create_child_arrow_context(&self) -> ArrowFunctionContext {
+        match self {
+          $(
+            &$name::$item(ref e) => e.create_child_arrow_context(),
           )*
         }
       }
@@ -321,132 +380,48 @@ impl From<ArrowFunctionContext> for ExprCtx {
   }
 }
 
-// pub trait ParserDef {
-//   fn parse_directive_prologue(&mut self, scope: Exotic<Scope>);
-//   fn parse_program(&mut self);
-//   fn parse_terminator<T>(&mut self, expr: T) -> ParseResult<T>;
-//   fn parse_identifier(&mut self, constraints: ParserConstraints) -> ParseResult<Expr>;
-//   fn parse_identifier_reference(&mut self, constraints: ParserConstraints) -> ParseResult<Expr>;
-//   fn parse_primary_expression(&mut self) -> ParseResult<Expr>;
-//   fn parse_literal(&mut self) -> ParseResult<Expr>;
-//   fn parse_regular_expression(&mut self) -> ParseResult<Expr>;
-//   fn parse_array_literal(&mut self, constraints: ParserConstraints) -> ParseResult<Expr>;
-//   fn parse_element_list(&mut self) -> ParseResult<Expr>;
-//   fn parse_spread_element(&mut self) -> ParseResult<Expr>;
-//   fn parse_object_literal(&mut self, constraints: ParserConstraints) -> ParseResult<Expr>;
-//   fn parse_object_literal_property(&mut self, constraints: ParserConstraints) -> ParseResult<Expr>;
-//   fn parse_property_name(&mut self) -> ParseResult<Expr>;
-//   fn parse_template_literal(&mut self) -> ParseResult<Expr>;
-//   fn parse_cover_parenthesized_expression_and_arrow_parameter_list(&mut self) -> ParseResult<Expr>;
-//   fn parse_member_expression(&mut self) -> ParseResult<Expr>;
-//   fn parse_post_member_expression(
-//     &mut self,
-//     source_position: &RuntimeSourcePosition,
-//     expr: Expr,
-//     receiver_type: CallReceiverType,
-//     constraints: ParserConstraints,
-//     error_if_default: bool,
-//   ) -> ParseResult<Expr>;
-//   fn parse_new_expression(&mut self) -> ParseResult<Expr>;
-//   fn parse_super_call(&mut self) -> ParseResult<Expr>;
-//   fn parse_import_call(&mut self) -> ParseResult<Expr>;
-//   fn parse_arguments(&mut self) -> ParseResult<Expr>;
-//   fn parse_arguments_list(&mut self) -> ParseResult<Expr>;
-//   fn parse_left_hand_side_expression(&mut self) -> ParseResult<Expr>;
-//   fn parse_update_expression(&mut self) -> ParseResult<Expr>;
-//   fn parse_unary_expression(&mut self) -> ParseResult<Expr>;
-//   fn parse_binary_operator_by_priority(
-//     &mut self,
-//     prev_ast: Expr,
-//     priority: OperatorPriority,
-//     prev_priority: OperatorPriority,
-//   ) -> ParseResult<Expr>;
-//   fn parse_binary_expression(&mut self) -> ParseResult<Expr>;
-//   fn parse_conditional_expression(&mut self) -> ParseResult<Expr>;
-//   fn parse_assignment_expression(&mut self) -> ParseResult<Expr>;
-//   fn parse_assignment_expression_lhs(&mut self) -> ParseResult<Expr>;
-//   fn parse_assignment_pattern(&mut self) -> ParseResult<Expr>;
-//   fn parse_object_assignment_pattern(&mut self) -> ParseResult<Expr>;
-//   fn parse_array_assignment_pattern(&mut self) -> ParseResult<Expr>;
-//   fn parse_assignment_property_list(&mut self) -> ParseResult<Expr>;
-//   fn parse_assignment_element_list(&mut self) -> ParseResult<Expr>;
-//   fn parse_assignment_elision_element(&mut self) -> ParseResult<Expr>;
-//   fn parse_assignment_property(&mut self) -> ParseResult<Expr>;
-//   fn parse_assignment_element(&mut self) -> ParseResult<Expr>;
-//   fn parse_assignment_rest_element(&mut self) -> ParseResult<Expr>;
-//   fn parse_destructuring_assignment_target(&mut self) -> ParseResult<Expr>;
-//   fn parse_expression(&mut self, should_return_exprs: bool) -> ParseResult<Expr>;
-//   fn parse_statement(&mut self) -> ParseResult<Stmt>;
-//   fn parse_declaration(&mut self) -> ParseResult<Stmt>;
-//   fn parse_hoistable_declaration(&mut self) -> ParseResult<Stmt>;
-//   fn parse_breakable_statement(&mut self) -> ParseResult<Expr>;
-//   fn parse_block_statement(&mut self) -> ParseResult<Stmt>;
-//   fn parse_block(&mut self) -> ParseResult<Stmt>;
-//   fn parse_statement_list<T: Fn(Token) -> bool>(&mut self, a: T) -> ParseResult<Stmt>;
-//   fn parse_statement_list_item(&mut self) -> ParseResult<Stmt>;
-//   fn parse_lexical_declaration(&mut self) -> ParseResult<Stmt>;
-//   fn parse_lexical_binding(&mut self) -> ParseResult<Expr>;
-//   fn parse_variable_statement(&mut self) -> ParseResult<Stmt>;
-//   fn parse_variable_declaration_list(&mut self) -> ParseResult<Stmt>;
-//   fn parse_variable_declaration(&mut self) -> ParseResult<Stmt>;
-//   fn parse_binding_pattern(&mut self) -> ParseResult<Expr>;
-//   fn parse_binding_element(&mut self) -> ParseResult<Expr>;
-//   fn parse_single_name_binding(&mut self, constraints: ParserConstraints) -> ParseResult<Expr>;
-//   fn parse_binding_rest_element(&mut self) -> ParseResult<Expr>;
-//   fn parse_expression_statement(&mut self) -> ParseResult<Stmt>;
-//   fn parse_if_statement(&mut self) -> ParseResult<Stmt>;
-//   fn parse_iteration_statement(&mut self) -> ParseResult<Expr>;
-//   fn parse_for_declaration(&mut self) -> ParseResult<Stmt>;
-//   fn parse_for_binding(&mut self) -> ParseResult<Expr>;
-//   fn parse_continue_statement(&mut self) -> ParseResult<Stmt>;
-//   fn parse_break_statement(&mut self) -> ParseResult<Stmt>;
-//   fn parse_return_statement(&mut self) -> ParseResult<Stmt>;
-//   fn parse_with_statement(&mut self) -> ParseResult<Stmt>;
-//   fn parse_switch_statement(&mut self) -> ParseResult<Stmt>;
-//   fn parse_case_block(&mut self) -> ParseResult<Expr>;
-//   fn parse_case_clauses(&mut self) -> ParseResult<Expr>;
-//   fn parse_case_clause(&mut self) -> ParseResult<Expr>;
-//   fn parse_default_caluse(&mut self) -> ParseResult<Expr>;
-//   fn parse_labelled_statement(&mut self) -> ParseResult<Stmt>;
-//   fn parse_labelled_item(&mut self) -> ParseResult<Expr>;
-//   fn parse_throw_statement(&mut self) -> ParseResult<Stmt>;
-//   fn parse_try_statement(&mut self) -> ParseResult<Stmt>;
-//   fn parse_catch(&mut self) -> ParseResult<Expr>;
-//   fn parse_finally(&mut self) -> ParseResult<Expr>;
-//   fn parse_catch_parameter(&mut self) -> ParseResult<Expr>;
-//   fn parse_debugger_statement(&mut self) -> ParseResult<Stmt>;
-//   fn parse_function_declaration(&mut self, is_async: bool, is_default: bool) -> ParseResult<Stmt>;
-//   fn parse_function_expression(&mut self, is_async: bool, is_default: bool) -> ParseResult<Expr>;
-//   fn parse_formal_parameters(&mut self) -> ParseResult<Expr>;
-//   fn parse_formal_parameter_list(&mut self) -> ParseResult<Expr>;
-//   fn parse_function_rest_parameter(&mut self) -> ParseResult<Expr>;
-//   fn parse_function_body(&mut self) -> ParseResult<Stmt>;
-//   fn parse_arrow_function(&mut self, is_async: bool) -> ParseResult<Expr>;
-//   fn parse_arrow_parameter(&mut self) -> ParseResult<Expr>;
-//   fn parse_concise_body(&mut self, is_async: bool, args: Expr) -> ParseResult<Expr>;
-//   fn parse_method_definition(&mut self) -> ParseResult<Expr>;
-//   fn parse_property_set_parameter_list(&mut self) -> ParseResult<Expr>;
-//   fn parse_generator_method(&mut self) -> ParseResult<Expr>;
-//   fn parse_generator_declaration(&mut self) -> ParseResult<Stmt>;
-//   fn parse_generator_expression(&mut self) -> ParseResult<Expr>;
-//   fn parse_generator_body(&mut self) -> ParseResult<Expr>;
-//   fn parse_yield_expression(&mut self) -> ParseResult<Expr>;
-//   fn parse_await_expression(&mut self) -> ParseResult<Expr>;
-//   fn parse_class_declaration(&mut self) -> ParseResult<Stmt>;
-//   fn parse_class_expression(&mut self) -> ParseResult<Expr>;
-//   fn parse_class_tail(&mut self) -> ParseResult<Expr>;
-//   fn parse_class_heritage(&mut self) -> ParseResult<Expr>;
-//   fn parse_class_body(&mut self) -> ParseResult<Expr>;
-//   fn parse_class_element_list(&mut self) -> ParseResult<Expr>;
-//   fn parse_class_element(&mut self) -> ParseResult<Expr>;
-//   fn parse_script(&mut self) -> ParseResult<Ast>;
-//   fn parse_module(&mut self) -> ParseResult<Ast>;
-//   fn parse_module_body(&mut self) -> ParseResult<Stmt>;
-//   fn parse_module_item(&mut self) -> ParseResult<Stmt>;
-//   fn parse_import_declaration(&mut self) -> ParseResult<Stmt>;
-//   fn parse_name_space_import(&mut self) -> ParseResult<Expr>;
-//   fn parse_named_import(&mut self) -> ParseResult<Expr>;
-//   fn parse_export_declaration(&mut self) -> ParseResult<Stmt>;
-//   fn parse_export_clause(&mut self) -> ParseResult<Expr>;
-//   fn parse_named_list(&mut self) -> ParseResult<Expr>;
-// }
+pub struct SyntaxErrorFactory {
+  region: Region,
+}
+
+macro_rules! error_def {
+  ($name:ident, $text:expr) => {
+    pub fn $name<T>(&mut self, pos: SourcePosition) -> ParseResult<T> {
+      return parse_error!(self.region, $text, &pos);
+    }
+
+    paste! {
+      pub fn [<$name _raw>](&mut self, pos: SourcePosition) -> Exotic<ErrorDescriptor> {
+        return parse_error!(@raw, self.region, $text, &pos);
+      }
+    }
+  };
+}
+impl SyntaxErrorFactory {
+  pub fn new(region: Region) -> Self {
+    SyntaxErrorFactory { region: region.clone() }
+  }
+  error_def!(invalid_token_found, "Invalid token found");
+  error_def!(
+    template_literal_not_allowed_after_op_chain,
+    "Template literal not allowed after optional chain"
+  );
+  error_def!(
+    duplicate_parameter_not_allowed_here,
+    "Duplicate parameter not allowed here"
+  );
+  error_def!(
+    use_strict_after_non_simple_param,
+    "Declaring 'use strict' is not allowed if function has non-simple parameter list"
+  );
+  error_def!(unexpected_token_found, "Unexpected token found");
+  error_def!(
+    invalid_left_hand_side_expression_found,
+    "Invalid left hand side expression found"
+  );
+  error_def!(
+    eval_or_arguments_in_strict_mode_code,
+    "In strict mode code, eval or arguments not allowed here"
+  );
+  error_def!(invalid_update_expression, "Invalid update expression");
+}

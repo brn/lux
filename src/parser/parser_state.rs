@@ -7,10 +7,6 @@ pub enum ParserState {
   InTaggedTemplateLiteral,
   InTemplateInterpolation,
   RegexpExpected,
-  InFunction,
-  InAsyncFunction,
-  InGeneratorFunction,
-  InAsyncGeneratorFunction,
   _None,
   _Sentinel,
 }

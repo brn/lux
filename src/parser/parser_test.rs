@@ -1081,9 +1081,47 @@ mod parser_test {
   fn parse_unary_expression_increments_pre_test() {
     single_expression_test(
       |(col, line, _, _)| {
-        return unary!("OpIncrement", "Pre", pos!(col, line), number!("1", pos!(col + 2, line)));
+        return unary!("OpIncrement", "Pre", pos!(col, line), ident!("a", pos!(col + 2, line)));
       },
-      "++1",
+      "++a",
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_increments_pre_with_eval_identifier_test() {
+    single_expression_test_with_options(
+      |(col, line, _, _)| {
+        return unary!(
+          "OpIncrement",
+          "Pre",
+          pos!(col, line),
+          ident!("eval", pos!(col + 2, line))
+        );
+      },
+      "++eval",
+      ParserOption::new(),
+      0,
+      true,
+      0,
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_increments_pre_with_arguments_identifier_test() {
+    single_expression_test_with_options(
+      |(col, line, _, _)| {
+        return unary!(
+          "OpIncrement",
+          "Pre",
+          pos!(col, line),
+          ident!("arguments", pos!(col + 2, line))
+        );
+      },
+      "++arguments",
+      ParserOption::new(),
+      0,
+      true,
+      0,
     );
   }
 
@@ -1091,9 +1129,43 @@ mod parser_test {
   fn parse_unary_expression_decrements_pre_test() {
     single_expression_test(
       |(col, line, _, _)| {
-        return unary!("OpDecrement", "Pre", pos!(col, line), number!("1", pos!(col + 2, line)));
+        return unary!("OpDecrement", "Pre", pos!(col, line), ident!("a", pos!(col + 2, line)));
       },
-      "--1",
+      "--a",
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_decrements_pre_with_yield_keyword_test() {
+    single_expression_test_with_options(
+      |(col, line, _, _)| {
+        return unary!(
+          "OpDecrement",
+          "Pre",
+          pos!(col, line),
+          ident!("yield", pos!(col + 2, line))
+        );
+      },
+      "--yield",
+      ParserOption::new(),
+      0,
+      true,
+      0,
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_decrements_pre_with_await_keyword_test() {
+    single_expression_test(
+      |(col, line, _, _)| {
+        return unary!(
+          "OpDecrement",
+          "Pre",
+          pos!(col, line),
+          ident!("await", pos!(col + 2, line))
+        );
+      },
+      "--await",
     );
   }
 
@@ -1101,9 +1173,9 @@ mod parser_test {
   fn parse_unary_expression_increments_post_test() {
     single_expression_test(
       |(col, line, _, _)| {
-        return unary!("OpIncrement", "Post", pos!(col, line), number!("1", pos!(col, line)));
+        return unary!("OpIncrement", "Post", pos!(col, line), ident!("a", pos!(col, line)));
       },
-      "1++",
+      "a++",
     );
   }
 
@@ -1111,9 +1183,106 @@ mod parser_test {
   fn parse_unary_expression_decrements_post_test() {
     single_expression_test(
       |(col, line, _, _)| {
-        return unary!("OpDecrement", "Post", pos!(col, line), number!("1", pos!(col, line)));
+        return unary!("OpDecrement", "Post", pos!(col, line), ident!("a", pos!(col, line)));
       },
-      "1--",
+      "a--",
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_decrements_post_with_yield_keyword_test() {
+    single_expression_test_with_options(
+      |(col, line, _, _)| {
+        return unary!("OpDecrement", "Post", pos!(col, line), ident!("yield", pos!(col, line)));
+      },
+      "yield--",
+      ParserOption::new(),
+      0,
+      true,
+      0,
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_decrements_post_with_await_keyword_test() {
+    single_expression_test(
+      |(col, line, _, _)| {
+        return unary!("OpDecrement", "Post", pos!(col, line), ident!("await", pos!(col, line)));
+      },
+      "await--",
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_increments_post_with_eval_identifier_test() {
+    single_expression_test_with_options(
+      |(col, line, _, _)| {
+        return unary!("OpIncrement", "Post", pos!(col, line), ident!("eval", pos!(col, line)));
+      },
+      "eval++",
+      ParserOption::new(),
+      0,
+      true,
+      0,
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_decrements_post_with_arguments_identifier_test() {
+    single_expression_test_with_options(
+      |(col, line, _, _)| {
+        return unary!(
+          "OpDecrement",
+          "Post",
+          pos!(col, line),
+          ident!("arguments", pos!(col, line))
+        );
+      },
+      "arguments--",
+      ParserOption::new(),
+      0,
+      true,
+      0,
+    );
+  }
+
+  #[test]
+  fn pre_update_expression_assignment_target_early_error_test() {
+    let env = [(None, ""), (None, ""), (Some("'use strict';"), "")];
+    syntax_error_test(
+      &env,
+      "eval++",
+      &[&s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(13, 17, 0, 0)],
+      false,
+    );
+
+    syntax_error_test(
+      &env,
+      "arguments++",
+      &[&s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(13, 22, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn pre_update_expression_assignment_target_yield_early_error_test() {
+    let env = [(Some("!function *x() {"), "}"), (None, ""), (None, "")];
+    syntax_error_test(
+      &env,
+      "++yield",
+      &[&s_pos!(18, 23, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(13, 17, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn pre_update_expression_assignment_target_await_early_error_test() {
+    let env = [(Some("!async function x() {"), "}"), (None, ""), (None, "")];
+    syntax_error_test(
+      &env,
+      "++await",
+      &[&s_pos!(23, 28, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(13, 17, 0, 0)],
+      false,
     );
   }
 
@@ -1220,6 +1389,26 @@ mod parser_test {
   }
 
   #[test]
+  fn template_literal_not_allowed_after_op_chain_early_error_test() {
+    syntax_error_test(
+      &BASIC_ENV,
+      "a?.`a`",
+      &[&s_pos!(3, 4, 0, 0), &s_pos!(16, 17, 0, 0), &s_pos!(18, 19, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn template_literal_not_allowed_after_op_chain_early_error_test_2() {
+    syntax_error_test(
+      &BASIC_ENV,
+      "a?.a?.`a`",
+      &[&s_pos!(6, 7, 0, 0), &s_pos!(19, 20, 0, 0), &s_pos!(21, 22, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
   fn parse_new_expression_with_props_and_element_chain_test() {
     single_expression_test(
       |(col, line, _, _)| {
@@ -1272,6 +1461,34 @@ mod parser_test {
         );
       },
       "new X().a`test`",
+    );
+  }
+
+  #[test]
+  fn parse_new_expression_with_coalesce_test() {
+    single_expression_test(
+      |(col, line, _, _)| {
+        return callexpr!(
+          "Expr",
+          pos!(col, line),
+          prop!(
+            "op_chaining",
+            pos!(col, line),
+            newexpr!(
+              pos!(col, line),
+              callexpr!(
+                "Expr",
+                pos!(col + 4, line),
+                ident!("X", pos!(col + 4, line)),
+                exprs!(pos!(col + 5, line))
+              )
+            ),
+            ident!("a", pos!(col + 9, line))
+          ),
+          exprs!(pos!(col + 10, line))
+        );
+      },
+      "new X()?.a()",
     );
   }
 
@@ -1621,6 +1838,21 @@ mod parser_test {
   }
 
   #[test]
+  fn parse_null_coalesce_expression_test() {
+    single_expression_test(
+      |(col, line, _, _)| {
+        return binary!(
+          "OpNullCoalescing",
+          pos!(col, line),
+          number!("1", pos!(col, line)),
+          number!("1", pos!(col + 5, line))
+        );
+      },
+      "1 ?? 1",
+    );
+  }
+
+  #[test]
   fn parser_operator_priority_test_1() {
     single_expression_test(
       |(col, line, _, _)| {
@@ -1793,6 +2025,8 @@ mod parser_test {
     };
   }
 
+  _make_assignment_test!(OpLogicalOrAssign);
+  _make_assignment_test!(OpLogicalAndAssign);
   _make_assignment_test!(OpMulAssign);
   _make_assignment_test!(OpDivAssign);
   _make_assignment_test!(OpModAssign);

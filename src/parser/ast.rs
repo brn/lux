@@ -200,6 +200,7 @@ _ast_enum! {
     NewExpression(Node<NewExpression>),
     TemplateLiteral(Node<TemplateLiteral>),
     ClassExpression(Node<ClassExpression>),
+    ImportMetaExpression(Node<ImportMetaExpression>),
     SkipExpr(Node<SkipExpr>),
   }
 }
@@ -907,21 +908,40 @@ impl_expr!(
     self.callee.to_string_tree_internal(&mut ni, result);
   }
 );
-
 impl NewExpression {
   #[inline]
-  pub fn new(region: &mut Region, callee: Expr) -> Node<NewExpression> {
+  pub fn new(region: &mut Region, callee: Expr) -> Node<Self> {
     return Node::<NewExpression>::new(region, NewExpression { callee });
   }
 }
 
+pub struct ImportMetaExpression;
+impl_expr!(
+  ImportMetaExpression,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    let str = format!("{}[ImportMetaExpression {}]\n", indent, source_position.to_string());
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    self.to_string(indent, result, source_position);
+  }
+);
+
+impl ImportMetaExpression {
+  #[inline]
+  pub fn new(region: &mut Region) -> Node<Self> {
+    return Node::<ImportMetaExpression>::new(region, ImportMetaExpression);
+  }
+}
+
 bitflags! {
-  pub struct CallReceiverType: u8 {
-   const Expr = 0;
-   const New = 0x4;
-   const Super = 0x8;
-   const Template = 0x10;
-   const None = 0x20;
+  pub struct CallReceiverType: u16 {
+    const Expr = 0;
+    const New = 0x8;
+    const Super = 0x10;
+    const Import = 0x20;
+    const Template = 0x40;
+    const None = 0x80;
   }
 }
 
@@ -979,14 +999,15 @@ impl CallExpression {
 }
 
 bitflags! {
-pub struct PropertyAccessType: u8 {
+pub struct PropertyAccessType: u16 {
   const Dot = 1;
   const Element = 2;
+  const OptionalChaining = 4;
 }
 }
 
 pub struct PropertyAccessExpression {
-  flags: Bitset<u8>,
+  flags: Bitset<u16>,
   receiver: Option<Expr>,
   property: Option<Expr>,
 }
@@ -1002,6 +1023,8 @@ impl_expr!(
         "element"
       } else if self.is_meta_property() {
         "meta"
+      } else if self.is_op_chaining_access() {
+        "op_chaining"
       } else {
         "super"
       },
@@ -1033,7 +1056,7 @@ impl PropertyAccessExpression {
     return Node::<PropertyAccessExpression>::new(
       region,
       PropertyAccessExpression {
-        flags: Bitset::<u8>::with(property_access_type.bits() | receiver_type.bits()),
+        flags: Bitset::<u16>::with(property_access_type.bits() | receiver_type.bits()),
         receiver,
         property,
       },
@@ -1042,22 +1065,27 @@ impl PropertyAccessExpression {
 
   #[inline(always)]
   pub fn is_dot_access(&self) -> bool {
-    return self.flags.get(PropertyAccessType::Dot.bits() as usize);
+    return (self.flags.bits() & PropertyAccessType::Dot.bits()) > 0;
   }
 
   #[inline(always)]
   pub fn is_element_access(&self) -> bool {
-    return self.flags.get(PropertyAccessType::Element.bits() as usize);
+    return (self.flags.bits() & PropertyAccessType::Element.bits()) > 0;
+  }
+
+  #[inline(always)]
+  pub fn is_op_chaining_access(&self) -> bool {
+    return (self.flags.bits() & PropertyAccessType::OptionalChaining.bits()) > 0;
   }
 
   #[inline(always)]
   pub fn is_meta_property(&self) -> bool {
-    return self.flags.get(CallReceiverType::New.bits() as usize);
+    return (self.flags.bits() & CallReceiverType::New.bits()) > 0;
   }
 
   #[inline(always)]
   pub fn is_super_property(&self) -> bool {
-    return self.flags.get(CallReceiverType::Super.bits() as usize);
+    return (self.flags.bits() & CallReceiverType::Super.bits()) > 0;
   }
 }
 
@@ -1959,6 +1987,8 @@ bitflags! {
     const EXPRS = 0x100;
     const TEMPLATE = 0x200;
     const SPREAD = 0x400;
+    const STRING_LITERAL = 0x800;
+    const IMPORT_META = 0x1000;
   }
 }
 pub struct SkipExpr(SkipExprType);
@@ -1981,6 +2011,10 @@ impl SkipExpr {
 
   pub fn is_literal(&self) -> bool {
     return self.0.contains(SkipExprType::LITERAL);
+  }
+
+  pub fn is_string_literal(&self) -> bool {
+    return self.0.contains(SkipExprType::STRING_LITERAL);
   }
 
   pub fn is_object(&self) -> bool {

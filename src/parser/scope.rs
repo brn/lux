@@ -6,12 +6,16 @@ use property::Property;
 use std::collections::HashMap;
 
 bitflags! {
-  pub struct ScopeFlag: u8 {
+  pub struct ScopeFlag: u16 {
     const NONE = 0;
-    const STRICT_MODE = 1;
-    const OPAQUE = 2;
-    const TRANSPARENT = 4;
-    const HAS_SUPER_CALL = 8;
+    const ROOT_SCOPE = 0x1;
+    const STRICT_MODE = 0x2;
+    const OPAQUE = 0x4;
+    const TRANSPARENT = 0x8;
+    const HAS_SUPER_CALL = 0x10;
+    const SIMPLE_PARAMETER = 0x20;
+    const ASYNC_CONTEXT = 0x40;
+    const GENERATOR_CONTEXT = 0x80;
   }
 }
 
@@ -32,9 +36,6 @@ pub struct Scope {
   #[property(get(type = "copy"), set(type = "ref"))]
   parent_scope: Option<Exotic<Scope>>,
 
-  #[property(get(type = "copy"), set(type = "ref"))]
-  is_simple_parameter: bool,
-
   #[property(skip)]
   nearest_opaque_scope: Option<Exotic<Scope>>,
 }
@@ -48,7 +49,6 @@ impl Scope {
       parent_scope: None,
       nearest_opaque_scope: None,
       first_super_call_position: None,
-      is_simple_parameter: true,
     });
   }
 
@@ -72,6 +72,20 @@ impl Scope {
 
   pub fn has_super_call(&self) -> bool {
     return self.scope_flag.contains(ScopeFlag::HAS_SUPER_CALL);
+  }
+
+  pub fn is_simple_parameter(&self) -> bool {
+    return self
+      .scope_flag
+      .intersects(ScopeFlag::SIMPLE_PARAMETER | ScopeFlag::ROOT_SCOPE);
+  }
+
+  pub fn is_async_context(&self) -> bool {
+    return self.scope_flag.contains(ScopeFlag::ASYNC_CONTEXT);
+  }
+
+  pub fn is_generator_context(&self) -> bool {
+    return self.scope_flag.contains(ScopeFlag::GENERATOR_CONTEXT);
   }
 
   pub fn is_strict_mode(&self) -> bool {
