@@ -516,6 +516,19 @@ mod parser_test {
     (Some("!function X() {"), ""),
   ];
 
+  fn basic_env_expression_eary_error_test(start_col: u64, end_col: u64, code: &str) {
+    syntax_error_test(
+      &BASIC_ENV,
+      code,
+      &[
+        &s_pos!(start_col, end_col, 0, 0),
+        &s_pos!(start_col + 13, end_col + 13, 0, 0),
+        &s_pos!(start_col + 15, end_col + 15, 0, 0),
+      ],
+      false,
+    );
+  }
+
   #[test]
   fn parse_single_decimal_literal_test() {
     single_expression_test(
@@ -1287,6 +1300,117 @@ mod parser_test {
   }
 
   #[test]
+  fn pre_update_expression_assignment_target_primary_expr_early_error_test() {
+    basic_env_expression_eary_error_test(2, 6, "++this");
+    basic_env_expression_eary_error_test(2, 5, "++'a'");
+    basic_env_expression_eary_error_test(2, 3, "++1");
+    basic_env_expression_eary_error_test(2, 15, "++function() {}");
+    basic_env_expression_eary_error_test(2, 16, "++function*() {}");
+    basic_env_expression_eary_error_test(2, 21, "++async function() {}");
+    basic_env_expression_eary_error_test(2, 22, "++async function*() {}");
+    basic_env_expression_eary_error_test(2, 7, "++`abc`");
+  }
+
+  #[test]
+  fn pre_update_expression_assignment_target_call_expr_early_error_test() {
+    basic_env_expression_eary_error_test(2, 5, "++(1)");
+    basic_env_expression_eary_error_test(2, 9, "++super()");
+    basic_env_expression_eary_error_test(2, 15, "++import('abc')");
+    basic_env_expression_eary_error_test(2, 6, "++x(1)");
+    basic_env_expression_eary_error_test(2, 10, "++x()`abc`");
+  }
+
+  #[test]
+  fn pre_update_expression_assignment_target_new_to_left_hand_side_expr_early_error_test() {
+    basic_env_expression_eary_error_test(2, 7, "++new x");
+    basic_env_expression_eary_error_test(2, 9, "++new x()");
+    basic_env_expression_eary_error_test(2, 13, "++new new x()");
+    basic_env_expression_eary_error_test(2, 7, "++a`aa`");
+    basic_env_expression_eary_error_test(2, 12, "++new.target");
+    basic_env_expression_eary_error_test(2, 13, "++import.meta");
+    basic_env_expression_eary_error_test(2, 8, "++a.b?.c");
+    basic_env_expression_eary_error_test(2, 12, "++a.b?.['c']");
+  }
+
+  #[test]
+  fn pre_update_expression_assignment_target_update_to_unary_expr_early_error_test() {
+    basic_env_expression_eary_error_test(2, 5, "++x++");
+    basic_env_expression_eary_error_test(2, 5, "++x--");
+    basic_env_expression_eary_error_test(2, 5, "++++x");
+    basic_env_expression_eary_error_test(2, 5, "++++x");
+    basic_env_expression_eary_error_test(2, 12, "++delete a.b");
+    basic_env_expression_eary_error_test(2, 8, "++void a");
+    basic_env_expression_eary_error_test(2, 4, "+++a");
+    basic_env_expression_eary_error_test(2, 4, "++-a");
+    basic_env_expression_eary_error_test(2, 4, "++~a");
+    basic_env_expression_eary_error_test(2, 4, "++!a");
+  }
+
+  #[test]
+  fn pre_update_expression_assignment_await_expr_early_error_test() {
+    syntax_error_test(
+      &[(Some("!async function() {"), "}"), (None, ""), (None, "")],
+      "++await a",
+      &[&s_pos!(21, 26, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
+  }
+
+  macro_rules! _make_assignment_pre_update_expr_early_error_test {
+    ($token:expr) => {
+      paste! {
+        #[test]
+        fn [<pre_update_expression_assignment_ $token _test>]() {
+          use Token::*;
+          let len = $token.symbol().len() as u64;
+          basic_env_expression_eary_error_test(2, 8 + len, &format!("++(a {} b)", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 6 + len, &format!("(a {} b)++", $token.symbol()));
+        }
+      }
+    };
+  }
+
+  _make_assignment_pre_update_expr_early_error_test!(OpPow);
+  _make_assignment_pre_update_expr_early_error_test!(OpMul);
+  _make_assignment_pre_update_expr_early_error_test!(OpDiv);
+  _make_assignment_pre_update_expr_early_error_test!(OpPlus);
+  _make_assignment_pre_update_expr_early_error_test!(OpMinus);
+  _make_assignment_pre_update_expr_early_error_test!(OpShl);
+  _make_assignment_pre_update_expr_early_error_test!(OpShr);
+  _make_assignment_pre_update_expr_early_error_test!(OpUShr);
+  _make_assignment_pre_update_expr_early_error_test!(In);
+  _make_assignment_pre_update_expr_early_error_test!(Instanceof);
+  _make_assignment_pre_update_expr_early_error_test!(OpGreaterThan);
+  _make_assignment_pre_update_expr_early_error_test!(OpGreaterThanOrEq);
+  _make_assignment_pre_update_expr_early_error_test!(OpLessThan);
+  _make_assignment_pre_update_expr_early_error_test!(OpLessThanOrEq);
+  _make_assignment_pre_update_expr_early_error_test!(OpEq);
+  _make_assignment_pre_update_expr_early_error_test!(OpStrictEq);
+  _make_assignment_pre_update_expr_early_error_test!(OpNotEq);
+  _make_assignment_pre_update_expr_early_error_test!(OpStrictNotEq);
+  _make_assignment_pre_update_expr_early_error_test!(OpAnd);
+  _make_assignment_pre_update_expr_early_error_test!(OpOr);
+  _make_assignment_pre_update_expr_early_error_test!(OpXor);
+  _make_assignment_pre_update_expr_early_error_test!(OpLogicalAnd);
+  _make_assignment_pre_update_expr_early_error_test!(OpLogicalOr);
+  _make_assignment_pre_update_expr_early_error_test!(OpNullCoalescing);
+  _make_assignment_pre_update_expr_early_error_test!(OpLogicalOrAssign);
+  _make_assignment_pre_update_expr_early_error_test!(OpLogicalAndAssign);
+  _make_assignment_pre_update_expr_early_error_test!(OpMulAssign);
+  _make_assignment_pre_update_expr_early_error_test!(OpDivAssign);
+  _make_assignment_pre_update_expr_early_error_test!(OpModAssign);
+  _make_assignment_pre_update_expr_early_error_test!(OpPlusAssign);
+  _make_assignment_pre_update_expr_early_error_test!(OpMinusAssign);
+  _make_assignment_pre_update_expr_early_error_test!(OpAndAssign);
+  _make_assignment_pre_update_expr_early_error_test!(OpOrAssign);
+  _make_assignment_pre_update_expr_early_error_test!(OpXorAssign);
+  _make_assignment_pre_update_expr_early_error_test!(OpAssign);
+  _make_assignment_pre_update_expr_early_error_test!(OpShlAssign);
+  _make_assignment_pre_update_expr_early_error_test!(OpShrAssign);
+  _make_assignment_pre_update_expr_early_error_test!(OpUShrAssign);
+  _make_assignment_pre_update_expr_early_error_test!(OpPowAssign);
+
+  #[test]
   fn parse_new_expression_no_args_test() {
     single_expression_test(
       |(col, line, _, _)| {
@@ -1492,365 +1616,53 @@ mod parser_test {
     );
   }
 
-  #[test]
-  fn parse_exponentiation_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpPow",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 5, line))
-        );
-      },
-      "1 ** 1",
-    );
+  macro_rules! _make_binary_expr_test {
+    ($token:expr) => {
+      paste! {
+        #[test]
+        fn [<parse_ $token _expr_test>]() {
+          use Token::*;
+          let len = $token.symbol().len() as u64;
+          single_expression_test(
+            |(col, line, _, _)| {
+              return binary!(
+                &format!("{:?}", $token),
+                pos!(col, line),
+                number!("1", pos!(col, line)),
+                number!("1", pos!(col + 3 + len, line))
+              );
+            },
+            &format!("1 {} 1", $token.symbol()),
+          );
+        }
+      }
+    };
   }
 
-  #[test]
-  fn parse_multiplicative_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpMul",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 4, line))
-        );
-      },
-      "1 * 1",
-    );
-  }
-
-  #[test]
-  fn parse_division_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpDiv",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 4, line))
-        );
-      },
-      "1 / 1",
-    );
-  }
-
-  #[test]
-  fn parse_addition_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpPlus",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 4, line))
-        );
-      },
-      "1 + 1",
-    );
-  }
-
-  #[test]
-  fn parse_subtraction_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpMinus",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 4, line))
-        );
-      },
-      "1 - 1",
-    );
-  }
-
-  #[test]
-  fn parse_shift_left_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpShl",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 5, line))
-        );
-      },
-      "1 << 1",
-    );
-  }
-
-  #[test]
-  fn parse_shift_right_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpShr",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 5, line))
-        );
-      },
-      "1 >> 1",
-    );
-  }
-
-  #[test]
-  fn parse_u_shift_right_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpUShr",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 6, line))
-        );
-      },
-      "1 >>> 1",
-    );
-  }
-
-  #[test]
-  fn parse_in_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "In",
-          pos!(col, line),
-          str!("a", pos!(col, line)),
-          ident!("v", pos!(col + 7, line))
-        );
-      },
-      "'a' in v",
-    );
-  }
-
-  #[test]
-  fn parse_instanceof_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "Instanceof",
-          pos!(col, line),
-          ident!("a", pos!(col, line)),
-          ident!("v", pos!(col + 13, line))
-        );
-      },
-      "a instanceof v",
-    );
-  }
-
-  #[test]
-  fn parse_greater_than_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpGreaterThan",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("0", pos!(col + 4, line))
-        );
-      },
-      "1 > 0",
-    );
-  }
-
-  #[test]
-  fn parse_greater_than_or_eq_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpGreaterThanOrEq",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("0", pos!(col + 5, line))
-        );
-      },
-      "1 >= 0",
-    );
-  }
-
-  #[test]
-  fn parse_less_than_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpLessThan",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("0", pos!(col + 4, line))
-        );
-      },
-      "1 < 0",
-    );
-  }
-
-  #[test]
-  fn parse_less_than_or_eq_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpLessThanOrEq",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("0", pos!(col + 5, line))
-        );
-      },
-      "1 <= 0",
-    );
-  }
-
-  #[test]
-  fn parse_equal_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpEq",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 5, line))
-        );
-      },
-      "1 == 1",
-    );
-  }
-
-  #[test]
-  fn parse_strict_equal_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpStrictEq",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 6, line))
-        );
-      },
-      "1 === 1",
-    );
-  }
-
-  #[test]
-  fn parse_not_equal_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpNotEq",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 5, line))
-        );
-      },
-      "1 != 1",
-    );
-  }
-
-  #[test]
-  fn parse_strict_not_equal_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpStrictNotEq",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 6, line))
-        );
-      },
-      "1 !== 1",
-    );
-  }
-
-  #[test]
-  fn parse_bitwise_and_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpAnd",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 4, line))
-        );
-      },
-      "1 & 1",
-    );
-  }
-
-  #[test]
-  fn parse_bitwise_or_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpOr",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 4, line))
-        );
-      },
-      "1 | 1",
-    );
-  }
-
-  #[test]
-  fn parse_bitwise_xor_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpXor",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 4, line))
-        );
-      },
-      "1 ^ 1",
-    );
-  }
-
-  #[test]
-  fn parse_logical_and_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpLogicalAnd",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 5, line))
-        );
-      },
-      "1 && 1",
-    );
-  }
-
-  #[test]
-  fn parse_logical_or_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpLogicalOr",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 5, line))
-        );
-      },
-      "1 || 1",
-    );
-  }
-
-  #[test]
-  fn parse_null_coalesce_expression_test() {
-    single_expression_test(
-      |(col, line, _, _)| {
-        return binary!(
-          "OpNullCoalescing",
-          pos!(col, line),
-          number!("1", pos!(col, line)),
-          number!("1", pos!(col + 5, line))
-        );
-      },
-      "1 ?? 1",
-    );
-  }
+  _make_binary_expr_test!(OpPow);
+  _make_binary_expr_test!(OpMul);
+  _make_binary_expr_test!(OpDiv);
+  _make_binary_expr_test!(OpPlus);
+  _make_binary_expr_test!(OpMinus);
+  _make_binary_expr_test!(OpShl);
+  _make_binary_expr_test!(OpShr);
+  _make_binary_expr_test!(OpUShr);
+  _make_binary_expr_test!(In);
+  _make_binary_expr_test!(Instanceof);
+  _make_binary_expr_test!(OpGreaterThan);
+  _make_binary_expr_test!(OpGreaterThanOrEq);
+  _make_binary_expr_test!(OpLessThan);
+  _make_binary_expr_test!(OpLessThanOrEq);
+  _make_binary_expr_test!(OpEq);
+  _make_binary_expr_test!(OpStrictEq);
+  _make_binary_expr_test!(OpNotEq);
+  _make_binary_expr_test!(OpStrictNotEq);
+  _make_binary_expr_test!(OpAnd);
+  _make_binary_expr_test!(OpOr);
+  _make_binary_expr_test!(OpXor);
+  _make_binary_expr_test!(OpLogicalAnd);
+  _make_binary_expr_test!(OpLogicalOr);
+  _make_binary_expr_test!(OpNullCoalescing);
 
   #[test]
   fn parser_operator_priority_test_1() {
