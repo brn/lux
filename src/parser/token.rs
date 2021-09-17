@@ -165,6 +165,7 @@ token_enum! {
     (OpXor,                false, false, false, "^"),
     (OpXorAssign,          false, false, false, "^="),
     (Question,             false, false, false, "?"),
+    (PrivateIdentifier,    true,  false, true, "#identifier"),
     (RegExp,               true,  false, false, "$RegExp"),
     (Return,               false, true,  false, "return"),
     (RightBrace,           false, false, false, "}"),
@@ -208,6 +209,7 @@ token_enum! {
     (Package,              false, true,  true,  "package"),
     (Private,              false, true,  true,  "private"),
     (Protected,            false, true,  true,  "protected"),
+    (Prototype,            false, true,  true,  "prototype"),
     (Public,               false, true,  true,  "public"),
     (Static,               false, true,  true,  "static"),
   }

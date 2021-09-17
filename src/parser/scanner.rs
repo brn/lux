@@ -466,15 +466,18 @@ impl Scanner {
       let cur = self.current_position_mut();
       cur.set_start_col(cur.end_col());
     }
+    let end_line_number = self.current_position().end_line_number();
+    self.current_position_mut().set_start_line_number(end_line_number);
     loop {
       if self.skip_line_break() {
         {
           let skipped = self.skipped;
-          let end_line_number = self.current_position().end_line_number();
           self
             .current_position_mut()
             .set_start_line_number(end_line_number + skipped as u32);
-          self.current_position_mut().set_end_col(0_u32);
+          self
+            .current_position_mut()
+            .set_end_line_number(end_line_number + skipped as u32);
           self.current_position_mut().set_start_col(0_u32);
           self.current_position_mut().set_end_col(0_u32);
         }
@@ -775,6 +778,12 @@ impl Scanner {
           return OpNotEq;
         }
         return OpNot;
+      }
+      '#' => {
+        self.advance();
+        self.tokenize_identifier();
+        self.contextual_keywords[self.mode as usize] = Token::PrivateIdentifier;
+        return Token::Identifier;
       }
       chars::LT_CHAR | chars::PS_CHAR | ';' => {
         self.advance();
@@ -1098,6 +1107,7 @@ impl Scanner {
       "package": Package,
       "private": Private,
       "protected": Protected,
+      "prototype": Prototype,
       "public": Public,
     }, 'r' => {
       "return": Return,
@@ -1408,6 +1418,10 @@ impl Scanner {
         self.advance();
         self.skipped = 2;
       }
+      return true;
+    } else if chars::is_lf(*self.iter) {
+      self.advance();
+      self.skipped += 1;
       return true;
     }
     return false;

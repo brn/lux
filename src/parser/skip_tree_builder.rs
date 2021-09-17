@@ -21,6 +21,9 @@ pub struct SkipTreeBuilder {
   skip_template: Expr,
   skip_import_meta: Expr,
   skip_stmt: Stmt,
+  skip_class_field: Stmt,
+  skip_class: Ast,
+  skip_function: Ast,
 }
 
 impl SkipTreeBuilder {
@@ -39,8 +42,11 @@ impl SkipTreeBuilder {
       skip_expr: SkipExpr::new(&mut region, SkipExprType::EXPR).into(),
       skip_template: SkipExpr::new(&mut region, SkipExprType::TEMPLATE).into(),
       skip_import_meta: SkipExpr::new(&mut region, SkipExprType::IMPORT_META).into(),
-      skip_stmt: SkipStmt::new(&mut region).into(),
+      skip_stmt: SkipStmt::new(&mut region, SkipStmtType::STMT).into(),
       skip_exprs: SkipExpr::new(&mut region, SkipExprType::EXPRS).into(),
+      skip_class_field: SkipStmt::new(&mut region, SkipStmtType::CLASS_FIELD).into(),
+      skip_class: SkipAny::new(&mut region, SkipAnyType::CLASS).into(),
+      skip_function: SkipAny::new(&mut region, SkipAnyType::FUNCTION).into(),
     };
   }
 }
@@ -56,18 +62,16 @@ impl NodeOps for SkipTreeBuilder {
 
   fn new_function(
     &mut self,
-    is_async: bool,
     name: Option<Expr>,
-    function_type: FunctionType,
+    attr: FunctionAttribute,
     scope: Exotic<Scope>,
-    accessor: FunctionAccessor,
     formal_parameters: Expr,
     function_body: Option<Ast>,
     function_body_start: u32,
     function_body_end: u32,
     pos: Option<&RuntimeSourcePosition>,
-  ) -> Expr {
-    return self.skip_expr;
+  ) -> Ast {
+    return self.skip_function;
   }
 
   fn new_binary_expr(&mut self, op: Token, lhs: Expr, rhs: Expr, pos: Option<&RuntimeSourcePosition>) -> Expr {
@@ -193,15 +197,6 @@ impl NodeOps for SkipTreeBuilder {
     return self.skip_template;
   }
 
-  fn new_class_expression(
-    &mut self,
-    name: Option<Expr>,
-    heritage: Option<Expr>,
-    pos: Option<&RuntimeSourcePosition>,
-  ) -> Expr {
-    return self.skip_expr;
-  }
-
   fn is_binary_expr(&self, expr: Expr) -> bool {
     return match expr {
       Expr::BinaryExpression(_) => true,
@@ -305,5 +300,20 @@ impl NodeOps for SkipTreeBuilder {
     pos: Option<&RuntimeSourcePosition>,
   ) -> Stmt {
     return self.skip_stmt;
+  }
+
+  fn new_class_field(&mut self, flags: ClassFieldFlag, value: Expr, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_class_field;
+  }
+
+  fn new_class(
+    &mut self,
+    name: Option<Expr>,
+    heritage: Option<Expr>,
+    fields: Vec<Stmt>,
+    methods: Vec<Stmt>,
+    pos: Option<&RuntimeSourcePosition>,
+  ) -> Ast {
+    return self.skip_class;
   }
 }

@@ -18,6 +18,14 @@ macro_rules! pos_range {
       Some($end.end_line_number()),
     )
   };
+  (@start $start:expr, $end:expr) => {
+    SourcePosition::with(
+      Some($start.start_col()),
+      Some($end.end_col()),
+      Some($start.start_line_number()),
+      Some($end.end_line_number()),
+    )
+  };
 }
 
 const ONE_LINE_LIMIT: u64 = 50;

@@ -30,26 +30,22 @@ pub trait NodeOps {
 
   fn new_function(
     &mut self,
-    is_async: bool,
     name: Option<Expr>,
-    function_type: FunctionType,
+    attr: FunctionAttribute,
     scope: Exotic<Scope>,
-    accessor: FunctionAccessor,
     formal_parameters: Expr,
     function_body: Option<Ast>,
     function_body_start: u32,
     function_body_end: u32,
     pos: Option<&RuntimeSourcePosition>,
-  ) -> Expr {
+  ) -> Ast {
     return new_node!(
-      FunctionExpression,
+      Function,
       self.region(),
       pos,
-      is_async,
       name,
-      function_type,
+      attr,
       scope,
-      accessor,
       formal_parameters,
       function_body,
       function_body_start,
@@ -193,15 +189,6 @@ pub trait NodeOps {
     return new_node!(TemplateLiteral, self.region(), pos, properties).into();
   }
 
-  fn new_class_expression(
-    &mut self,
-    name: Option<Expr>,
-    heritage: Option<Expr>,
-    pos: Option<&RuntimeSourcePosition>,
-  ) -> Expr {
-    return new_node!(ClassExpression, self.region(), pos, name, heritage).into();
-  }
-
   fn new_import_meta(&mut self, pos: Option<&RuntimeSourcePosition>) -> Expr {
     return new_node!(ImportMetaExpression, self.region(), pos).into();
   }
@@ -318,5 +305,20 @@ pub trait NodeOps {
       from_clause
     )
     .into();
+  }
+
+  fn new_class_field(&mut self, flags: ClassFieldFlag, value: Expr, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(ClassField, self.region(), pos, flags, value).into();
+  }
+
+  fn new_class(
+    &mut self,
+    name: Option<Expr>,
+    heritage: Option<Expr>,
+    methods: Vec<Stmt>,
+    fields: Vec<Stmt>,
+    pos: Option<&RuntimeSourcePosition>,
+  ) -> Ast {
+    return new_node!(Class, self.region(), pos, name, heritage, methods, fields).into();
   }
 }

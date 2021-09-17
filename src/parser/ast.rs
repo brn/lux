@@ -183,7 +183,7 @@ _ast_enum! {
   @expr,
   Expr {
     Empty(Node<Empty>),
-    FunctionExpression(Node<FunctionExpression>),
+    Function(Node<Function>),
     BinaryExpression(Node<BinaryExpression>),
     Elision(Node<Elision>),
     Expressions(Node<Expressions>),
@@ -199,9 +199,10 @@ _ast_enum! {
     NamedImportList(Node<NamedImportList>),
     NewExpression(Node<NewExpression>),
     TemplateLiteral(Node<TemplateLiteral>),
-    ClassExpression(Node<ClassExpression>),
+    Class(Node<Class>),
     ImportMetaExpression(Node<ImportMetaExpression>),
     SkipExpr(Node<SkipExpr>),
+    SkipAny(Node<SkipAny>),
   }
 }
 macro_rules! impl_expr {
@@ -285,6 +286,7 @@ _ast_enum! {
     ExportDeclaration(Node<ExportDeclaration>),
     Statements(Node<Statements>),
     Statement(Node<Statement>),
+    Function(Node<Function>),
     ForStatement(Node<ForStatement>),
     WhileStatement(Node<WhileStatement>),
     DoWhileStatement(Node<DoWhileStatement>),
@@ -297,7 +299,10 @@ _ast_enum! {
     LabelledStatement(Node<LabelledStatement>),
     WithStatement(Node<WithStatement>),
     VariableDeclaration(Node<VariableDeclaration>),
+    ClassField(Node<ClassField>),
+    Class(Node<Class>),
     SkipStmt(Node<SkipStmt>),
+    SkipAny(Node<SkipAny>),
   }
 }
 macro_rules! impl_stmt_conv {
@@ -1089,33 +1094,24 @@ impl PropertyAccessExpression {
   }
 }
 
-#[derive(PartialEq, Copy, Clone)]
-pub enum FunctionType {
-  Scoped,
-  NonScoped,
-  Generator,
-}
-
-#[derive(PartialEq, Copy, Clone)]
-pub enum FunctionAccessor {
-  None,
-  Getter,
-  Setter,
+bitflags! {
+  pub struct FunctionAttribute: u8 {
+    const NONE = 0;
+    const GETTER = 0x1;
+    const SETTER = 0x2;
+    const ASYNC = 0x4;
+    const GENERATOR = 0x8;
+    const CONSTRUCTOR = 0x10;
+  }
 }
 
 #[derive(Property)]
-pub struct FunctionExpression {
+pub struct Function {
   #[property(get(type = "copy"))]
   name: Option<Expr>,
 
-  #[property(get(type = "copy"))]
-  is_async: bool,
-
-  #[property(get(type = "copy"))]
-  function_type: FunctionType,
-
-  #[property(get(type = "copy"))]
-  accessor: FunctionAccessor,
+  #[property(skip)]
+  attr: FunctionAttribute,
 
   #[property(get(type = "copy"))]
   formal_parameters: Expr,
@@ -1133,10 +1129,10 @@ pub struct FunctionExpression {
   function_body_end: u32,
 }
 impl_expr!(
-  FunctionExpression,
+  Function,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
-      "{}[FunctionExpression type = {}{}{} body_start = {} body_end = {} {:?} {}]\n",
+      "{}[Function type = {}{}{} body_start = {} body_end = {} {:?} {}]\n",
       indent,
       if self.is_arrow_function() {
         "ArrowFunction"
@@ -1145,11 +1141,13 @@ impl_expr!(
       } else {
         "Function"
       },
-      if self.is_async { " async" } else { "" },
-      match self.accessor {
-        FunctionAccessor::Getter => " get",
-        FunctionAccessor::Setter => " set",
-        _ => "",
+      if self.is_async_function() { " async" } else { "" },
+      if self.is_getter() {
+        " get"
+      } else if self.is_setter() {
+        " set"
+      } else {
+        ""
       },
       self.function_body_start,
       self.function_body_end,
@@ -1170,28 +1168,25 @@ impl_expr!(
     }
   }
 );
+impl_stmt_conv!(Function);
 
-impl FunctionExpression {
+impl Function {
   pub fn new(
     region: &mut Region,
-    is_async: bool,
     name: Option<Expr>,
-    function_type: FunctionType,
+    attr: FunctionAttribute,
     scope: Exotic<Scope>,
-    accessor: FunctionAccessor,
     formal_parameters: Expr,
     function_body: Option<Ast>,
     function_body_start: u32,
     function_body_end: u32,
-  ) -> Node<FunctionExpression> {
+  ) -> Node<Function> {
     return Node::new(
       region,
-      FunctionExpression {
+      Function {
         name,
-        is_async,
+        attr,
         scope,
-        function_type,
-        accessor,
         formal_parameters,
         function_body,
         function_body_start,
@@ -1202,14 +1197,148 @@ impl FunctionExpression {
 
   #[inline(always)]
   pub fn is_arrow_function(&self) -> bool {
-    return self.function_type == FunctionType::NonScoped;
+    return self.scope.is_transparent();
   }
 
   #[inline(always)]
   pub fn is_generator_function(&self) -> bool {
-    return self.function_type == FunctionType::Generator;
+    return self.attr.contains(FunctionAttribute::GENERATOR);
+  }
+
+  #[inline(always)]
+  pub fn is_async_function(&self) -> bool {
+    return self.attr.contains(FunctionAttribute::ASYNC);
+  }
+
+  #[inline(always)]
+  pub fn is_getter(&self) -> bool {
+    return self.attr.contains(FunctionAttribute::GETTER);
+  }
+
+  #[inline(always)]
+  pub fn is_setter(&self) -> bool {
+    return self.attr.contains(FunctionAttribute::SETTER);
+  }
+
+  #[inline(always)]
+  pub fn is_constructor(&self) -> bool {
+    return self.attr.contains(FunctionAttribute::CONSTRUCTOR);
   }
 }
+
+bitflags! {
+  pub struct ClassFieldFlag: u8 {
+    const NONE = 0;
+    const PUBLIC = 0x1;
+    const PRIVATE = 0x2;
+    const STATIC = 0x4;
+  }
+}
+
+#[derive(Property)]
+pub struct ClassField {
+  #[property(get(type = "copy"))]
+  flags: ClassFieldFlag,
+
+  #[property(get(type = "copy"))]
+  value: Expr,
+}
+impl_stmt!(
+  ClassField,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    let str = format!(
+      "{}[ClassField{}{} {}]\n",
+      indent,
+      if self.is_static() { " static" } else { "" },
+      if self.is_public() {
+        " public"
+      } else if self.is_private() {
+        " private"
+      } else {
+        ""
+      },
+      source_position.to_string()
+    );
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    self.to_string(indent, result, source_position);
+    let mut ni = format!("  {}", indent);
+    self.value.to_string_tree_internal(&mut ni, result);
+  }
+);
+
+impl ClassField {
+  pub fn new(region: &mut Region, flags: ClassFieldFlag, value: Expr) -> Node<Self> {
+    return Node::<ClassField>::new(region, ClassField { flags, value });
+  }
+
+  pub fn is_public(&self) -> bool {
+    return self.flags.contains(ClassFieldFlag::PUBLIC);
+  }
+
+  pub fn is_private(&self) -> bool {
+    return self.flags.contains(ClassFieldFlag::PRIVATE);
+  }
+
+  pub fn is_static(&self) -> bool {
+    return self.flags.contains(ClassFieldFlag::STATIC);
+  }
+}
+
+#[derive(Property)]
+pub struct Class {
+  #[property(get(type = "copy"))]
+  name: Option<Expr>,
+
+  #[property(get(type = "copy"))]
+  heritage: Option<Expr>,
+
+  #[property(get(type = "ref"))]
+  methods: Vec<Stmt>,
+
+  #[property(get(type = "ref"))]
+  fields: Vec<Stmt>,
+}
+impl Class {
+  pub fn new(
+    region: &mut Region,
+    name: Option<Expr>,
+    heritage: Option<Expr>,
+    methods: Vec<Stmt>,
+    fields: Vec<Stmt>,
+  ) -> Node<Self> {
+    return Node::<Class>::new(
+      region,
+      Class {
+        name,
+        heritage,
+        methods,
+        fields,
+      },
+    );
+  }
+}
+impl_expr!(
+  Class,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    let str = format!("{}[Class {}]\n", indent, source_position.to_string());
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    self.to_string(indent, result, source_position);
+    let mut ni = format!("  {}", indent);
+    if let Some(name) = self.name {
+      name.to_string_tree_internal(&mut ni, result);
+    }
+    if let Some(heritage) = self.heritage {
+      heritage.to_string_tree_internal(&mut ni, result);
+    }
+    to_string_list(&self.fields, indent, result);
+    to_string_list(&self.methods, indent, result);
+  }
+);
+impl_stmt_conv!(Class);
 
 #[derive(Property)]
 pub struct ObjectPropertyExpression {
@@ -1716,45 +1845,6 @@ impl ExportDeclaration {
   }
 }
 
-pub struct ClassExpression {
-  name: Option<Expr>,
-  heritage: Option<Expr>,
-  static_fields: Node<Expressions>,
-  instance_fields: Node<Expressions>,
-}
-impl_expr!(
-  ClassExpression,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
-    let str = format!("{}[ClassExpression {}]\n", indent, source_position.to_string());
-    result.push_str(&str);
-  },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
-    self.to_string(indent, result, source_position);
-    let mut ni = format!("  {}", indent);
-    if let Some(ref heritage) = self.heritage {
-      heritage.to_string_tree_internal(&mut ni, result);
-    }
-    self.static_fields.to_string_tree_internal(&mut ni, result);
-    self.instance_fields.to_string_tree_internal(&mut ni, result);
-  }
-);
-
-impl ClassExpression {
-  pub fn new(region: &mut Region, name: Option<Expr>, heritage: Option<Expr>) -> Node<Self> {
-    let static_fields = Expressions::new(region, Vec::new());
-    let instance_fields = Expressions::new(region, Vec::new());
-    return Node::<ClassExpression>::new(
-      region,
-      ClassExpression {
-        name,
-        heritage,
-        static_fields,
-        instance_fields,
-      },
-    );
-  }
-}
-
 pub struct ForStatement {
   declarations: Node<Statements>,
   comparison: Expr,
@@ -1989,6 +2079,7 @@ bitflags! {
     const SPREAD = 0x400;
     const STRING_LITERAL = 0x800;
     const IMPORT_META = 0x1000;
+    const CLASS = 0x2000;
   }
 }
 pub struct SkipExpr(SkipExprType);
@@ -2056,10 +2147,23 @@ impl_expr!(
   }
 );
 
-pub struct SkipStmt;
+bitflags! {
+  pub struct SkipStmtType: u8 {
+    const STMT = 1;
+    const CLASS_FIELD = 2;
+  }
+}
+
+pub struct SkipStmt {
+  flag: SkipStmtType,
+}
 impl SkipStmt {
-  pub fn new(region: &mut Region) -> Node<Self> {
-    return Node::<Self>::new(region, SkipStmt);
+  pub fn new(region: &mut Region, flag: SkipStmtType) -> Node<Self> {
+    return Node::<Self>::new(region, SkipStmt { flag });
+  }
+
+  pub fn is_class_field(&self) -> bool {
+    return self.flag == SkipStmtType::CLASS_FIELD;
   }
 }
 impl_stmt!(
@@ -2072,6 +2176,41 @@ impl_stmt!(
     self.to_string(indent, result, source_position);
   }
 );
+
+bitflags! {
+  pub struct SkipAnyType: u8 {
+    const CLASS = 1;
+    const FUNCTION = 2;
+  }
+}
+
+pub struct SkipAny {
+  flag: SkipAnyType,
+}
+impl SkipAny {
+  pub fn new(region: &mut Region, flag: SkipAnyType) -> Node<Self> {
+    return Node::<Self>::new(region, SkipAny { flag });
+  }
+
+  pub fn is_function(&self) -> bool {
+    return self.flag == SkipAnyType::FUNCTION;
+  }
+
+  pub fn is_class(&self) -> bool {
+    return self.flag == SkipAnyType::CLASS;
+  }
+}
+impl_expr!(
+  SkipAny,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    let str = format!("{}[SkipAny {}]\n", indent, source_position.to_string());
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    self.to_string(indent, result, source_position);
+  }
+);
+impl_stmt_conv!(SkipAny);
 
 #[cfg(test)]
 mod ast_test {

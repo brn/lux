@@ -12,6 +12,9 @@ mod parser_test {
   use paste::paste;
   use std::rc::Rc;
 
+  const STATIC_STR_LEN: u64 = "static ".len() as u64;
+
+  #[derive(Clone)]
   struct TestableAst {
     name: String,
     attr: String,
@@ -154,21 +157,21 @@ mod parser_test {
   macro_rules! fnexpr {
     ($pos:expr, $type:expr, $start:expr, $end:expr, $scope:expr, $($asts:expr),*$(,)*) => {{
       let attr = format!("type = {} body_start = {} body_end = {} {}", $type, $start, $end, $scope);
-      ast_with_children!("FunctionExpression", &attr, $pos, $($asts,)*)
+      ast_with_children!("Function", &attr, $pos, $($asts,)*)
     }}
   }
 
   macro_rules! afnexpr {
     ($pos:expr, $type:expr, $start:expr, $end:expr, $scope:expr, $($asts:expr),*$(,)*) => {{
       let attr = format!("type = {} async body_start = {} body_end = {} {}", $type, $start, $end, $scope);
-      ast_with_children!("FunctionExpression", &attr, $pos, $($asts,)*)
+      ast_with_children!("Function", &attr, $pos, $($asts,)*)
     }}
   }
 
   macro_rules! getset_fnexpr {
     ($pos:expr, $type:expr, $accessor:expr, $start:expr, $end:expr, $scope:expr, $($asts:expr),*$(,)*) => {{
       let attr = format!("type = {} {} body_start = {} body_end = {} {}", $type, $accessor, $start, $end, $scope);
-      ast_with_children!("FunctionExpression", &attr, $pos, $($asts,)*)
+      ast_with_children!("Function", &attr, $pos, $($asts,)*)
     }}
   }
 
@@ -221,6 +224,41 @@ mod parser_test {
       };
       ast_with_children!("StructuralLiteral", attr, $pos, $($asts,)*)
     }};
+  }
+
+  macro_rules! class_field {
+    ($attr:expr, $pos:expr, $value:expr) => {{
+      ast_with_children!("ClassField", $attr, $pos, $value)
+    }};
+  }
+
+  fn class(
+    pos: RuntimeSourcePosition,
+    name: Option<TestableAst>,
+    heritage: Option<TestableAst>,
+    fields: &[TestableAst],
+    methods: &[TestableAst],
+  ) -> TestableAst {
+    let mut ast = if let Some(n) = name {
+      if let Some(h) = heritage {
+        ast_with_children!("Class", "", pos, n, h)
+      } else {
+        ast_with_children!("Class", "", pos, n)
+      }
+    } else {
+      if let Some(h) = heritage {
+        ast_with_children!("Class", "", pos, h)
+      } else {
+        ast!("Class", "", pos)
+      }
+    };
+    for field in fields.iter() {
+      ast.push(field.clone());
+    }
+    for method in methods.iter() {
+      ast.push(method.clone());
+    }
+    ast
   }
 
   bitflags! {
@@ -301,12 +339,7 @@ mod parser_test {
 
   type Expectations<'a> = [&'a str; 3];
 
-  fn parse_test<'a>(
-    env_list: &[(Option<&'a str>, &'a str); 3],
-    code: &str,
-    expectations: &'a Expectations,
-    parser_option: ParserOption,
-  ) {
+  fn parse_test<'a>(env_list: &[(Option<&'a str>, &'a str); 3], code: &str, expectations: &'a Expectations, parser_option: ParserOption) {
     for i in 0..3 {
       let env = env_list[i];
       if env.0.is_none() {
@@ -336,12 +369,7 @@ mod parser_test {
     }
   }
 
-  fn syntax_error_test<'a>(
-    env_list: &[(Option<&str>, &str); 3],
-    code: &str,
-    source_positions: &[&SourcePosition],
-    show_error: bool,
-  ) {
+  fn syntax_error_test<'a>(env_list: &[(Option<&str>, &str); 3], code: &str, source_positions: &[&SourcePosition], show_error: bool) {
     let parser_options = [ParserOption::new(), ParserOption::with(true)];
     for opt in (&parser_options).iter() {
       for i in 0..3 {
@@ -380,6 +408,7 @@ mod parser_test {
   }
 
   fn wrap_with_function_expr<F: Fn((u64, u32, bool, bool)) -> TestableAst>(
+    code: &str,
     expr_size: u64,
     ast_builder: F,
     scope_count: u32,
@@ -399,6 +428,7 @@ mod parser_test {
     } else {
       func_exit + 1
     };
+    let lb_count = code.matches('\n').count() as u32;
 
     let ast = stmts!(
       pos!(0, 0),
@@ -427,8 +457,8 @@ mod parser_test {
         )
       ),
       stmt!(
-        pos!(sentinel_start, 0),
-        ident!("PARSER_SENTINEL", pos!(sentinel_start, 0))
+        pos!(sentinel_start, lb_count),
+        ident!("PARSER_SENTINEL", pos!(sentinel_start, lb_count))
       )
     );
 
@@ -440,11 +470,7 @@ mod parser_test {
     single_expression_test_with_options(ast_b, value, ParserOption::with(true), 0, false, 0);
   }
 
-  fn single_expression_test_with_scope<F: Fn((u64, u32, bool, bool)) -> TestableAst>(
-    ast_builder: F,
-    value: &str,
-    scope_count: u32,
-  ) {
+  fn single_expression_test_with_scope<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str, scope_count: u32) {
     let ast_b = single_expression_test_with_options(ast_builder, value, ParserOption::new(), scope_count, false, 0);
     single_expression_test_with_options(ast_b, value, ParserOption::with(true), scope_count, false, 0);
   }
@@ -459,20 +485,15 @@ mod parser_test {
   ) -> F {
     let env: [(Option<&str>, &str); 3] = [
       (Some(""), ""),
-      (
-        if is_skip_strict_mode {
-          None
-        } else {
-          Some("'use strict';")
-        },
-        "",
-      ),
+      (if is_skip_strict_mode { None } else { Some("'use strict';") }, ""),
       (Some("!function X() {"), "}"),
     ];
+    let lb_count = value.matches('\n').count() as u32;
 
     let size = value.len() as u64;
     let product1 = ast_builder((0, 0, false, !parser_option.disable_skip_parser()));
     let (ast_b, f) = wrap_with_function_expr(
+      value,
       size,
       ast_builder,
       scope_count,
@@ -483,8 +504,8 @@ mod parser_test {
       pos!(0, 0),
       stmt!(pos!(0, 0), product1),
       stmt!(
-        pos!((size + 1) - before_line_break_count, 0),
-        ident!("PARSER_SENTINEL", pos!((size + 1) - before_line_break_count, 0))
+        pos!((size + 1) - before_line_break_count, lb_count),
+        ident!("PARSER_SENTINEL", pos!((size + 1) - before_line_break_count, lb_count))
       )
     )
     .to_string();
@@ -499,8 +520,8 @@ mod parser_test {
       pos!(13, 0),
       stmt!(pos!(13, 0), product2),
       stmt!(
-        pos!(sentinel_start_col, 0),
-        ident!("PARSER_SENTINEL", pos!(sentinel_start_col, 0))
+        pos!(sentinel_start_col, lb_count),
+        ident!("PARSER_SENTINEL", pos!(sentinel_start_col, lb_count))
       )
     )
     .to_string();
@@ -510,11 +531,7 @@ mod parser_test {
     return ast_b;
   }
 
-  const BASIC_ENV: [(Option<&str>, &str); 3] = [
-    (Some(""), ""),
-    (Some("'use strict';"), ""),
-    (Some("!function X() {"), ""),
-  ];
+  const BASIC_ENV: [(Option<&str>, &str); 3] = [(Some(""), ""), (Some("'use strict';"), ""), (Some("!function X() {"), "")];
 
   fn basic_env_expression_eary_error_test(start_col: u64, end_col: u64, code: &str) {
     syntax_error_test(
@@ -845,12 +862,7 @@ mod parser_test {
           ident!("bar", pos!(col + 6, line)),
           str!("baz", pos!(col + 10, line)),
           number!("100", pos!(col + 15, line)),
-          unary!(
-            "OpPlus",
-            "Pre",
-            pos!(col + 21, line),
-            ident!("foo", pos!(col + 22, line))
-          )
+          unary!("OpPlus", "Pre", pos!(col + 21, line), ident!("foo", pos!(col + 22, line)))
         );
       },
       "`foo${bar}baz${100}${+foo}`",
@@ -1071,6 +1083,28 @@ mod parser_test {
   }
 
   #[test]
+  fn unary_expression_delete_early_error_test() {
+    let env = &[(Some("'use strict';"), ""), (None, ""), (None, "")];
+    syntax_error_test(
+      &env,
+      "delete a",
+      &[&s_pos!(13, 21, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn unary_expression_delete_rec_parenthesized_expr_early_error_test() {
+    let env = &[(Some("'use strict';"), ""), (None, ""), (None, "")];
+    syntax_error_test(
+      &env,
+      "delete ((((a))))",
+      &[&s_pos!(13, 29, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
   fn parse_unary_expression_typeof_pre_test() {
     single_expression_test(
       |(col, line, _, _)| {
@@ -1104,12 +1138,7 @@ mod parser_test {
   fn parse_unary_expression_increments_pre_with_eval_identifier_test() {
     single_expression_test_with_options(
       |(col, line, _, _)| {
-        return unary!(
-          "OpIncrement",
-          "Pre",
-          pos!(col, line),
-          ident!("eval", pos!(col + 2, line))
-        );
+        return unary!("OpIncrement", "Pre", pos!(col, line), ident!("eval", pos!(col + 2, line)));
       },
       "++eval",
       ParserOption::new(),
@@ -1123,12 +1152,7 @@ mod parser_test {
   fn parse_unary_expression_increments_pre_with_arguments_identifier_test() {
     single_expression_test_with_options(
       |(col, line, _, _)| {
-        return unary!(
-          "OpIncrement",
-          "Pre",
-          pos!(col, line),
-          ident!("arguments", pos!(col + 2, line))
-        );
+        return unary!("OpIncrement", "Pre", pos!(col, line), ident!("arguments", pos!(col + 2, line)));
       },
       "++arguments",
       ParserOption::new(),
@@ -1152,12 +1176,7 @@ mod parser_test {
   fn parse_unary_expression_decrements_pre_with_yield_keyword_test() {
     single_expression_test_with_options(
       |(col, line, _, _)| {
-        return unary!(
-          "OpDecrement",
-          "Pre",
-          pos!(col, line),
-          ident!("yield", pos!(col + 2, line))
-        );
+        return unary!("OpDecrement", "Pre", pos!(col, line), ident!("yield", pos!(col + 2, line)));
       },
       "--yield",
       ParserOption::new(),
@@ -1171,12 +1190,7 @@ mod parser_test {
   fn parse_unary_expression_decrements_pre_with_await_keyword_test() {
     single_expression_test(
       |(col, line, _, _)| {
-        return unary!(
-          "OpDecrement",
-          "Pre",
-          pos!(col, line),
-          ident!("await", pos!(col + 2, line))
-        );
+        return unary!("OpDecrement", "Pre", pos!(col, line), ident!("await", pos!(col + 2, line)));
       },
       "--await",
     );
@@ -1189,6 +1203,21 @@ mod parser_test {
         return unary!("OpIncrement", "Post", pos!(col, line), ident!("a", pos!(col, line)));
       },
       "a++",
+    );
+  }
+
+  #[test]
+  fn parse_unary_expression_increments_post_convert_num_test() {
+    single_expression_test(
+      |(col, line, _, _)| {
+        return unary!(
+          "OpPlus",
+          "Pre",
+          pos!(col, line),
+          unary!("OpIncrement", "Post", pos!(col + 1, line), ident!("a", pos!(col + 1, line)))
+        );
+      },
+      "+a++",
     );
   }
 
@@ -1244,12 +1273,7 @@ mod parser_test {
   fn parse_unary_expression_decrements_post_with_arguments_identifier_test() {
     single_expression_test_with_options(
       |(col, line, _, _)| {
-        return unary!(
-          "OpDecrement",
-          "Post",
-          pos!(col, line),
-          ident!("arguments", pos!(col, line))
-        );
+        return unary!("OpDecrement", "Post", pos!(col, line), ident!("arguments", pos!(col, line)));
       },
       "arguments--",
       ParserOption::new(),
@@ -1344,6 +1368,49 @@ mod parser_test {
     basic_env_expression_eary_error_test(2, 4, "++-a");
     basic_env_expression_eary_error_test(2, 4, "++~a");
     basic_env_expression_eary_error_test(2, 4, "++!a");
+  }
+
+  #[test]
+  fn post_update_expression_assignment_target_primary_expr_early_error_test() {
+    basic_env_expression_eary_error_test(0, 4, "this++");
+    basic_env_expression_eary_error_test(0, 3, "'a'++");
+    basic_env_expression_eary_error_test(0, 1, "1++");
+    basic_env_expression_eary_error_test(0, 15, "(function() {})++");
+    basic_env_expression_eary_error_test(0, 16, "(function*() {})++");
+    basic_env_expression_eary_error_test(0, 21, "(async function() {})++");
+    basic_env_expression_eary_error_test(0, 22, "(async function*() {})++");
+    basic_env_expression_eary_error_test(0, 5, "`abc`++");
+  }
+
+  #[test]
+  fn post_update_expression_assignment_target_call_expr_early_error_test() {
+    basic_env_expression_eary_error_test(0, 3, "(1)++");
+    basic_env_expression_eary_error_test(0, 7, "super()++");
+    basic_env_expression_eary_error_test(0, 13, "import('abc')++");
+    basic_env_expression_eary_error_test(0, 4, "x(1)++");
+    basic_env_expression_eary_error_test(0, 8, "x()`abc`++");
+  }
+
+  #[test]
+  fn post_update_expression_assignment_target_new_to_left_hand_side_expr_early_error_test() {
+    basic_env_expression_eary_error_test(0, 5, "new x++");
+    basic_env_expression_eary_error_test(0, 7, "new x()++");
+    basic_env_expression_eary_error_test(0, 11, "new new x()++");
+    basic_env_expression_eary_error_test(0, 5, "a`aa`++");
+    basic_env_expression_eary_error_test(0, 10, "new.target++");
+    basic_env_expression_eary_error_test(0, 11, "import.meta++");
+    basic_env_expression_eary_error_test(0, 6, "a.b?.c++");
+    basic_env_expression_eary_error_test(0, 10, "a.b?.['c']++");
+  }
+
+  #[test]
+  fn post_update_expression_assignment_target_update_to_unary_expr_early_error_test() {
+    basic_env_expression_eary_error_test(0, 12, "(delete a.b)++");
+    basic_env_expression_eary_error_test(0, 8, "(void a)++");
+    basic_env_expression_eary_error_test(0, 4, "(+a)++");
+    basic_env_expression_eary_error_test(0, 4, "(-a)++");
+    basic_env_expression_eary_error_test(0, 4, "(~a)++");
+    basic_env_expression_eary_error_test(0, 4, "(!a)++");
   }
 
   #[test]
@@ -1837,21 +1904,86 @@ mod parser_test {
     };
   }
 
-  _make_assignment_test!(OpLogicalOrAssign);
-  _make_assignment_test!(OpLogicalAndAssign);
-  _make_assignment_test!(OpMulAssign);
-  _make_assignment_test!(OpDivAssign);
-  _make_assignment_test!(OpModAssign);
-  _make_assignment_test!(OpPlusAssign);
-  _make_assignment_test!(OpMinusAssign);
-  _make_assignment_test!(OpAndAssign);
-  _make_assignment_test!(OpOrAssign);
-  _make_assignment_test!(OpXorAssign);
-  _make_assignment_test!(OpAssign);
-  _make_assignment_test!(OpShlAssign);
-  _make_assignment_test!(OpShrAssign);
-  _make_assignment_test!(OpUShrAssign);
-  _make_assignment_test!(OpPowAssign);
+  macro_rules! _assignment_op_list {
+    ($macro:ident) => {
+      $macro!(OpLogicalOrAssign);
+      $macro!(OpLogicalAndAssign);
+      $macro!(OpMulAssign);
+      $macro!(OpDivAssign);
+      $macro!(OpModAssign);
+      $macro!(OpPlusAssign);
+      $macro!(OpMinusAssign);
+      $macro!(OpAndAssign);
+      $macro!(OpOrAssign);
+      $macro!(OpXorAssign);
+      $macro!(OpAssign);
+      $macro!(OpShlAssign);
+      $macro!(OpShrAssign);
+      $macro!(OpUShrAssign);
+      $macro!(OpPowAssign);
+    };
+  }
+
+  _assignment_op_list!(_make_assignment_test);
+
+  macro_rules! _make_assignment_early_error_test {
+    ($token:expr) => {
+      paste! {
+        #[test]
+        fn [<assignment_expr_primary_to_new_expr_early_error_test_ $token>]() {
+          use Token::*;
+          basic_env_expression_eary_error_test(0, 4, &format!("this {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 3, &format!("'a' {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 1, &format!("1 {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 14,&format!("!function() {{}} {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 15, &format!("!function*() {{}} {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 20, &format!("!async function() {{}} {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 21, &format!("!async function*() {{}} {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 5, &format!("`abc` {} 1", $token.symbol()));
+        }
+
+        #[test]
+        fn [<assignment_expr_call_expr_early_error_test_ $token>]() {
+          use Token::*;
+          basic_env_expression_eary_error_test(0, 7, &format!("(((1))) {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 7, &format!("super() {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 13, &format!("import('abc') {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 4, &format!("x(1) {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 8, &format!("x()`abc` {} 1", $token.symbol()));
+        }
+
+        #[test]
+        fn [<assignment_expr_new_to_left_hand_side_expr_early_error_test_ $token>]() {
+          use Token::*;
+          basic_env_expression_eary_error_test(0, 5, &format!("new x {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 7, &format!("new x() {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 11, &format!("new new x() {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 5, &format!("a`aa` {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 10, &format!("new.target {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 11, &format!("import.meta {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 6, &format!("a.b?.c {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 10, &format!("a.b?.['c'] {} 1", $token.symbol()));
+        }
+
+        #[test]
+        fn [<assignment_expr_update_to_unary_expr_early_error_test_ $token>]() {
+          use Token::*;
+          basic_env_expression_eary_error_test(0, 3, &format!("++x {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 3, &format!("++x {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 3, &format!("x++ {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 3, &format!("x-- {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 10, &format!("delete a.b {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 6, &format!("void a {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 2, &format!("+a {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 2, &format!("-a {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 2, &format!("~a {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(0, 2, &format!("!a {} 1", $token.symbol()));
+        }
+      }
+    };
+  }
+
+  _assignment_op_list!(_make_assignment_early_error_test);
 
   #[test]
   fn identifier_reference_strict_mode_early_error_test() {
@@ -2138,11 +2270,7 @@ mod parser_test {
               scope!(@opaque is_strict, 0, true),
               ident!("a", pos!(col + 2, line)),
               exprs!(pos!(col + 4, line)),
-              if is_skip_parser {
-                void!()
-              } else {
-                stmts!(pos!(col + 7, line))
-              }
+              if is_skip_parser { void!() } else { stmts!(pos!(col + 7, line)) }
             )
           ),
           object_props!(
@@ -2156,11 +2284,7 @@ mod parser_test {
               scope!(@opaque is_strict, 0, true),
               ident!("b", pos!(col + 10, line)),
               exprs!(pos!(col + 12, line)),
-              if is_skip_parser {
-                void!()
-              } else {
-                stmts!(pos!(col + 15, line))
-              }
+              if is_skip_parser { void!() } else { stmts!(pos!(col + 15, line)) }
             )
           ),
         );
@@ -2188,12 +2312,8 @@ mod parser_test {
               if is_skip_parser { col + 12 } else { 0 },
               scope!(@opaque is_strict, 0, true),
               ident!("a", pos!(col + 6, line)),
-              exprs!(pos!(col + 7, line)),
-              if is_skip_parser {
-                void!()
-              } else {
-                stmts!(pos!(col + 11, line))
-              }
+              exprs!(pos!(col + 8, line)),
+              if is_skip_parser { void!() } else { stmts!(pos!(col + 11, line)) }
             )
           ),
           object_props!(
@@ -2208,11 +2328,7 @@ mod parser_test {
               scope!(@opaque is_strict, 0, true),
               ident!("b", pos!(col + 18, line)),
               exprs!(pos!(col + 20, line), ident!("x", pos!(col + 20, line))),
-              if is_skip_parser {
-                void!()
-              } else {
-                stmts!(pos!(col + 24, line))
-              }
+              if is_skip_parser { void!() } else { stmts!(pos!(col + 24, line)) }
             )
           ),
         );
@@ -2223,7 +2339,7 @@ mod parser_test {
   }
 
   #[test]
-  fn parser_parse_object_literal_function_expr_value() {
+  fn parser_parse_object_literal_arrow_function_expr_value() {
     single_expression_test_with_scope(
       |(col, line, is_strict, is_skip_parser)| {
         return objectlit!(
@@ -2239,16 +2355,39 @@ mod parser_test {
               if is_skip_parser { col + 13 } else { 0 },
               scope!(@transparent is_strict, 0, true),
               exprs!(pos!(col + 5, line)),
-              if is_skip_parser {
-                void!()
-              } else {
-                stmts!(pos!(col + 12, line))
-              }
+              if is_skip_parser { void!() } else { stmts!(pos!(col + 12, line)) }
             )
           ),
         );
       },
       "({a: () => {}})",
+      1,
+    )
+  }
+
+  #[test]
+  fn parser_parse_object_literal_function_expr_value() {
+    single_expression_test_with_scope(
+      |(col, line, is_strict, is_skip_parser)| {
+        return objectlit!(
+          ObjectLitType::NONE,
+          pos!(col + 1, line),
+          object_props!(
+            pos!(col + 2, line),
+            ident!("a", pos!(col + 2, line)),
+            fnexpr!(
+              pos!(col + 5, line),
+              "Function",
+              if is_skip_parser { col + 17 } else { 0 },
+              if is_skip_parser { col + 17 } else { 0 },
+              scope!(@opaque is_strict, 0, true),
+              exprs!(pos!(col + 13, line)),
+              if is_skip_parser { void!() } else { stmts!(pos!(col + 16, line)) }
+            )
+          ),
+        );
+      },
+      "({a: function() {}})",
       1,
     )
   }
@@ -2271,11 +2410,7 @@ mod parser_test {
               scope!(@opaque is_strict,0, true),
               ident!("a", pos!(col + 8, line)),
               exprs!(pos!(col + 10, line)),
-              if is_skip_parser {
-                void!()
-              } else {
-                stmts!(pos!(col + 13, line))
-              }
+              if is_skip_parser { void!() } else { stmts!(pos!(col + 13, line)) }
             )
           ),
           object_props!(
@@ -2289,11 +2424,7 @@ mod parser_test {
               scope!(@opaque is_strict,0, true),
               ident!("b", pos!(col + 16, line)),
               exprs!(pos!(col + 18, line)),
-              if is_skip_parser {
-                void!()
-              } else {
-                stmts!(pos!(col + 21, line))
-              }
+              if is_skip_parser { void!() } else { stmts!(pos!(col + 21, line)) }
             )
           ),
         );
@@ -2606,7 +2737,7 @@ mod parser_test {
         );
       },
       "({a: {b: {c}}} = X)",
-    )
+    );
   }
 
   #[test]
@@ -2642,7 +2773,7 @@ mod parser_test {
         );
       },
       "({a: {b: [c]}, d: [e]} = X)",
-    )
+    );
   }
 
   #[test]
@@ -2653,6 +2784,16 @@ mod parser_test {
       &[&s_pos!(2, 6, 0, 0), &s_pos!(15, 19, 0, 0), &s_pos!(17, 21, 0, 0)],
       false,
     );
+  }
+
+  #[test]
+  fn array_pattern_spread_is_not_identifier_early_error_test() {
+    basic_env_expression_eary_error_test(2, 11, "([...{a: b}] = x)");
+  }
+
+  #[test]
+  fn object_pattern_spread_is_not_identifier_early_error_test() {
+    basic_env_expression_eary_error_test(2, 11, "({...{a: b}} = x)");
   }
 
   #[test]
@@ -2668,118 +2809,525 @@ mod parser_test {
 
   #[test]
   fn method_has_direct_super_early_error_test() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "({a(a, b, super) {}})",
-      &[&s_pos!(10, 15, 0, 0), &s_pos!(23, 28, 0, 0), &s_pos!(25, 30, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(10, 15, "({a(a, b, super) {}})");
 
-    syntax_error_test(
-      &BASIC_ENV,
-      "({a(a, b) { super() }})",
-      &[&s_pos!(12, 17, 0, 0), &s_pos!(25, 30, 0, 0), &s_pos!(27, 32, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(12, 17, "({a(a, b) { super() }})");
   }
 
   #[test]
   fn method_has_duplicated_parameters_error_test() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "({a(a, a) {}})",
-      &[&s_pos!(7, 8, 0, 0), &s_pos!(20, 21, 0, 0), &s_pos!(22, 23, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(7, 8, "({a(a, a) {}})");
   }
 
   #[test]
   fn method_has_duplicated_parameters_with_simple_object_pattern_error_test() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "({a(a, {a}) {}})",
-      &[&s_pos!(8, 9, 0, 0), &s_pos!(21, 22, 0, 0), &s_pos!(23, 24, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(8, 9, "({a(a, {a}) {}})");
   }
 
   #[test]
   fn method_has_duplicated_parameters_with_simple_object_pattern_error_test_2() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "({a(a, {a, b}) {}})",
-      &[&s_pos!(8, 9, 0, 0), &s_pos!(21, 22, 0, 0), &s_pos!(23, 24, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(8, 9, "({a(a, {a, b}) {}})");
   }
 
   #[test]
   fn method_has_duplicated_parameters_with_nested_object_pattern_error_test() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "({a(a, {b: {c: {a}}}) {}})",
-      &[&s_pos!(16, 17, 0, 0), &s_pos!(29, 30, 0, 0), &s_pos!(31, 32, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(16, 17, "({a(a, {b: {c: {a}}}) {}})");
   }
 
   #[test]
   fn method_has_duplicated_parameters_with_complex_pattern_error_test() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "({a(a, {[((a, b) => {})()]: [{c: {o: [{a}]}}]}) {}})",
-      &[&s_pos!(39, 40, 0, 0), &s_pos!(52, 53, 0, 0), &s_pos!(54, 55, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(39, 40, "({a(a, {[((a, b) => {})()]: [{c: {o: [{a}]}}]}) {}})");
   }
 
   #[test]
   fn method_has_duplicated_parameters_skip_parser_error_test() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "({a(a, b) { ({b(a, a) {}}) }})",
-      &[&s_pos!(19, 20, 0, 0), &s_pos!(32, 33, 0, 0), &s_pos!(34, 35, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(19, 20, "({a(a, b) { ({b(a, a) {}}) }})");
   }
 
   #[test]
   fn method_has_not_simple_parameter_but_declare_strict() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "({a({a}) {'use strict'}})",
-      &[&s_pos!(10, 22, 0, 0), &s_pos!(23, 35, 0, 0), &s_pos!(25, 37, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(10, 22, "({a({a}) {'use strict'}})");
   }
 
   #[test]
   fn setter_has_not_simple_parameter_but_declare_strict() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "({set a({a}) {'use strict'}})",
-      &[&s_pos!(14, 26, 0, 0), &s_pos!(27, 39, 0, 0), &s_pos!(29, 41, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(14, 26, "({set a({a}) {'use strict'}})");
   }
 
   #[test]
   fn object_literal_has_propery_name_initializer_early_error_test() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "({a = 1, b})",
-      &[&s_pos!(4, 5, 0, 0), &s_pos!(17, 18, 0, 0), &s_pos!(19, 20, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(4, 5, "({a = 1, b})");
   }
 
   #[test]
   fn generator_method_not_allowed_to_use_yield_param_early_error_test() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "({*a(yield) {}})",
-      &[&s_pos!(5, 10, 0, 0), &s_pos!(18, 23, 0, 0), &s_pos!(20, 25, 0, 0)],
+    basic_env_expression_eary_error_test(5, 10, "({*a(yield) {}})");
+  }
+
+  #[test]
+  fn in_param_array_pattern_spread_is_not_identifier_early_error_test() {
+    basic_env_expression_eary_error_test(5, 11, "({a([...{a}]) {}})");
+  }
+
+  #[test]
+  fn in_param_object_pattern_spread_is_not_identifier_early_error_test() {
+    basic_env_expression_eary_error_test(5, 11, "({a([...[a]]) {}})");
+  }
+
+  #[test]
+  fn parser_parse_empty_class_expression() {
+    single_expression_test(
+      |(col, line, _, _)| {
+        return class(pos!(col + 1, line), Some(ident!("A", pos!(col + 7, line))), None, &[], &[]);
+      },
+      "(class A {})",
+    )
+  }
+
+  fn get_visibility_str(flag: ClassFieldFlag) -> String {
+    let mut buf = Vec::new();
+    if flag.contains(ClassFieldFlag::STATIC) {
+      buf.push("static");
+    }
+    if flag.contains(ClassFieldFlag::PUBLIC) {
+      buf.push("public");
+    } else if flag.contains(ClassFieldFlag::PRIVATE) {
+      buf.push("private");
+    }
+    return buf.join(" ").to_string();
+  }
+
+  fn class_field_without_value(attr: ClassFieldFlag, key_expr: &str, start_pos: u64, line: u32) -> TestableAst {
+    let static_additional = if attr.contains(ClassFieldFlag::STATIC) { STATIC_STR_LEN } else { 0 };
+    return class_field!(
+      &get_visibility_str(attr),
+      pos!(start_pos, line),
+      ident!(key_expr, pos!(start_pos + static_additional, line))
+    );
+  }
+
+  fn class_field_with_value(attr: ClassFieldFlag, key_expr: &str, value_expr: &str, mut start_pos: u64, line: u32) -> TestableAst {
+    let static_additional = if attr.contains(ClassFieldFlag::STATIC) { STATIC_STR_LEN } else { 0 };
+    let key_len = key_expr.len() as u64;
+    return class_field!(
+      &get_visibility_str(attr),
+      pos!(start_pos, line),
+      binary!(
+        "OpAssign",
+        pos!(start_pos, line),
+        ident!(key_expr, pos!(start_pos + static_additional, line)),
+        number!(
+          value_expr,
+          pos!(
+            start_pos + static_additional + key_len + if attr.contains(ClassFieldFlag::PRIVATE) { 4 } else { 3 },
+            line
+          )
+        )
+      )
+    );
+  }
+
+  fn normal_method(
+    attr: ClassFieldFlag,
+    start_col: u64,
+    is_strict: bool,
+    name: &str,
+    mut col: u64,
+    line: u32,
+    fn_start: u64,
+    fn_end: u64,
+  ) -> TestableAst {
+    let static_additional = if attr.contains(ClassFieldFlag::STATIC) { STATIC_STR_LEN } else { 0 };
+    let addition = if attr.contains(ClassFieldFlag::PRIVATE) { 1 } else { 0 };
+    return class_field!(
+      &get_visibility_str(attr),
+      pos!(col, line),
+      fnexpr!(
+        pos!(col + static_additional, line),
+        "Function",
+        start_col + fn_start,
+        start_col + fn_end,
+        if is_strict {
+          scope!(@opaque @strict 0, true)
+        } else {
+          scope!(@opaque 0, true)
+        },
+        ident!(name, pos!(col + static_additional, line)),
+        exprs!(pos!(col + static_additional + (name.len() as u64) + addition + 1, line))
+      )
+    );
+  }
+
+  fn generator_method(
+    attr: ClassFieldFlag,
+    start_col: u64,
+    is_strict: bool,
+    name: &str,
+    mut col: u64,
+    line: u32,
+    fn_start: u64,
+    fn_end: u64,
+  ) -> TestableAst {
+    let static_additional = if attr.contains(ClassFieldFlag::STATIC) { STATIC_STR_LEN } else { 0 };
+    let addition = if attr.contains(ClassFieldFlag::PRIVATE) { 1 } else { 0 };
+    return class_field!(
+      &get_visibility_str(attr),
+      pos!(col, line),
+      fnexpr!(
+        pos!(col + static_additional, line),
+        "Generator",
+        start_col + fn_start,
+        start_col + fn_end,
+        if is_strict {
+          scope!(@opaque @strict 0, true)
+        } else {
+          scope!(@opaque 0, true)
+        },
+        ident!(name, pos!(col + 1 + static_additional, line)),
+        exprs!(pos!(col + static_additional + (name.len() as u64) + 2 + addition, line))
+      )
+    );
+  }
+
+  fn async_method(
+    attr: ClassFieldFlag,
+    start_col: u64,
+    is_strict: bool,
+    name: &str,
+    mut col: u64,
+    line: u32,
+    fn_start: u64,
+    fn_end: u64,
+  ) -> TestableAst {
+    let static_additional = if attr.contains(ClassFieldFlag::STATIC) { STATIC_STR_LEN } else { 0 };
+    let async_len = ("async ".len() as u64);
+    let addition = if attr.contains(ClassFieldFlag::PRIVATE) { 1 } else { 0 };
+    return class_field!(
+      &get_visibility_str(attr),
+      pos!(col, line),
+      afnexpr!(
+        pos!(col + static_additional, line),
+        "Function",
+        start_col + fn_start,
+        start_col + fn_end,
+        if is_strict {
+          scope!(@opaque @strict 0, true)
+        } else {
+          scope!(@opaque 0, true)
+        },
+        ident!(name, pos!(col + static_additional + async_len, line)),
+        exprs!(pos!(col + static_additional + (name.len() as u64) + 1 + async_len + addition, line))
+      )
+    );
+  }
+
+  fn async_generator_method(
+    attr: ClassFieldFlag,
+    start_col: u64,
+    is_strict: bool,
+    name: &str,
+    mut col: u64,
+    line: u32,
+    fn_start: u64,
+    fn_end: u64,
+  ) -> TestableAst {
+    let static_additional = if attr.contains(ClassFieldFlag::STATIC) { STATIC_STR_LEN } else { 0 };
+    let async_len = ("async *".len() as u64);
+    let addition = if attr.contains(ClassFieldFlag::PRIVATE) { 1 } else { 0 };
+    return class_field!(
+      &get_visibility_str(attr),
+      pos!(col, line),
+      afnexpr!(
+        pos!(col + static_additional, line),
+        "Generator",
+        start_col + fn_start,
+        start_col + fn_end,
+        if is_strict {
+          scope!(@opaque @strict 0, true)
+        } else {
+          scope!(@opaque 0, true)
+        },
+        ident!(name, pos!(col + static_additional + async_len, line)),
+        exprs!(pos!(col + static_additional + (name.len() as u64) + 1 + async_len + addition, line))
+      )
+    );
+  }
+
+  fn getset_method(
+    getset: &str,
+    attr: ClassFieldFlag,
+    start_col: u64,
+    is_strict: bool,
+    name: &str,
+    mut col: u64,
+    line: u32,
+    fn_start: u64,
+    fn_end: u64,
+  ) -> TestableAst {
+    let static_additional = if attr.contains(ClassFieldFlag::STATIC) { STATIC_STR_LEN } else { 0 };
+    let addition = if attr.contains(ClassFieldFlag::PRIVATE) { 1 } else { 0 };
+    let getset_additional = (getset.len() as u64) + 1;
+    return class_field!(
+      &get_visibility_str(attr),
+      pos!(col, line),
+      getset_fnexpr!(
+        pos!(col + getset_additional + static_additional, line),
+        "Function",
+        getset,
+        start_col + fn_start,
+        start_col + fn_end,
+        if is_strict {
+          scope!(@opaque @strict 0, true)
+        } else {
+          scope!(@opaque 0, true)
+        },
+        ident!(name, pos!(col + getset_additional + static_additional, line)),
+        if getset.bytes().eq("set".bytes()) {
+          exprs!(
+            pos!(
+              col + getset_additional + static_additional + (name.len() as u64) + 1 + addition,
+              line
+            ),
+            ident!(
+              "a",
+              pos!(
+                col + getset_additional + static_additional + (name.len() as u64) + 1 + addition,
+                line
+              )
+            )
+          )
+        } else {
+          exprs!(pos!(
+            col + getset_additional + static_additional + (name.len() as u64) + 1 + addition,
+            line
+          ))
+        }
+      )
+    );
+  }
+
+  macro_rules! cfa {
+    ($($name:ident)|*$(|)*) => {{
+      let mut attr = ClassFieldFlag::NONE;
+      $(
+        attr |= ClassFieldFlag::$name;
+      )*
+      attr
+    }}
+  }
+
+  #[test]
+  fn parser_parse_class_expression() {
+    single_expression_test_with_options(
+      |(col, line, is_strict, _)| {
+        return class(
+          pos!(col + 1, line),
+          Some(ident!("A", pos!(col + 7, line))),
+          None,
+          &[
+            class_field_without_value(ClassFieldFlag::PUBLIC, "field", 2, 5),
+            class_field_with_value(ClassFieldFlag::PUBLIC, "field1", "1", 2, 6),
+            class_field_with_value(ClassFieldFlag::PRIVATE, "priv_field", "1", 2, 7),
+            class_field_without_value(ClassFieldFlag::PUBLIC | ClassFieldFlag::STATIC, "s_field", 2, 11),
+            class_field_without_value(ClassFieldFlag::PRIVATE | ClassFieldFlag::STATIC, "s_priv_field", 2, 12),
+            class_field_with_value(ClassFieldFlag::PUBLIC | ClassFieldFlag::STATIC, "s_field_v", "1", 2, 13),
+            class_field_with_value(ClassFieldFlag::PRIVATE | ClassFieldFlag::STATIC, "s_priv_field_v", "1", 2, 14),
+          ],
+          &[
+            normal_method(ClassFieldFlag::PUBLIC, col, is_strict, "fn", 2, 1, 20, 20),
+            generator_method(ClassFieldFlag::PUBLIC, col, is_strict, "gen", 2, 2, 32, 32),
+            async_method(ClassFieldFlag::PUBLIC, col, is_strict, "asy", 2, 3, 49, 49),
+            async_generator_method(ClassFieldFlag::PUBLIC, col, is_strict, "asyg", 2, 4, 68, 68),
+            normal_method(ClassFieldFlag::PRIVATE, col, is_strict, "priv_fn", 2, 8, 123, 123),
+            generator_method(ClassFieldFlag::PRIVATE, col, is_strict, "priv_gen", 2, 9, 141, 141),
+            async_generator_method(ClassFieldFlag::PRIVATE, col, is_strict, "priv_agen", 2, 10, 166, 166),
+            normal_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_fn", 2, 15, 277, 277),
+            generator_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_gen", 2, 16, 298, 298),
+            async_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_asy", 2, 17, 324, 324),
+            async_generator_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_asyg", 2, 18, 352, 352),
+            normal_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_fn", 2, 19, 374, 374),
+            generator_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_gen", 2, 20, 398, 398),
+            async_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_asy", 2, 21, 427, 427),
+            async_generator_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_asyg", 2, 22, 458, 458),
+            getset_method("get", cfa!(PUBLIC), col, is_strict, "get_fn", 2, 23, 476, 476),
+            getset_method("set", cfa!(PUBLIC), col, is_strict, "set_fn", 2, 24, 495, 495),
+            getset_method("get", cfa!(PRIVATE), col, is_strict, "p_get_fn", 2, 25, 516, 516),
+            getset_method("set", cfa!(PRIVATE), col, is_strict, "p_set_fn", 2, 26, 538, 538),
+            getset_method("get", cfa!(PUBLIC | STATIC), col, is_strict, "s_get_fn", 2, 27, 565, 565),
+            getset_method("set", cfa!(PUBLIC | STATIC), col, is_strict, "s_set_fn", 2, 28, 593, 593),
+            getset_method("get", cfa!(PRIVATE | STATIC), col, is_strict, "s_p_get_fn", 2, 29, 623, 623),
+            getset_method("set", cfa!(PRIVATE | STATIC), col, is_strict, "s_p_set_fn", 2, 30, 654, 654),
+          ],
+        );
+      },
+      "(class A {
+  fn() {}
+  *gen() {}
+  async asy() {}
+  async *asyg() {}
+  field
+  field1 = 1
+  #priv_field = 1
+  #priv_fn() {}
+  *#priv_gen() {}
+  async *#priv_agen() {}
+  static s_field
+  static #s_priv_field
+  static s_field_v = 1
+  static #s_priv_field_v = 1
+  static s_fn() {}
+  static *s_gen() {}
+  static async s_asy() {}
+  static async *s_asyg() {}
+  static #s_p_fn() {}
+  static *#s_p_gen() {}
+  static async #s_p_asy() {}
+  static async *#s_p_asyg() {}
+  get get_fn() {}
+  set set_fn(a) {}
+  get #p_get_fn() {}
+  set #p_set_fn(a) {}
+  static get s_get_fn() {}
+  static set s_set_fn(a) {}
+  static get #s_p_get_fn() {}
+  static set #s_p_set_fn(a) {}
+})",
+      ParserOption::new(),
+      23,
       false,
+      655,
+    );
+  }
+
+  #[test]
+  fn parser_parse_class_expression_with_heritage() {
+    single_expression_test_with_options(
+      |(col, line, is_strict, _)| {
+        return class(
+          pos!(col + 1, line),
+          Some(ident!("A", pos!(col + 7, line))),
+          Some(callexpr!(
+            "Expr",
+            pos!(col + 17, line),
+            ident!("fn", pos!(col + 17, line)),
+            exprs!(pos!(col + 19, line))
+          )),
+          &[
+            class_field!("public", pos!(2, 5), ident!("field", pos!(2, 5))),
+            class_field!(
+              "public",
+              pos!(2, 6),
+              binary!("OpAssign", pos!(2, 6), ident!("field1", pos!(2, 6)), number!("1", pos!(11, 6)))
+            ),
+            class_field!(
+              "private",
+              pos!(2, 7),
+              binary!("OpAssign", pos!(2, 7), ident!("priv_field", pos!(2, 7)), number!("1", pos!(16, 7)))
+            ),
+          ],
+          &[
+            class_field!(
+              "public",
+              pos!(2, 1),
+              fnexpr!(
+                pos!(2, 1),
+                "Function",
+                col + 33,
+                col + 33,
+                if is_strict {
+                  scope!(@opaque @strict 0, true)
+                } else {
+                  scope!(@opaque 0, true)
+                },
+                ident!("fn", pos!(2, 1)),
+                exprs!(pos!(5, 1))
+              )
+            ),
+            class_field!(
+              "public",
+              pos!(2, 2),
+              fnexpr!(
+                pos!(2, 2),
+                "Generator",
+                col + 45,
+                col + 45,
+                if is_strict {
+                  scope!(@opaque @strict 0, true)
+                } else {
+                  scope!(@opaque 0, true)
+                },
+                ident!("gen", pos!(3, 2)),
+                exprs!(pos!(7, 2))
+              )
+            ),
+            class_field!(
+              "public",
+              pos!(2, 3),
+              afnexpr!(
+                pos!(2, 3),
+                "Function",
+                col + 62,
+                col + 62,
+                if is_strict {
+                  scope!(@opaque @strict 0, true)
+                } else {
+                  scope!(@opaque 0, true)
+                },
+                ident!("asy", pos!(8, 3)),
+                exprs!(pos!(12, 3))
+              )
+            ),
+            class_field!(
+              "public",
+              pos!(2, 4),
+              afnexpr!(
+                pos!(2, 4),
+                "Generator",
+                col + 81,
+                col + 81,
+                if is_strict {
+                  scope!(@opaque @strict 0, true)
+                } else {
+                  scope!(@opaque 0, true)
+                },
+                ident!("asyg", pos!(9, 4)),
+                exprs!(pos!(14, 4))
+              )
+            ),
+            class_field!(
+              "private",
+              pos!(2, 8),
+              fnexpr!(
+                pos!(2, 8),
+                "Function",
+                col + 136,
+                col + 136,
+                if is_strict {
+                  scope!(@opaque @strict 0, true)
+                } else {
+                  scope!(@opaque 0, true)
+                },
+                ident!("priv_fn", pos!(2, 8)),
+                exprs!(pos!(11, 8))
+              )
+            ),
+          ],
+        );
+      },
+      "(class A extends fn() {
+  fn() {}
+  *gen() {}
+  async asy() {}
+  async *asyg() {}
+  field
+  field1 = 1
+  #priv_field = 1
+  #priv_fn() {}
+})",
+      ParserOption::new(),
+      5,
+      false,
+      137,
     );
   }
 }
