@@ -5,9 +5,7 @@ pub const LOW_SURROGATE_START: u16 = 0xDC00;
 pub const LOW_SURROGATE_END: u16 = 0xDFFF;
 
 pub fn is_surrogate_pair(ch: u16) -> bool {
-  return if (ch >= HIGH_SURROGATE_START && ch <= HIGH_SURROGATE_END)
-    || (ch >= LOW_SURROGATE_START && ch <= LOW_SURROGATE_END)
-  {
+  return if (ch >= HIGH_SURROGATE_START && ch <= HIGH_SURROGATE_END) || (ch >= LOW_SURROGATE_START && ch <= LOW_SURROGATE_END) {
     true
   } else {
     false

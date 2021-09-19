@@ -1,8 +1,8 @@
 use super::heap::*;
 use crate::def::*;
 use crate::structs::{
-  BareHeapLayout, Builtins, FlatString, HeapLayout, HeapObject, InternalArray, ObjectRecord, ObjectRecords,
-  PropertyName, Repr, Shape, SymbolRegistry,
+  BareHeapLayout, Builtins, FlatString, HeapLayout, HeapObject, InternalArray, ObjectRecord, ObjectRecords, PropertyName, Repr, Shape,
+  SymbolRegistry,
 };
 use once_cell::sync::Lazy as SyncLazy;
 use property::Property;

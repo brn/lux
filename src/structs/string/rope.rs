@@ -53,12 +53,7 @@ impl StringPiece {
     return StringPiece(layout);
   }
 
-  pub fn new_with_offset(
-    context: impl Context,
-    str: FixedU16CodePointArray,
-    offset: usize,
-    length: usize,
-  ) -> StringPiece {
+  pub fn new_with_offset(context: impl Context, str: FixedU16CodePointArray, offset: usize, length: usize) -> StringPiece {
     let mut layout = StringPiece::init(context, str);
     let body = layout.as_ref_mut();
     body.offset = offset;
@@ -117,9 +112,7 @@ impl StringPiece {
   }
 
   pub fn to_utf8(&self) -> String {
-    return decode_utf16(self.data.into_iter())
-      .map(|r| r.unwrap_or('#'))
-      .collect::<String>();
+    return decode_utf16(self.data.into_iter()).map(|r| r.unwrap_or('#')).collect::<String>();
   }
 
   pub fn concat(&self, context: impl Context, piece: StringPiece) -> StringPiece {

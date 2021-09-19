@@ -44,9 +44,7 @@ impl Header {
   #[inline]
   pub fn size(&self) -> u32 {
     if self.is_size_used_as_size() {
-      let mask = self
-        .field
-        .mask_range(SIZE_FIELD_START, SIZE_FIELD_START + SIZE_FIELD_SIZE);
+      let mask = self.field.mask_range(SIZE_FIELD_START, SIZE_FIELD_START + SIZE_FIELD_SIZE);
       return mask.bits() as u32;
     }
     return 0;

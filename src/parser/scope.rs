@@ -25,6 +25,9 @@ pub struct Scope {
   first_super_call_position: Option<SourcePosition>,
 
   #[property(skip)]
+  first_super_property_position: Option<SourcePosition>,
+
+  #[property(skip)]
   scope_flag: ScopeFlag,
 
   #[property(skip)]
@@ -49,6 +52,7 @@ impl Scope {
       parent_scope: None,
       nearest_opaque_scope: None,
       first_super_call_position: None,
+      first_super_property_position: None,
     });
   }
 
@@ -60,6 +64,16 @@ impl Scope {
 
   pub fn first_super_call_position(&mut self) -> Option<&SourcePosition> {
     return self.first_super_call_position.as_ref();
+  }
+
+  pub fn set_first_super_property_position(&mut self, pos: &SourcePosition) {
+    if self.first_super_property_position.is_none() {
+      self.first_super_property_position = Some(pos.clone());
+    }
+  }
+
+  pub fn first_super_property_position(&mut self) -> Option<&SourcePosition> {
+    return self.first_super_property_position.as_ref();
   }
 
   pub fn mark_as_strict_mode(&mut self) {
@@ -75,9 +89,7 @@ impl Scope {
   }
 
   pub fn is_simple_parameter(&self) -> bool {
-    return self
-      .scope_flag
-      .intersects(ScopeFlag::SIMPLE_PARAMETER | ScopeFlag::ROOT_SCOPE);
+    return self.scope_flag.intersects(ScopeFlag::SIMPLE_PARAMETER | ScopeFlag::ROOT_SCOPE);
   }
 
   pub fn is_async_context(&self) -> bool {

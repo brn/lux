@@ -38,8 +38,7 @@ impl SymbolRegistry {
   pub const SIZE: usize = size_of::<SymbolRegistryLayout>();
 
   pub fn persist(context: impl ObjectRecordsInitializedContext) -> SymbolRegistry {
-    let mut layout =
-      HeapLayout::<SymbolRegistryLayout>::persist(context, context.object_records().symbol_registry_record());
+    let mut layout = HeapLayout::<SymbolRegistryLayout>::persist(context, context.object_records().symbol_registry_record());
     layout.map = HashMap::<PropertyName, JsSymbol>::new(context);
     return SymbolRegistry(layout);
   }
@@ -129,12 +128,7 @@ impl JsSymbol {
     desc.prepare_hash(context);
     let mut layout = HeapLayout::<JsSymbolLayout>::new_object(context, context.object_records().symbol_record());
     let symbol = JsSymbol(layout);
-    let result = object_property::define_own_property_kv(
-      symbol.into(),
-      context,
-      context.static_names().description(),
-      desc.into(),
-    );
+    let result = object_property::define_own_property_kv(symbol.into(), context, context.static_names().description(), desc.into());
     if result.usable_as_cache() {
       layout.description_index = result.index();
     } else {
@@ -146,12 +140,7 @@ impl JsSymbol {
   pub fn new_primitive(context: impl Context, desc: FlatString) -> JsSymbol {
     let mut layout = HeapLayout::<JsSymbolLayout>::new_object(context, context.object_records().symbol_record());
     let symbol = JsSymbol(layout);
-    let result = object_property::define_own_property_kv(
-      symbol.into(),
-      context,
-      context.static_names().description(),
-      desc.into(),
-    );
+    let result = object_property::define_own_property_kv(symbol.into(), context, context.static_names().description(), desc.into());
     if result.usable_as_cache() {
       layout.description_index = result.index();
     } else {
@@ -172,9 +161,7 @@ impl JsSymbol {
           match WellKnownSymbolType::from_u64(u64::from(result.descriptor().value())) {
             Some(WellKnownSymbolType::AsyncIterator) => return context.globals().async_iterator_symbol_str(),
             Some(WellKnownSymbolType::HasInstance) => return context.globals().has_instance_symbol_str(),
-            Some(WellKnownSymbolType::IsConcatSpreadable) => {
-              return context.globals().is_concat_spreadable_symbol_str()
-            }
+            Some(WellKnownSymbolType::IsConcatSpreadable) => return context.globals().is_concat_spreadable_symbol_str(),
             Some(WellKnownSymbolType::Iterator) => return context.globals().iterator_symbol_str(),
             Some(WellKnownSymbolType::Match) => return context.globals().match_symbol_str(),
             Some(WellKnownSymbolType::MatchAll) => return context.globals().match_all_symbol_str(),

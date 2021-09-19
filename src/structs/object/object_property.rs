@@ -1,7 +1,7 @@
 use super::super::internal_array::InternalArray;
 use super::super::object_record::{
-  FullObjectRecord, ObjectSkin, OwnPropertyDescriptorSearchResult, OwnPropertySearchHint,
-  PropertyDescriptorSearchResult, PropertyMode, PropertySearchHint,
+  FullObjectRecord, ObjectSkin, OwnPropertyDescriptorSearchResult, OwnPropertySearchHint, PropertyDescriptorSearchResult, PropertyMode,
+  PropertySearchHint,
 };
 use super::super::repr::Repr;
 use super::property::{Property, PropertyName};
@@ -42,11 +42,7 @@ pub fn define_own_property_from_utf8(
 }
 
 #[inline(always)]
-pub fn define_own_properties(
-  object: Repr,
-  context: impl ObjectRecordsInitializedContext,
-  properties: PropertyDescriptorArray,
-) {
+pub fn define_own_properties(object: Repr, context: impl ObjectRecordsInitializedContext, properties: PropertyDescriptorArray) {
   let full_object_record = object.full_record().unwrap();
   FullObjectRecord::define_own_properties(full_object_record, context, JsReceiver::new(object), properties);
 }
@@ -81,11 +77,7 @@ pub fn get_own_property_raw_with(
 #[inline(always)]
 pub fn get_own_property_raw(object: Repr, name: PropertyName) -> Option<OwnPropertyDescriptorSearchResult> {
   let full_object_record = object.full_record().unwrap();
-  return FullObjectRecord::get_own_property(
-    full_object_record,
-    JsReceiver::new(object),
-    OwnPropertySearchHint::new(name),
-  );
+  return FullObjectRecord::get_own_property(full_object_record, JsReceiver::new(object), OwnPropertySearchHint::new(name));
 }
 
 #[inline(always)]

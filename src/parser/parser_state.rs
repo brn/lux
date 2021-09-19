@@ -7,6 +7,7 @@ pub enum ParserState {
   InTaggedTemplateLiteral,
   InTemplateInterpolation,
   RegexpExpected,
+  InSkipParsing,
   _None,
   _Sentinel,
 }
@@ -64,11 +65,7 @@ impl ParserStateStack {
   }
 
   pub fn match_state(&self, state: ParserState) -> bool {
-    return if let Some(s) = self.stack.last() {
-      *s == state
-    } else {
-      false
-    };
+    return if let Some(s) = self.stack.last() { *s == state } else { false };
   }
 
   pub fn match_states(&self, state: &[ParserState]) -> bool {

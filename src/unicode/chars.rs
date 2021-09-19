@@ -127,10 +127,7 @@ pub fn uc32_to_uc16(u: u32) -> Result<(u16, u16), ()> {
   if u < 0x1000 {
     return Ok((u as u16, 0));
   }
-  return Ok((
-    ((u - 0x10000) / 0x400 + 0xD800) as u16,
-    ((u - 0x10000) % 0x400 + 0xDC00) as u16,
-  ));
+  return Ok((((u - 0x10000) / 0x400 + 0xD800) as u16, ((u - 0x10000) % 0x400 + 0xDC00) as u16));
 }
 
 #[inline(always)]
@@ -367,11 +364,7 @@ fn parse_exponents<'a>(
 
   if exponents_value >= POW_LIMIT {
     while exponents_value > 0 {
-      let exp_val = if exponents_value < POW_LIMIT {
-        exponents_value
-      } else {
-        POW_LIMIT
-      };
+      let exp_val = if exponents_value < POW_LIMIT { exponents_value } else { POW_LIMIT };
       exponents_value -= exp_val;
       let p = u64::pow(10, exp_val) as f64;
       if !is_negative {
@@ -692,11 +685,7 @@ mod chars_test {
 
   #[test]
   fn is_identifier_continue_test() {
-    let v = fs::read_to_string(format!(
-      "{}/test/data/unicode/id_continue.txt",
-      env!("CARGO_MANIFEST_DIR")
-    ))
-    .unwrap();
+    let v = fs::read_to_string(format!("{}/test/data/unicode/id_continue.txt", env!("CARGO_MANIFEST_DIR"))).unwrap();
     let u16_list = v.encode_utf16().collect::<Vec<_>>();
     let mut iter = u16_list.iter();
     let len = u16_list.len();

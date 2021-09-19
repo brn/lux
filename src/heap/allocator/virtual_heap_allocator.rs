@@ -61,13 +61,7 @@ impl AllocationError {
 
 #[cfg(unix)]
 #[inline]
-pub fn allocate(
-  addr: *mut c_void,
-  size: usize,
-  prot: Prot,
-  flags: Flags,
-  _: AllocationType,
-) -> Result<*mut c_void, AllocationError> {
+pub fn allocate(addr: *mut c_void, size: usize, prot: Prot, flags: Flags, _: AllocationType) -> Result<*mut c_void, AllocationError> {
   unsafe {
     return alloc_posix(addr, size, prot, flags);
   }
@@ -75,13 +69,7 @@ pub fn allocate(
 
 #[cfg(windows)]
 #[inline]
-pub fn allocate(
-  addr: *mut c_void,
-  size: usize,
-  prot: Prot,
-  flags: Flags,
-  t: AllocationType,
-) -> Result<*mut c_void, AllocationError> {
+pub fn allocate(addr: *mut c_void, size: usize, prot: Prot, flags: Flags, t: AllocationType) -> Result<*mut c_void, AllocationError> {
   unsafe {
     return VirtualHeapAllocator::map_win32(addr, size, prot, flags, t);
   }
@@ -104,12 +92,7 @@ pub fn deallocate(addr: *mut c_void, size: usize) {
 }
 
 #[cfg(unix)]
-unsafe fn alloc_posix(
-  addr: *mut c_void,
-  size: usize,
-  prot: Prot,
-  flags: Flags,
-) -> Result<*mut c_void, AllocationError> {
+unsafe fn alloc_posix(addr: *mut c_void, size: usize, prot: Prot, flags: Flags) -> Result<*mut c_void, AllocationError> {
   let mut prot_flags = ProtFlags::empty();
   let mut mmap_flags = MapFlags::empty();
 
@@ -154,13 +137,7 @@ unsafe fn alloc_posix(
 }
 
 #[cfg(windows)]
-unsafe fn alloc_win32(
-  addr: *mut c_void,
-  size: usize,
-  prot: i32,
-  flags: i32,
-  t: i32,
-) -> Result<*mut c_void, AllocationError> {
+unsafe fn alloc_win32(addr: *mut c_void, size: usize, prot: i32, flags: i32, t: i32) -> Result<*mut c_void, AllocationError> {
   let fl_protect: extra::DWORD = 0;
   let fl_allocation_type: extra::DWORD = 0;
 

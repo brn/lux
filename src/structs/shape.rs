@@ -114,9 +114,7 @@ impl Shape {
   }
 
   pub const fn builtins() -> Shape {
-    return Shape {
-      tag: ShapeTag::Builtins,
-    };
+    return Shape { tag: ShapeTag::Builtins };
   }
 
   pub const fn native_function() -> Shape {
@@ -126,9 +124,7 @@ impl Shape {
   }
 
   pub const fn receiver() -> Shape {
-    return Shape {
-      tag: ShapeTag::Receiver,
-    };
+    return Shape { tag: ShapeTag::Receiver };
   }
 
   pub const fn object_record() -> Shape {
@@ -152,9 +148,7 @@ impl Shape {
   }
 
   pub const fn undefined() -> Shape {
-    return Shape {
-      tag: ShapeTag::Undefined,
-    };
+    return Shape { tag: ShapeTag::Undefined };
   }
 
   pub const fn null() -> Shape {
@@ -186,9 +180,7 @@ impl Shape {
   }
 
   pub const fn function() -> Shape {
-    return Shape {
-      tag: ShapeTag::Function,
-    };
+    return Shape { tag: ShapeTag::Function };
   }
 
   pub const fn function_prototype() -> Shape {
@@ -204,9 +196,7 @@ impl Shape {
   }
 
   pub const fn property() -> Shape {
-    return Shape {
-      tag: ShapeTag::Property,
-    };
+    return Shape { tag: ShapeTag::Property };
   }
 
   pub const fn own_properties() -> Shape {
@@ -228,9 +218,7 @@ impl Shape {
   }
 
   pub const fn string_rope() -> Shape {
-    return Shape {
-      tag: ShapeTag::StringRope,
-    };
+    return Shape { tag: ShapeTag::StringRope };
   }
 
   pub const fn flatten_string() -> Shape {
@@ -262,9 +250,7 @@ impl Shape {
   }
 
   pub const fn type_error() -> Shape {
-    return Shape {
-      tag: ShapeTag::TypeError,
-    };
+    return Shape { tag: ShapeTag::TypeError };
   }
 
   pub const fn global_objects() -> Shape {

@@ -265,16 +265,12 @@ impl Scanner {
 
   #[inline(always)]
   pub fn has_line_break_before(&self) -> bool {
-    return self
-      .current_scanner_state()
-      .get(ScannerState::HasLinebreakBefore as usize);
+    return self.current_scanner_state().get(ScannerState::HasLinebreakBefore as usize);
   }
 
   #[inline(always)]
   pub fn has_line_break_after(&self) -> bool {
-    return self
-      .current_scanner_state()
-      .get(ScannerState::HasLinebreakAfter as usize);
+    return self.current_scanner_state().get(ScannerState::HasLinebreakAfter as usize);
   }
 
   #[inline(always)]
@@ -472,12 +468,8 @@ impl Scanner {
       if self.skip_line_break() {
         {
           let skipped = self.skipped;
-          self
-            .current_position_mut()
-            .set_start_line_number(end_line_number + skipped as u32);
-          self
-            .current_position_mut()
-            .set_end_line_number(end_line_number + skipped as u32);
+          self.current_position_mut().set_start_line_number(end_line_number + skipped as u32);
+          self.current_position_mut().set_end_line_number(end_line_number + skipped as u32);
           self.current_position_mut().set_start_col(0_u32);
           self.current_position_mut().set_end_col(0_u32);
         }
@@ -543,6 +535,7 @@ impl Scanner {
   }
 
   fn tokenize(&mut self) -> Token {
+    self.current_literal_buffer_mut().clear();
     if self
       .parser_state_stack
       .match_states(&[ParserState::InTemplateLiteral, ParserState::InTaggedTemplateLiteral])
@@ -898,12 +891,7 @@ impl Scanner {
             } else {
               let start = self.record_position();
               self.advance();
-              report_error!(
-                self,
-                "Unterminated string literal",
-                &pos_range!(start, start),
-                Token::Invalid
-              );
+              report_error!(self, "Unterminated string literal", &pos_range!(start, start), Token::Invalid);
             }
           } else {
             self.advance_and_push_buffer();
@@ -918,12 +906,7 @@ impl Scanner {
             if !is_escaped {
               let start = self.record_position();
               self.advance();
-              report_error!(
-                self,
-                "Unterminated string literal",
-                &pos_range!(start, start),
-                Token::Invalid
-              );
+              report_error!(self, "Unterminated string literal", &pos_range!(start, start), Token::Invalid);
             }
             self.collect_line_break();
             continue;
@@ -942,12 +925,7 @@ impl Scanner {
         }
       }
     }
-    report_error!(
-      self,
-      "Unterminated string literal",
-      self.current_position(),
-      Token::Invalid
-    );
+    report_error!(self, "Unterminated string literal", self.current_position(), Token::Invalid);
   }
 
   fn tokenize_identifier(&mut self) -> Token {
@@ -1145,11 +1123,7 @@ impl Scanner {
     if pos != self.iter.pos() {
       self.iter.back();
     }
-    let next_pos = if self.iter.pos() >= 0 {
-      self.iter.pos() as u32
-    } else {
-      0_u32
-    };
+    let next_pos = if self.iter.pos() >= 0 { self.iter.pos() as u32 } else { 0_u32 };
     self.current_position_mut().set_end_col(next_pos);
     self.advance();
     if let Ok((value, kind)) = result {
@@ -1166,12 +1140,7 @@ impl Scanner {
         report_error!(self, "Unexpected token found", self.source_position(), Token::Invalid);
       }
       chars::NumericConvertionError::ExponentsExpectedNumber => {
-        report_error!(
-          self,
-          "Number expected after exponents",
-          self.source_position(),
-          Token::Invalid
-        );
+        report_error!(self, "Number expected after exponents", self.source_position(), Token::Invalid);
       }
       chars::NumericConvertionError::UnexpectedEndOfInput => {
         report_error!(self, "Unexpected end of input", self.source_position(), Token::Invalid);
@@ -1202,12 +1171,7 @@ impl Scanner {
     }
   }
 
-  fn decode_template_literal_escape_sequence(
-    &mut self,
-    escape_sequence_start_pos: &SourcePosition,
-    start_index: u32,
-    count: u32,
-  ) -> bool {
+  fn decode_template_literal_escape_sequence(&mut self, escape_sequence_start_pos: &SourcePosition, start_index: u32, count: u32) -> bool {
     if let Ok(ret) = self.decode_hex_escape(count) {
       if let Ok((hi, low)) = chars::uc32_to_uc16(ret) {
         self.current_literal_buffer_mut().push(hi);
@@ -1224,10 +1188,7 @@ impl Scanner {
         return false;
       }
     } else {
-      if self
-        .parser_state_stack
-        .match_state(ParserState::InTaggedTemplateLiteral)
-      {
+      if self.parser_state_stack.match_state(ParserState::InTaggedTemplateLiteral) {
         let end = self.iter.index() as u32;
         for _ in start_index..end {
           self.iter.back();
@@ -1278,11 +1239,7 @@ impl Scanner {
                 if !self.decode_template_literal_escape_sequence(
                   &escape_sequence_start_pos,
                   start_index as u32,
-                  if chars::is_start_unicode_escape_sequence(lookahead) {
-                    4
-                  } else {
-                    2
-                  },
+                  if chars::is_start_unicode_escape_sequence(lookahead) { 4 } else { 2 },
                 ) {
                   return Token::Invalid;
                 }
@@ -1305,12 +1262,7 @@ impl Scanner {
                 self.advance();
               }
             } else {
-              report_error!(
-                self,
-                "Unexpected end of input.",
-                self.current_position(),
-                Token::Invalid
-              );
+              report_error!(self, "Unexpected end of input.", self.current_position(), Token::Invalid);
             }
           } else {
             is_escaped = !is_escaped;
@@ -1329,12 +1281,7 @@ impl Scanner {
                 return Token::TemplateSubstitution;
               }
             } else {
-              report_error!(
-                self,
-                "Unexpected end of input.",
-                self.current_position(),
-                Token::Invalid
-              );
+              report_error!(self, "Unexpected end of input.", self.current_position(), Token::Invalid);
             }
           } else {
             is_escaped = false;
@@ -1374,12 +1321,7 @@ impl Scanner {
       }
     }
 
-    report_error!(
-      self,
-      "Unterminated template literal.",
-      self.source_position(),
-      Token::Invalid
-    );
+    report_error!(self, "Unterminated template literal.", self.source_position(), Token::Invalid);
   }
 
   fn collect_line_break(&mut self) {

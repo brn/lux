@@ -98,22 +98,11 @@ impl NodeOps for SkipTreeBuilder {
     };
   }
 
-  fn new_conditional_expression(
-    &mut self,
-    condition: Expr,
-    then_expr: Expr,
-    else_expr: Expr,
-    pos: Option<&RuntimeSourcePosition>,
-  ) -> Expr {
+  fn new_conditional_expression(&mut self, condition: Expr, then_expr: Expr, else_expr: Expr, pos: Option<&RuntimeSourcePosition>) -> Expr {
     return self.skip_expr;
   }
 
-  fn new_literal(
-    &mut self,
-    literal_type: Token,
-    literal_value: LiteralValue,
-    pos: Option<&RuntimeSourcePosition>,
-  ) -> Expr {
+  fn new_literal(&mut self, literal_type: Token, literal_value: LiteralValue, pos: Option<&RuntimeSourcePosition>) -> Expr {
     return match literal_type {
       Token::Identifier => self.skip_identifier,
       Token::StringLiteral => self.skip_string,
@@ -279,12 +268,7 @@ impl NodeOps for SkipTreeBuilder {
     return self.skip_stmt;
   }
 
-  fn new_import_decl(
-    &mut self,
-    import_binding: Option<Expr>,
-    module_specifier: Expr,
-    pos: Option<&RuntimeSourcePosition>,
-  ) -> Stmt {
+  fn new_import_decl(&mut self, import_binding: Option<Expr>, module_specifier: Expr, pos: Option<&RuntimeSourcePosition>) -> Stmt {
     return self.skip_stmt;
   }
 

@@ -36,13 +36,7 @@ impl_object!(HashMapEntry<K: HashMapKey, V: HashMapValue>, HeapLayout<HashMapEnt
 
 impl<K: HashMapKey, V: HashMapValue> HashMapEntry<K, V> {
   const SIZE: usize = size_of::<HashMapEntryLayout<K, V>>();
-  pub fn new(
-    context: impl ObjectRecordsInitializedContext,
-    key: K,
-    value: V,
-    hash: u64,
-    position: usize,
-  ) -> HashMapEntry<K, V> {
+  pub fn new(context: impl ObjectRecordsInitializedContext, key: K, value: V, hash: u64, position: usize) -> HashMapEntry<K, V> {
     let mut layout = HeapLayout::<HashMapEntryLayout<K, V>>::new(
       context,
       context

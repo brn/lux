@@ -10,12 +10,7 @@ pub fn join(pos: u32, v: &Vec<&str>) -> String {
     a.push_str(str);
     a.push_str("\n");
     if i == pos {
-      let start = (*str)
-        .chars()
-        .enumerate()
-        .skip_while(|(i, ch)| *ch == ' ')
-        .take(1)
-        .next();
+      let start = (*str).chars().enumerate().skip_while(|(i, ch)| *ch == ' ').take(1).next();
       let last = (*str).chars().rev().enumerate().skip_while(|(_, ch)| *ch == ' ').next();
       if start.is_some() && last.is_some() {
         let start_index = start.unwrap().0;

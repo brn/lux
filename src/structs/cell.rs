@@ -72,11 +72,7 @@ impl<T: HeapBody> HeapLayout<T> {
   }
 
   #[inline(always)]
-  pub fn new_object_into_heap(
-    context: impl AllocationOnlyContext,
-    heap: Addr,
-    object_record: FullObjectRecord,
-  ) -> HeapLayout<T> {
+  pub fn new_object_into_heap(context: impl AllocationOnlyContext, heap: Addr, object_record: FullObjectRecord) -> HeapLayout<T> {
     let heap = Cell::init_object_into_heap(context, heap, object_record);
     let cell = Cell::from(heap);
     unsafe {
@@ -478,11 +474,7 @@ impl Cell {
     return Cell::init_object_into_heap(context, heap, object_record);
   }
 
-  pub fn init_object_into_heap(
-    context: impl AllocationOnlyContext,
-    heap: Addr,
-    object_record: FullObjectRecord,
-  ) -> Addr {
+  pub fn init_object_into_heap(context: impl AllocationOnlyContext, heap: Addr, object_record: FullObjectRecord) -> Addr {
     let mut layout = BareHeapLayout::<CellLayout>::wrap(heap);
     layout.object_record = object_record.into();
     return heap;

@@ -190,12 +190,7 @@ impl Repr {
   pub fn is_object_type(&self) -> bool {
     if self.is_heap_object() {
       match Cell::from(self.unbox_unchecked()).shape().tag() {
-        ShapeTag::Object
-        | ShapeTag::String
-        | ShapeTag::Array
-        | ShapeTag::Boolean
-        | ShapeTag::Number
-        | ShapeTag::Symbol => return true,
+        ShapeTag::Object | ShapeTag::String | ShapeTag::Array | ShapeTag::Boolean | ShapeTag::Number | ShapeTag::Symbol => return true,
         _ => return false,
       }
     }

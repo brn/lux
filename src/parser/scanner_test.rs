@@ -15,11 +15,7 @@ mod scanner_test {
   use std::rc::Rc;
   use std::vec::Vec;
 
-  fn init_scanner<T>(
-    source: &str,
-    opt_parser_state_stack: Option<ParserStateStack>,
-    mut cb: impl FnMut(Scanner) -> T,
-  ) -> T {
+  fn init_scanner<T>(source: &str, opt_parser_state_stack: Option<ParserStateStack>, mut cb: impl FnMut(Scanner) -> T) -> T {
     let context = LuxContext::new_until_internal_object_records();
     let mut parser_state_stack = Box::new(if opt_parser_state_stack.is_some() {
       opt_parser_state_stack.unwrap()
@@ -65,8 +61,8 @@ mod scanner_test {
 
   #[test]
   fn scanner_all_token_once_test() {
-    let base_iter = Token::values()
-      .filter(|token| !token.is_pseudo_token() && !token.is_contextual_keyword() && **token != Token::BackQuote);
+    let base_iter =
+      Token::values().filter(|token| !token.is_pseudo_token() && !token.is_contextual_keyword() && **token != Token::BackQuote);
     let source: String = base_iter.clone().map(|token| token.symbol()).intersperse(" ").collect();
     let results = scan(&source);
     let mut expected = base_iter.clone().collect::<Vec<_>>();

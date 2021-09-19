@@ -66,11 +66,7 @@ impl JsObject {
     return object_property::get_own_property(object, OwnPropertySearchHint::new(name));
   }
 
-  pub fn define_own_property(
-    context: impl Context,
-    object: Repr,
-    property: Property,
-  ) -> OwnPropertyDescriptorSearchResult {
+  pub fn define_own_property(context: impl Context, object: Repr, property: Property) -> OwnPropertyDescriptorSearchResult {
     return object_property::define_own_property(object, context, property);
   }
 

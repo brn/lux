@@ -13,10 +13,6 @@ macro_rules! new_property {
       crate::structs::object::PropertyDescriptor::DEFAULT,
       $value,
     );
-    crate::structs::object::Property::new(
-      $context,
-      crate::structs::object::PropertyName::from_utf8_string($context, $name),
-      a,
-    )
+    crate::structs::object::Property::new($context, crate::structs::object::PropertyName::from_utf8_string($context, $name), a)
   }};
 }

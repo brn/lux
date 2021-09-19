@@ -43,9 +43,7 @@ impl FunctionBuilder {
   }
 
   pub fn define_property_from_utf8(&mut self, str: &str, value: Repr) -> &mut Self {
-    self
-      .properties
-      .push(new_property!(LuxContext::from(self.context), str: str, value));
+    self.properties.push(new_property!(LuxContext::from(self.context), str: str, value));
     return self;
   }
 
@@ -71,13 +69,7 @@ impl FunctionBuilder {
       }
     }
     if self.is_builtin {
-      return JsFunction::new_builtin(
-        c,
-        properties,
-        self.function,
-        self.builtin_function_type,
-        self.builtin_to_string_str,
-      );
+      return JsFunction::new_builtin(c, properties, self.function, self.builtin_function_type, self.builtin_to_string_str);
     }
     return JsFunction::new(c, properties);
   }

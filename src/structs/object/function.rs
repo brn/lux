@@ -138,8 +138,7 @@ impl JsFunction {
     func_type: BuiltinJsFunctionType,
     to_string_result: FlatString,
   ) -> JsFunction {
-    let mut layout =
-      HeapLayout::<BuiltinJsFunctionLayout>::new_object(context, context.object_records().builtin_function_record());
+    let mut layout = HeapLayout::<BuiltinJsFunctionLayout>::new_object(context, context.object_records().builtin_function_record());
     let func = JsFunction(HeapLayout::<JsFunctionLayout>::wrap(layout.as_addr()));
     layout.builtin_type = func_type;
     layout.to_string_result = to_string_result;
@@ -147,9 +146,7 @@ impl JsFunction {
     return func;
   }
 
-  pub fn get_native_function<NativeFunctionType: NativeFunctionCall>(
-    &self,
-  ) -> Option<NativeFunction<NativeFunctionType>> {
+  pub fn get_native_function<NativeFunctionType: NativeFunctionCall>(&self) -> Option<NativeFunction<NativeFunctionType>> {
     match JsFunction::get_builtin_layout(self) {
       Some(layout) => return Some(NativeFunction::<NativeFunctionType>::from(layout.function)),
       _ => return None,

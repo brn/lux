@@ -183,12 +183,7 @@ impl<'a, BitType: BitNum> MaskedBitset<'a, BitType> {
 
 impl<'a, BitType: BitNum> MaskedBitsetMut<'a, BitType> {
   #[inline]
-  pub fn new(
-    shift: usize,
-    masked_bits: BitType,
-    bit_field: BitType,
-    base: &'a mut BitType,
-  ) -> MaskedBitsetMut<BitType> {
+  pub fn new(shift: usize, masked_bits: BitType, bit_field: BitType, base: &'a mut BitType) -> MaskedBitsetMut<BitType> {
     return MaskedBitsetMut {
       shift,
       masked_bits,
@@ -226,12 +221,7 @@ impl<BitType: BitNum> Bitset<BitType> {
     debug_assert!(lower_index > 0, "lower_index must be greater than 1");
     let lower_mask = (BitType::one() << lower_index - 1) - BitType::one();
     let shift = lower_index - 1;
-    return MaskedBitset::new(
-      shift,
-      self.bit_field & lower_mask,
-      self.bit_field >> shift,
-      &self.bit_field,
-    );
+    return MaskedBitset::new(shift, self.bit_field & lower_mask, self.bit_field >> shift, &self.bit_field);
   }
 
   #[inline]
@@ -239,12 +229,7 @@ impl<BitType: BitNum> Bitset<BitType> {
     debug_assert!(lower_index > 0, "lower_index must be greater than 1");
     let lower_mask = (BitType::one() << lower_index - 1) - BitType::one();
     let shift = lower_index - 1;
-    return MaskedBitsetMut::new(
-      shift,
-      self.bit_field & lower_mask,
-      self.bit_field >> shift,
-      &mut self.bit_field,
-    );
+    return MaskedBitsetMut::new(shift, self.bit_field & lower_mask, self.bit_field >> shift, &mut self.bit_field);
   }
 
   #[inline]
@@ -353,9 +338,8 @@ mod tests {
     }
     assert_eq!(bs.bits(), 1431655765);
     let state = [
-      1431655764, 0, 1431655760, 0, 1431655744, 0, 1431655680, 0, 1431655424, 0, 1431654400, 0, 1431650304, 0,
-      1431633920, 0, 1431568384, 0, 1431306240, 0, 1430257664, 0, 1426063360, 0, 1409286144, 0, 1342177280, 0,
-      1073741824, 0, 0, 0,
+      1431655764, 0, 1431655760, 0, 1431655744, 0, 1431655680, 0, 1431655424, 0, 1431654400, 0, 1431650304, 0, 1431633920, 0, 1431568384,
+      0, 1431306240, 0, 1430257664, 0, 1426063360, 0, 1409286144, 0, 1342177280, 0, 1073741824, 0, 0, 0,
     ];
     for i in 1..32 {
       if i % 2 != 0 {

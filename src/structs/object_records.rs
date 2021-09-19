@@ -124,11 +124,9 @@ impl ObjectRecords {
     self.root_object_record = FullObjectRecordBuilder::new(context, Shape::root_object_record(), 0, 0).build();
     self.string_record = FullObjectRecordBuilder::new(context, Shape::string(), JsString::SIZE as u32, 1).build();
     let string_record = self.string_record;
-    self.root_object_record.transition_with_record(
-      context,
-      new_property!(context, str: "String", Repr::invalid()),
-      string_record,
-    );
+    self
+      .root_object_record
+      .transition_with_record(context, new_property!(context, str: "String", Repr::invalid()), string_record);
     self.js_object_record = self.root_object_record.transition_with_record(
       context,
       new_property!(context, str: "Object", Repr::invalid()),

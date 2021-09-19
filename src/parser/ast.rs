@@ -512,9 +512,7 @@ impl<T: AstNode> AstStringify for Node<T> {
   fn to_string_tree(&self) -> String {
     let mut indent = "".to_string();
     let mut result = "".to_string();
-    self
-      .kind
-      .to_string_tree(&mut indent, &mut result, self.source_position());
+    self.kind.to_string_tree(&mut indent, &mut result, self.source_position());
     return result;
   }
 }
@@ -846,12 +844,7 @@ impl_expr!(
 
 impl UnaryExpression {
   #[inline]
-  pub fn new(
-    region: &mut Region,
-    position: UnaryExpressionOperandPosition,
-    op: Token,
-    target: Expr,
-  ) -> Node<UnaryExpression> {
+  pub fn new(region: &mut Region, position: UnaryExpressionOperandPosition, op: Token, target: Expr) -> Node<UnaryExpression> {
     return Node::<UnaryExpression>::new(region, UnaryExpression { position, op, target });
   }
 }
@@ -986,12 +979,7 @@ impl_expr!(
 
 impl CallExpression {
   #[inline]
-  pub fn new(
-    region: &mut Region,
-    receiver: CallReceiverType,
-    callee: Option<Expr>,
-    parameters: Option<Expr>,
-  ) -> Node<CallExpression> {
+  pub fn new(region: &mut Region, receiver: CallReceiverType, callee: Option<Expr>, parameters: Option<Expr>) -> Node<CallExpression> {
     return Node::<CallExpression>::new(
       region,
       CallExpression {
@@ -1301,13 +1289,7 @@ pub struct Class {
   fields: Vec<Stmt>,
 }
 impl Class {
-  pub fn new(
-    region: &mut Region,
-    name: Option<Expr>,
-    heritage: Option<Expr>,
-    methods: Vec<Stmt>,
-    fields: Vec<Stmt>,
-  ) -> Node<Self> {
+  pub fn new(region: &mut Region, name: Option<Expr>, heritage: Option<Expr>, methods: Vec<Stmt>, fields: Vec<Stmt>) -> Node<Self> {
     return Node::<Class>::new(
       region,
       Class {
@@ -1371,12 +1353,7 @@ impl_expr!(
 );
 
 impl ObjectPropertyExpression {
-  pub fn new(
-    region: &mut Region,
-    key: Expr,
-    value: Option<Expr>,
-    init: Option<Expr>,
-  ) -> Node<ObjectPropertyExpression> {
+  pub fn new(region: &mut Region, key: Expr, value: Option<Expr>, init: Option<Expr>) -> Node<ObjectPropertyExpression> {
     return Node::new(region, ObjectPropertyExpression { key, value, init });
   }
 }
@@ -1429,11 +1406,7 @@ impl_expr!(
     let str = format!(
       "{}[StructuralLiteral type = {}{} {}]\n",
       indent,
-      if self.is_array_literal() {
-        "ArrayLiteral"
-      } else {
-        "ObjectLiteral"
-      },
+      if self.is_array_literal() { "ArrayLiteral" } else { "ObjectLiteral" },
       format!(
         "{}{}{}",
         if self.has_accessor() { " accessor = true" } else { "" },
@@ -1471,11 +1444,7 @@ impl NodeCollection<Expr> for Node<StructuralLiteral> {
 
 impl StructuralLiteral {
   #[inline]
-  pub fn new(
-    region: &mut Region,
-    literal_flag: StructuralLiteralFlags,
-    properties: Vec<Expr>,
-  ) -> Node<StructuralLiteral> {
+  pub fn new(region: &mut Region, literal_flag: StructuralLiteralFlags, properties: Vec<Expr>) -> Node<StructuralLiteral> {
     return Node::<StructuralLiteral>::new(
       region,
       StructuralLiteral {
@@ -1625,12 +1594,7 @@ impl_expr!(
   }
 );
 impl ImportSpecifier {
-  pub fn new(
-    region: &mut Region,
-    is_namespace: bool,
-    name: Option<Expr>,
-    as_expr: Option<Expr>,
-  ) -> Node<ImportSpecifier> {
+  pub fn new(region: &mut Region, is_namespace: bool, name: Option<Expr>, as_expr: Option<Expr>) -> Node<ImportSpecifier> {
     return Node::new(
       region,
       ImportSpecifier {
@@ -1785,11 +1749,7 @@ impl_stmt!(
     let str = format!(
       "{}[ExportDeclaration type = {} {}]\n",
       indent,
-      if self.is_namespace_export() {
-        "namespace"
-      } else {
-        "default"
-      },
+      if self.is_namespace_export() { "namespace" } else { "default" },
       source_position.to_string()
     );
     result.push_str(&str);

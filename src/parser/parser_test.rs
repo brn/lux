@@ -3330,4 +3330,330 @@ mod parser_test {
       137,
     );
   }
+
+  #[test]
+  fn parse_class_constructor_has_direct_super_with_heritage() {
+    single_expression_test_with_options(
+      |(col, line, is_strict, _)| {
+        return class(
+          pos!(col + 1, line),
+          Some(ident!("K", pos!(col + 7, line))),
+          Some(ident!("A", pos!(col + 17, line))),
+          &[],
+          &[normal_method(cfa!(PUBLIC), col, is_strict, "constructor", col + 20, line, 40, 43)],
+        );
+      },
+      "(class K extends A {constructor() {super()}})",
+      ParserOption::new(),
+      1,
+      false,
+      0,
+    );
+  }
+
+  #[test]
+  fn parse_class_constructor_has_direct_super_with_heritage_without_identifier() {
+    single_expression_test_with_options(
+      |(col, line, is_strict, _)| {
+        return class(
+          pos!(col + 1, line),
+          None,
+          Some(ident!("A", pos!(col + 15, line))),
+          &[],
+          &[normal_method(cfa!(PUBLIC), col, is_strict, "constructor", col + 18, line, 38, 41)],
+        );
+      },
+      "(class extends A {constructor() {super()}})",
+      ParserOption::new(),
+      1,
+      false,
+      0,
+    );
+  }
+
+  #[test]
+  fn class_constructor_has_direct_super_without_heritage_early_error_test() {
+    basic_env_expression_eary_error_test(23, 28, "(class {constructor() {super()}})");
+  }
+
+  #[test]
+  fn class_constructor_declared_twice_early_error_test() {
+    basic_env_expression_eary_error_test(25, 36, "(class {constructor() {} constructor() {}})");
+  }
+
+  #[test]
+  fn class_constructor_is_special_method_early_error_test() {
+    basic_env_expression_eary_error_test(14, 25, "(class {async constructor() {}})");
+    basic_env_expression_eary_error_test(9, 20, "(class {*constructor() {}})");
+    basic_env_expression_eary_error_test(15, 26, "(class {async *constructor() {}})");
+    basic_env_expression_eary_error_test(12, 23, "(class {get constructor() {}})");
+    basic_env_expression_eary_error_test(12, 23, "(class {set constructor(a) {}})");
+    basic_env_expression_eary_error_test(8, 20, "(class {#constructor() {}})");
+  }
+
+  #[test]
+  fn class_method_has_direct_super_early_error_test() {
+    basic_env_expression_eary_error_test(14, 19, "(class {fn() {super()}})");
+  }
+
+  #[test]
+  fn static_class_method_name_is_prototype_early_error_test() {
+    basic_env_expression_eary_error_test(15, 24, "(class {static prototype() {}})");
+  }
+
+  #[test]
+  fn parse_function_expression() {
+    single_expression_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return fnexpr!(
+          pos!(col + 1, line),
+          "Function",
+          0,
+          0,
+          if is_strict {
+            scope!(@opaque @strict 0, true)
+          } else {
+            scope!(@opaque 0, true)
+          },
+          exprs!(pos!(col + 9, line)),
+          stmts!(pos!(col + 12, line))
+        );
+      },
+      "(function() {})",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_generator_function_expression() {
+    single_expression_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return fnexpr!(
+          pos!(col + 1, line),
+          "Generator",
+          0,
+          0,
+          if is_strict {
+            scope!(@opaque @strict 0, true)
+          } else {
+            scope!(@opaque 0, true)
+          },
+          exprs!(pos!(col + 10, line)),
+          stmts!(pos!(col + 13, line))
+        );
+      },
+      "(function*() {})",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_async_function_expression() {
+    single_expression_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return afnexpr!(
+          pos!(col + 7, line),
+          "Function",
+          0,
+          0,
+          if is_strict {
+            scope!(@opaque @strict 0, true)
+          } else {
+            scope!(@opaque 0, true)
+          },
+          exprs!(pos!(col + 15, line)),
+          stmts!(pos!(col + 18, line))
+        );
+      },
+      "(async function() {})",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_async_generator_function_expression() {
+    single_expression_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return afnexpr!(
+          pos!(col + 7, line),
+          "Generator",
+          0,
+          0,
+          if is_strict {
+            scope!(@opaque @strict 0, true)
+          } else {
+            scope!(@opaque 0, true)
+          },
+          exprs!(pos!(col + 16, line)),
+          stmts!(pos!(col + 19, line))
+        );
+      },
+      "(async function*() {})",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_function_parameter_pattern() {
+    single_expression_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return fnexpr!(
+          pos!(col + 1, line),
+          "Function",
+          0,
+          0,
+          if is_strict {
+            scope!(@opaque @strict 0, true)
+          } else {
+            scope!(@opaque 0, true)
+          },
+          ident!("X", pos!(col + 10, line)),
+          exprs!(
+            pos!(col + 11, line),
+            ident!("a", pos!(col + 12, line)),
+            objectlit!(
+              ObjectLitType::NONE,
+              pos!(col + 15, line),
+              object_props!(pos!(col + 16, line), ident!("b", pos!(col + 16, line))),
+              object_props!(
+                pos!(col + 19, line),
+                ident!("test", pos!(col + 19, line)),
+                objectlit!(
+                  ObjectLitType::NONE,
+                  pos!(col + 25, line),
+                  object_props!(pos!(col + 26, line), ident!("c", pos!(col + 26, line)))
+                )
+              )
+            ),
+            arraylit!(
+              false,
+              pos!(col + 31, line),
+              ident!("d", pos!(col + 32, line)),
+              objectlit!(
+                ObjectLitType::NONE,
+                pos!(col + 35, line),
+                object_props!(
+                  pos!(col + 36, line),
+                  ident!("e", pos!(col + 36, line)),
+                  ident!("f", pos!(col + 39, line)),
+                ),
+              )
+            ),
+            binary!(
+              Token::OpAssign,
+              pos!(col + 44, line),
+              ident!("k", pos!(col + 44, line)),
+              number!("1", pos!(col + 48, line))
+            ),
+            binary!(
+              Token::OpAssign,
+              pos!(col + 51, line),
+              objectlit!(
+                ObjectLitType::NONE,
+                pos!(col + 51, line),
+                object_props!(
+                  pos!(col + 52, line),
+                  ident!("j", pos!(col + 52, line)),
+                  objectlit!(
+                    ObjectLitType::NONE,
+                    pos!(col + 55, line),
+                    object_props!(pos!(col + 56, line), ident!("l", pos!(col + 56, line)))
+                  )
+                )
+              ),
+              objectlit!(
+                ObjectLitType::NONE,
+                pos!(col + 62, line),
+                object_props!(
+                  pos!(col + 63, line),
+                  ident!("j", pos!(col + 63, line)),
+                  objectlit!(
+                    ObjectLitType::NONE,
+                    pos!(col + 66, line),
+                    object_props!(
+                      pos!(col + 67, line),
+                      ident!("l", pos!(col + 67, line)),
+                      number!("1", pos!(col + 70, line))
+                    )
+                  )
+                )
+              )
+            ),
+            unary!("Spread", "Pre", pos!(col + 75, line), ident!("g", pos!(col + 78, line)))
+          ),
+          stmts!(pos!(col + 81, line))
+        );
+      },
+      "(function X(a, {b, test: {c}}, [d, {e: f}], k = 1, {j: {l}} = {j: {l: 1}}, ...g) {})",
+      1,
+    )
+  }
+
+  #[test]
+  fn function_strict_mode_unique_parameter_early_error_test() {
+    let env = [(Some("'use strict';"), ""), (None, ""), (None, "")];
+    syntax_error_test(
+      &env,
+      "(function(a, a, b) {})",
+      &[&s_pos!(26, 27, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
+
+    syntax_error_test(
+      &env,
+      "(function(a, b = {a}, {[((a, b) => {})()]: [{c: {o: [{a}]}}]}) {})",
+      &[&s_pos!(67, 68, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn function_indentifier_eval_or_arguments_early_error_test() {
+    let env = [(Some("'use strict';"), ""), (None, ""), (None, "")];
+    syntax_error_test(
+      &env,
+      "(function eval() {})",
+      &[&s_pos!(23, 27, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
+
+    syntax_error_test(
+      &env,
+      "(function arguments() {})",
+      &[&s_pos!(23, 32, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn function_arguments_is_not_simple_but_strict_mode_declared_early_error_test() {
+    let env = [(Some(""), ""), (None, ""), (None, "")];
+    syntax_error_test(
+      &env,
+      "(function ({a}) {'use strict';})",
+      &[&s_pos!(17, 29, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
+    syntax_error_test(
+      &env,
+      "(function (a = 1) {'use strict';})",
+      &[&s_pos!(19, 31, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
+    syntax_error_test(
+      &env,
+      "(function (...a) {'use strict';})",
+      &[&s_pos!(18, 30, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn function_contains_super_property_or_call_early_error_test() {
+    basic_env_expression_eary_error_test(15, 20, "(function (a = super.a) {})");
+    basic_env_expression_eary_error_test(15, 20, "(function (a = super()) {})");
+    basic_env_expression_eary_error_test(15, 20, "(function (a) {super()})");
+    basic_env_expression_eary_error_test(15, 20, "(function (a) {super.a})");
+    basic_env_expression_eary_error_test(11, 16, "(function (super) {})");
+  }
 }

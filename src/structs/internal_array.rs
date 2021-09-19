@@ -32,11 +32,7 @@ pub struct InternalArrayLayout {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct InternalArray<T: InternalArrayElement>(HeapLayout<InternalArrayLayout>, PhantomData<T>);
-impl_object!(
-  InternalArray<T: InternalArrayElement>,
-  HeapLayout<InternalArrayLayout>,
-  PhantomData
-);
+impl_object!(InternalArray<T: InternalArrayElement>, HeapLayout<InternalArrayLayout>, PhantomData);
 
 impl<T: InternalArrayElement> Index<usize> for InternalArray<T> {
   type Output = T;
@@ -73,12 +69,7 @@ impl<T: Copy> InternalArray<T> {
     return InternalArray::<T>::init(HeapLayout::<InternalArrayLayout>::new(context, object_record), capacity);
   }
 
-  pub fn construct(
-    context: impl ObjectRecordsInitializedContext,
-    capacity: usize,
-    length: usize,
-    data: *mut T,
-  ) -> InternalArray<T> {
+  pub fn construct(context: impl ObjectRecordsInitializedContext, capacity: usize, length: usize, data: *mut T) -> InternalArray<T> {
     let mut array = InternalArray::<T>::init(
       HeapLayout::<InternalArrayLayout>::new(
         context,
@@ -94,12 +85,7 @@ impl<T: Copy> InternalArray<T> {
     return array;
   }
 
-  pub fn copy_construct(
-    context: impl ObjectRecordsInitializedContext,
-    capacity: usize,
-    length: usize,
-    data: *const T,
-  ) -> InternalArray<T> {
+  pub fn copy_construct(context: impl ObjectRecordsInitializedContext, capacity: usize, length: usize, data: *const T) -> InternalArray<T> {
     let mut array = InternalArray::<T>::init(
       HeapLayout::<InternalArrayLayout>::new(
         context,
@@ -121,11 +107,7 @@ impl<T: Copy> InternalArray<T> {
     return InternalArray::<T>::construct(context, base.capacity() * 2, base.len(), base.data());
   }
 
-  pub fn expand_and_copy_with_size(
-    context: impl ObjectRecordsInitializedContext,
-    base: InternalArray<T>,
-    size: usize,
-  ) -> InternalArray<T> {
+  pub fn expand_and_copy_with_size(context: impl ObjectRecordsInitializedContext, base: InternalArray<T>, size: usize) -> InternalArray<T> {
     assert!(base.capacity() < size);
     return InternalArray::<T>::construct(context, size, base.len(), base.data());
   }
@@ -157,11 +139,7 @@ impl<T: Copy> InternalArray<T> {
     return a;
   }
 
-  pub fn split(
-    &self,
-    context: impl ObjectRecordsInitializedContext,
-    index: usize,
-  ) -> (InternalArray<T>, InternalArray<T>) {
+  pub fn split(&self, context: impl ObjectRecordsInitializedContext, index: usize) -> (InternalArray<T>, InternalArray<T>) {
     assert!(index < self.capacity);
     let left_cap = self.capacity - index;
     let mut left = InternalArray::<T>::new(context, left_cap);
@@ -260,12 +238,7 @@ impl<T: Copy> InternalArray<T> {
   }
 
   pub fn data(&self) -> *mut T {
-    return unsafe {
-      self
-        .cell()
-        .get_body()
-        .offset((size_of::<InternalArrayLayout>()) as isize) as *mut T
-    };
+    return unsafe { self.cell().get_body().offset((size_of::<InternalArrayLayout>()) as isize) as *mut T };
   }
 
   pub fn iter<'a>(&'a self) -> RefInternalArrayIterator<'a, T> {
@@ -278,10 +251,7 @@ impl<T: Copy> InternalArray<T> {
 
   fn set_data(&self, data: *mut T) {
     unsafe {
-      let d = self
-        .cell()
-        .get_body()
-        .offset((size_of::<InternalArrayLayout>()) as isize) as *mut T;
+      let d = self.cell().get_body().offset((size_of::<InternalArrayLayout>()) as isize) as *mut T;
       *d = *data;
     };
   }

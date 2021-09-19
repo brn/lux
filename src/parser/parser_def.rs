@@ -130,21 +130,12 @@ impl ExpressionContext {
   pub fn create_child_context(&self) -> ExpressionContext {
     let mut child = ExpressionContext::new();
     child.set_is_in_allowed(self.is_in_allowed);
-    child.set_is_maybe_immediate_function(self.is_maybe_immediate_function);
+    child.set_is_maybe_immediate_function(self.is_maybe_immediate_function());
     return child;
   }
 
   pub fn create_child_arrow_context(&self) -> ArrowFunctionContext {
     let mut child = ArrowFunctionContext::new();
-    child.expression_context.set_is_in_allowed(self.is_in_allowed);
-    child
-      .expression_context
-      .set_is_maybe_immediate_function(self.is_maybe_immediate_function);
-    return child;
-  }
-
-  pub fn create_child_class_field_context(&self) -> ClassFieldContext {
-    let mut child = ClassFieldContext::new();
     child.expression_context.set_is_in_allowed(self.is_in_allowed);
     child
       .expression_context
@@ -177,11 +168,12 @@ impl std::fmt::Debug for ExpressionContext {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     return write!(
       f,
-      "pattern_error = {} value_errr = {} strict_mode_error = {}, imm_fn = {}",
+      "pattern_error = {} value_errr = {} strict_mode_error = {}, imm_fn = {} assignment_target_type = {:?}",
       self.first_pattern_error.is_some(),
       self.first_value_error.is_some(),
       self.first_strict_mode_error.is_some(),
-      self.is_maybe_immediate_function
+      self.is_maybe_immediate_function,
+      self.assignment_target_type
     );
   }
 }
@@ -224,21 +216,12 @@ impl ArrowFunctionContext {
   }
 
   pub fn create_child_context(&self) -> ExpressionContext {
-    let mut child = ExpressionContext::new();
-    child.set_is_in_allowed(self.expression_context.is_in_allowed);
-    child.set_is_maybe_immediate_function(self.expression_context.is_maybe_immediate_function);
-    return child;
+    return self.expression_context.create_child_context();
   }
 
   pub fn create_child_arrow_context(&self) -> ArrowFunctionContext {
     let mut child = ArrowFunctionContext::new();
-    child.expression_context = self.expression_context.create_child_context();
-    return child;
-  }
-
-  pub fn create_child_class_field_context(&self) -> ClassFieldContext {
-    let mut child = ClassFieldContext::new();
-    child.expression_context = self.expression_context.create_child_context();
+    child.expression_context = self.create_child_context();
     return child;
   }
 
@@ -275,75 +258,6 @@ impl ArrowFunctionContext {
   }
 }
 
-#[derive(Property, Clone)]
-pub struct ClassFieldContext {
-  #[property(mut(public, suffix = "_mut"))]
-  expression_context: ExpressionContext,
-
-  #[property(skip)]
-  first_constructor_error: Option<Exotic<ErrorDescriptor>>,
-
-  #[property(get(type = "copy"), set(type = "ref"))]
-  is_constructor_seen: bool,
-}
-
-impl std::fmt::Debug for ClassFieldContext {
-  fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-    return write!(
-      f,
-      "{:?} arrow_param_error = {} is_constructor_seen = {}",
-      self.expression_context,
-      self.first_constructor_error.is_some(),
-      self.is_constructor_seen
-    );
-  }
-}
-
-impl ClassFieldContext {
-  pub fn new() -> Self {
-    ClassFieldContext {
-      expression_context: ExpressionContext::new(),
-      first_constructor_error: None,
-      is_constructor_seen: false,
-    }
-  }
-
-  pub fn create_child_context(&self) -> ExpressionContext {
-    let mut child = ExpressionContext::new();
-    child.set_is_in_allowed(self.expression_context.is_in_allowed);
-    child.set_is_maybe_immediate_function(self.expression_context.is_maybe_immediate_function);
-    return child;
-  }
-
-  pub fn create_child_arrow_context(&self) -> ArrowFunctionContext {
-    let mut child = ArrowFunctionContext::new();
-    child.expression_context = self.expression_context.create_child_context();
-    return child;
-  }
-
-  pub fn create_child_class_field_context(&self) -> Self {
-    let mut child = ClassFieldContext::new();
-    child.expression_context = self.expression_context.create_child_context();
-    return child;
-  }
-
-  _get_set!(first_constructor_error);
-
-  pub fn propagate(&self, ec: &mut ExprCtx) {
-    self.expression_context.propagate(ec);
-    if let Ok(ctx) = ec.to_class_field_ctx_mut() {
-      if self.first_constructor_error.is_some() {
-        ctx.first_constructor_error = self.first_constructor_error;
-      }
-      ctx.is_constructor_seen = self.is_constructor_seen;
-    }
-  }
-
-  pub fn reset(&mut self) -> Self {
-    return std::mem::replace(self, ClassFieldContext::new());
-  }
-}
-
 macro_rules! context_enum {
   ($name:ident { $($item:ident($type:ty),)* }) => {
     #[derive(Clone)]
@@ -368,7 +282,6 @@ macro_rules! context_enum {
         match self {
           &mut $name::Expr(ref mut ctx) => ctx,
           &mut $name::Arrow(ref mut ctx) => ctx.expression_context_mut(),
-          &mut $name::ClassField(ref mut ctx) => ctx.expression_context_mut()
         }
       }
 
@@ -376,7 +289,6 @@ macro_rules! context_enum {
         match self {
           &$name::Expr(ref ctx) => ctx,
           &$name::Arrow(ref ctx) => ctx.expression_context(),
-          &$name::ClassField(ref ctx) => ctx.expression_context()
         }
       }
 
@@ -384,7 +296,6 @@ macro_rules! context_enum {
         match self {
           &mut $name::Expr(_) => Err(()),
           &mut $name::Arrow(ref mut ctx) => Ok(ctx),
-          &mut $name::ClassField(_) => Err(())
         }
       }
 
@@ -396,36 +307,11 @@ macro_rules! context_enum {
         match self {
           &$name::Expr(_) => Err(()),
           &$name::Arrow(ref ctx) => Ok(ctx),
-          &$name::ClassField(_) => Err(())
         }
       }
 
       pub fn to_arrow_ctx_unchecked(&self) -> &ArrowFunctionContext {
         return self.to_arrow_ctx().unwrap();
-      }
-
-      pub fn to_class_field_ctx_mut(&mut self) -> Result<&mut ClassFieldContext, ()> {
-        match self {
-          &mut $name::Expr(_) => Err(()),
-          &mut $name::Arrow(_) => Err(()),
-          &mut $name::ClassField(ref mut ctx) => Ok(ctx)
-        }
-      }
-
-      pub fn to_class_field_ctx_mut_unchecked(&mut self) -> &mut ClassFieldContext {
-        return self.to_class_field_ctx_mut().unwrap();
-      }
-
-      pub fn to_class_field_ctx(&self) -> Result<&ClassFieldContext, ()> {
-        match self {
-          &$name::Expr(_) => Err(()),
-          &$name::Arrow(_) => Err(()),
-          &$name::ClassField(ref ctx) => Ok(ctx)
-        }
-      }
-
-      pub fn to_class_field_ctx_unchecked(&self) -> &ClassFieldContext {
-        return self.to_class_field_ctx().unwrap();
       }
 
       pub fn propagate(&mut self, ec: &mut ExprCtx) {
@@ -448,14 +334,6 @@ macro_rules! context_enum {
         match self {
           $(
             &$name::$item(ref e) => e.create_child_arrow_context(),
-          )*
-        }
-      }
-
-      pub fn create_child_class_field_context(&self) -> ClassFieldContext {
-        match self {
-          $(
-            &$name::$item(ref e) => e.create_child_class_field_context(),
           )*
         }
       }
@@ -487,7 +365,6 @@ context_enum!(
   ExprCtx {
     Expr(ExpressionContext),
     Arrow(ArrowFunctionContext),
-    ClassField(ClassFieldContext),
   }
 );
 impl From<ExpressionContext> for ExprCtx {
@@ -498,11 +375,6 @@ impl From<ExpressionContext> for ExprCtx {
 impl From<ArrowFunctionContext> for ExprCtx {
   fn from(e: ArrowFunctionContext) -> ExprCtx {
     return ExprCtx::Arrow(e);
-  }
-}
-impl From<ClassFieldContext> for ExprCtx {
-  fn from(e: ClassFieldContext) -> ExprCtx {
-    return ExprCtx::ClassField(e);
   }
 }
 
@@ -532,19 +404,13 @@ impl SyntaxErrorFactory {
     template_literal_not_allowed_after_op_chain,
     "Template literal not allowed after optional chain"
   );
-  error_def!(
-    duplicate_parameter_not_allowed_here,
-    "Duplicate parameter not allowed here"
-  );
+  error_def!(duplicate_parameter_not_allowed_here, "Duplicate parameter not allowed here");
   error_def!(
     use_strict_after_non_simple_param,
     "Declaring 'use strict' is not allowed if function has non-simple parameter list"
   );
   error_def!(unexpected_token_found, "Unexpected token found");
-  error_def!(
-    invalid_left_hand_side_expression,
-    "Invalid left hand side expression found"
-  );
+  error_def!(invalid_left_hand_side_expression, "Invalid left hand side expression found");
   error_def!(
     eval_or_arguments_in_strict_mode_code,
     "In strict mode code, eval or arguments not allowed here"

@@ -38,11 +38,7 @@ impl SourcePosition {
       } else {
         0
       },
-      end_line_number: if end_line_number.is_some() {
-        end_line_number.unwrap()
-      } else {
-        0
-      },
+      end_line_number: if end_line_number.is_some() { end_line_number.unwrap() } else { 0 },
     };
   }
 
@@ -88,11 +84,7 @@ impl PartialOrd for SourcePosition {
   fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
     use Ordering::*;
     if self.start_line_number == other.start_line_number {
-      return Some(if self.start_col > other.start_col {
-        Greater
-      } else {
-        Less
-      });
+      return Some(if self.start_col > other.start_col { Greater } else { Less });
     }
     return Some(if self.start_line_number > other.start_line_number {
       Greater
@@ -122,11 +114,7 @@ impl RuntimeSourcePosition {
 
 impl Debug for RuntimeSourcePosition {
   fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-    return write!(
-      f,
-      "SourcePosition: {{col: {}, line_number: {}}}",
-      self.col, self.line_number
-    );
+    return write!(f, "SourcePosition: {{col: {}, line_number: {}}}", self.col, self.line_number);
   }
 }
 
@@ -136,10 +124,6 @@ impl PartialOrd for RuntimeSourcePosition {
     if self.line_number == other.line_number {
       return Some(if self.col > other.col { Greater } else { Less });
     }
-    return Some(if self.line_number > other.line_number {
-      Greater
-    } else {
-      Less
-    });
+    return Some(if self.line_number > other.line_number { Greater } else { Less });
   }
 }

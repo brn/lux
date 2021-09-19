@@ -72,30 +72,11 @@ pub trait NodeOps {
     return new_node!(CallExpression, self.region(), pos, receiver, callee, parameters).into();
   }
 
-  fn new_conditional_expression(
-    &mut self,
-    condition: Expr,
-    then_expr: Expr,
-    else_expr: Expr,
-    pos: Option<&RuntimeSourcePosition>,
-  ) -> Expr {
-    return new_node!(
-      ConditionalExpression,
-      self.region(),
-      pos,
-      condition,
-      then_expr,
-      else_expr
-    )
-    .into();
+  fn new_conditional_expression(&mut self, condition: Expr, then_expr: Expr, else_expr: Expr, pos: Option<&RuntimeSourcePosition>) -> Expr {
+    return new_node!(ConditionalExpression, self.region(), pos, condition, then_expr, else_expr).into();
   }
 
-  fn new_literal(
-    &mut self,
-    literal_type: Token,
-    literal_value: LiteralValue,
-    pos: Option<&RuntimeSourcePosition>,
-  ) -> Expr {
+  fn new_literal(&mut self, literal_type: Token, literal_value: LiteralValue, pos: Option<&RuntimeSourcePosition>) -> Expr {
     return new_node!(Literal, self.region(), pos, literal_type, literal_value).into();
   }
 
@@ -280,12 +261,7 @@ pub trait NodeOps {
     return new_node!(Statement, self.region(), pos, expr).into();
   }
 
-  fn new_import_decl(
-    &mut self,
-    import_binding: Option<Expr>,
-    module_specifier: Expr,
-    pos: Option<&RuntimeSourcePosition>,
-  ) -> Stmt {
+  fn new_import_decl(&mut self, import_binding: Option<Expr>, module_specifier: Expr, pos: Option<&RuntimeSourcePosition>) -> Stmt {
     return new_node!(ImportDeclaration, self.region(), pos, import_binding, module_specifier).into();
   }
 
@@ -296,15 +272,7 @@ pub trait NodeOps {
     from_clause: Option<Ast>,
     pos: Option<&RuntimeSourcePosition>,
   ) -> Stmt {
-    return new_node!(
-      ExportDeclaration,
-      self.region(),
-      pos,
-      export_type,
-      export_clause,
-      from_clause
-    )
-    .into();
+    return new_node!(ExportDeclaration, self.region(), pos, export_type, export_clause, from_clause).into();
   }
 
   fn new_class_field(&mut self, flags: ClassFieldFlag, value: Expr, pos: Option<&RuntimeSourcePosition>) -> Stmt {

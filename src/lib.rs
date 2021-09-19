@@ -18,6 +18,8 @@ extern crate backtrace;
 #[macro_use]
 extern crate itertools;
 
+extern crate termion;
+
 #[macro_use]
 mod debug;
 

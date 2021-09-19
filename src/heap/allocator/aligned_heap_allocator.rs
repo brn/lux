@@ -42,19 +42,11 @@ pub unsafe fn allocate_aligned<'a>(block_size: usize, alignment: usize) -> Optio
     ) {
       Ok(allocated_address) => {
         let next_alignment = alignment - 1;
-        let aligned_address =
-          ((allocated_address.offset(next_alignment as isize) as usize) & !next_alignment) as *mut libc::c_void;
+        let aligned_address = ((allocated_address.offset(next_alignment as isize) as usize) & !next_alignment) as *mut libc::c_void;
         let roundup = aligned_address.offset_from(allocated_address) as usize;
         let unused = alignment - def::ALIGNMENT - roundup;
 
-        if unmap_excess_address(
-          roundup,
-          allocated_address,
-          aligned_address,
-          unused,
-          block_size,
-          allocated_size,
-        ) {
+        if unmap_excess_address(roundup, allocated_address, aligned_address, unused, block_size, allocated_size) {
           return Some(aligned_address);
         }
         return None;
@@ -78,12 +70,7 @@ unsafe fn unmap_excess_address(
     vha::deallocate(allocated_address, roundup);
   }
   if unused > 0 {
-    vha::deallocate(
-      allocated_address
-        .offset(allocated_size as isize)
-        .offset(-(unused as isize)),
-      unused,
-    );
+    vha::deallocate(allocated_address.offset(allocated_size as isize).offset(-(unused as isize)), unused);
   }
   let mut flags = mman::ProtFlags::empty();
   flags.insert(mman::ProtFlags::PROT_READ);

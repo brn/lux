@@ -56,9 +56,7 @@ impl FixedU16CodePointArray {
   }
 
   pub fn to_utf8(&self) -> String {
-    return decode_utf16(self.into_iter())
-      .map(|r| r.unwrap_or('#'))
-      .collect::<String>();
+    return decode_utf16(self.into_iter()).map(|r| r.unwrap_or('#')).collect::<String>();
   }
 
   _def_eq!(pub eq_vec16, &Vec<u16>);

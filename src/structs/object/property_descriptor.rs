@@ -43,13 +43,8 @@ impl PropertyDescriptor {
   const DATA_PD_INDEX: usize = 4;
 
   #[inline]
-  pub fn new_data_descriptor(
-    context: impl ObjectRecordsInitializedContext,
-    bit: u8,
-    value: Repr,
-  ) -> PropertyDescriptor {
-    let mut layout =
-      HeapLayout::<DataPropertyDescriptorLayout>::new(context, context.object_records().data_descriptor_record());
+  pub fn new_data_descriptor(context: impl ObjectRecordsInitializedContext, bit: u8, value: Repr) -> PropertyDescriptor {
+    let mut layout = HeapLayout::<DataPropertyDescriptorLayout>::new(context, context.object_records().data_descriptor_record());
     let mut descriptor = PropertyDescriptor(layout);
     layout.value = value;
     HeapObject::assign_data_field(&mut descriptor, bit as u64);
@@ -57,14 +52,8 @@ impl PropertyDescriptor {
     return descriptor;
   }
 
-  pub fn new_accessor_descriptor(
-    context: impl Context,
-    bit: u8,
-    get: Option<Repr>,
-    set: Option<Repr>,
-  ) -> PropertyDescriptor {
-    let layout =
-      HeapLayout::<DataPropertyDescriptorLayout>::new(context, context.object_records().accessor_descriptor_record());
+  pub fn new_accessor_descriptor(context: impl Context, bit: u8, get: Option<Repr>, set: Option<Repr>) -> PropertyDescriptor {
+    let layout = HeapLayout::<DataPropertyDescriptorLayout>::new(context, context.object_records().accessor_descriptor_record());
     let mut a_layout = HeapLayout::<AccessorPropertyDescriptorLayout>::from(layout);
     let mut descriptor = PropertyDescriptor(layout);
     HeapObject::assign_data_field(&mut descriptor, bit as u64);

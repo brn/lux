@@ -19,17 +19,13 @@ pub struct NativeFunctionLayout<F: NativeFunctionCall> {
 #[repr(C)]
 #[derive(Copy, Clone)]
 pub struct NativeFunction<F: NativeFunctionCall>(HeapLayout<NativeFunctionLayout<F>>);
-impl_object!(
-  NativeFunction<F: NativeFunctionCall>,
-  HeapLayout<NativeFunctionLayout<F>>
-);
+impl_object!(NativeFunction<F: NativeFunctionCall>, HeapLayout<NativeFunctionLayout<F>>);
 
 pub const NATIVE_FUNCTION_SIZE: usize = PTR_SIZE;
 
 impl<F: NativeFunctionCall> NativeFunction<F> {
   pub fn new(context: impl Context, func: F) -> NativeFunction<F> {
-    let mut layout =
-      HeapLayout::<NativeFunctionLayout<F>>::new(context, context.object_records().native_function_record());
+    let mut layout = HeapLayout::<NativeFunctionLayout<F>>::new(context, context.object_records().native_function_record());
     layout.callable = func;
     return NativeFunction(layout);
   }
