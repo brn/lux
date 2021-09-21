@@ -3717,7 +3717,7 @@ mod parser_test {
   }
 
   #[test]
-  fn parse_let_binding() {
+  fn parse_lexical_or_var_binding() {
     macro_rules! let_or_const {
       ($type:expr, $type_l:expr) => {
         let len = ($type_l.len() + 1) as u64;
@@ -3736,10 +3736,11 @@ mod parser_test {
     }
     let_or_const!("Let", "let");
     let_or_const!("Const", "const");
+    let_or_const!("Var", "var");
   }
 
   #[test]
-  fn parse_let_pattern_binding() {
+  fn parse_lexical_or_var_pattern_binding() {
     macro_rules! let_or_const {
       ($type:expr, $type_l:expr) => {
         let len = ($type_l.len() + 1) as u64;
@@ -3774,10 +3775,11 @@ mod parser_test {
     }
     let_or_const!("Let", "let");
     let_or_const!("Const", "const");
+    let_or_const!("Var", "var");
   }
 
   #[test]
-  fn parse_let_bindings() {
+  fn parse_lexical_or_var_bindings() {
     macro_rules! let_or_const {
       ($type:expr, $type_l:expr) => {
         let len = ($type_l.len() + 1) as u64;
@@ -3815,6 +3817,31 @@ mod parser_test {
     }
     let_or_const!("Let", "let");
     let_or_const!("Const", "const");
+    let_or_const!("Var", "var");
+  }
+
+  #[test]
+  fn parse_duplicated_var_binding() {
+    stmt_test(
+      |(col, line, _, _)| {
+        return vars!(
+          pos!(col, line),
+          var!(
+            "Var",
+            pos!(col, line),
+            ident!("a", pos!(col + 4, line)),
+            number!("1", pos!(col + 8, line))
+          ),
+          var!(
+            "Var",
+            pos!(col, line),
+            ident!("a", pos!(col + 11, line)),
+            number!("1", pos!(col + 15, line))
+          ),
+        );
+      },
+      "var a = 1, a = 1;",
+    );
   }
 
   #[test]
@@ -3826,6 +3853,8 @@ mod parser_test {
   fn lexical_binding_not_allowed_duplication_early_error_test() {
     basic_env_expression_eary_error_test(14, 15, "let a = 1, b, a = 3");
     basic_env_expression_eary_error_test(20, 21, "const a = 1, b = 2, a = 3");
+    basic_env_expression_eary_error_test(16, 17, "let a = 1; var a = 2;");
+    basic_env_expression_eary_error_test(18, 19, "const a = 1; var a = 2;");
   }
 
   #[test]

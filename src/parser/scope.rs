@@ -151,7 +151,7 @@ impl Scope {
     vars: &Vec<(Vec<u16>, SourcePosition)>,
   ) -> Option<(SourcePosition, SourcePosition)> {
     for var in vars.iter() {
-      if let Some(pos) = self.get_already_declared_var_position(&var.0) {
+      if let Some(pos) = self.get_already_declared_var_position(&var.0, var_type == VariableType::LegacyVar) {
         return Some((var.1.clone(), pos.clone()));
       }
       self.declare_var(var_type, var.clone());
@@ -177,13 +177,19 @@ impl Scope {
     }
   }
 
-  pub fn get_already_declared_var_position(&self, var: &Vec<u16>) -> Option<&SourcePosition> {
+  pub fn get_already_declared_var_position(&self, var: &Vec<u16>, should_search_only_lexical_decl: bool) -> Option<&SourcePosition> {
     if let Some(ref val) = self.var_map.get(var) {
-      return Some(&val.0);
+      if should_search_only_lexical_decl {
+        if val.1 == VariableType::Lexical {
+          return Some(&val.0);
+        }
+      } else {
+        return Some(&val.0);
+      }
     }
     if self.is_lexical() {
       if let Some(ref scope) = self.parent_scope {
-        return scope.get_already_declared_var_position(var);
+        return scope.get_already_declared_var_position(var, should_search_only_lexical_decl);
       }
     }
     return None;

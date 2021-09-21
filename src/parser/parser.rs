@@ -2046,7 +2046,10 @@ impl Parser {
         return next_parse!(self, self.parse_block_statement(builder));
       }
       Var => {
-        return next_parse!(self, self.parse_variable_statement(builder));
+        return next_parse!(
+          self,
+          self.parse_lexical_or_variable_declaration(builder, VariableDeclarationType::Var)
+        );
       }
       If => {
         return next_parse!(self, self.parse_if_statement(builder));
@@ -2083,7 +2086,14 @@ impl Parser {
     match self.cur() {
       Token::Identifier | Token::Const => {
         if self.contextual_keyword() != Token::Async || self.peek()? != Token::Function {
-          return self.parse_lexical_declaration(builder);
+          return self.parse_lexical_or_variable_declaration(
+            builder,
+            if self.contextual_keyword() == Token::Let {
+              VariableDeclarationType::Let
+            } else {
+              VariableDeclarationType::Const
+            },
+          );
         }
         return next_parse!(self, self.parse_function_declaration(builder, FunctionAttribute::ASYNC));
       }
@@ -2140,17 +2150,23 @@ impl Parser {
     return next_parse!(self, self.parse_statement(builder));
   }
 
-  fn parse_lexical_declaration<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
+  fn parse_lexical_or_variable_declaration<Builder: NodeOps>(
+    &mut self,
+    mut builder: Exotic<Builder>,
+    var_type: VariableDeclarationType,
+  ) -> ParseResult<Stmt> {
     let start_pos = self.source_position().clone();
-    let var_type = if self.cur() == Token::Const {
-      VariableDeclarationType::Const
-    } else if self.contextual_keyword() == Token::Let {
-      VariableDeclarationType::Let
-    } else {
-      return parse_error!(self.region, "let or const expected", self.source_position());
-    };
-    self.advance()?;
 
+    #[cfg(debug_assertions)]
+    if var_type == VariableDeclarationType::Const {
+      debug_assert_eq!(self.cur(), Token::Const);
+    } else if var_type == VariableDeclarationType::Let {
+      debug_assert_eq!(self.contextual_keyword(), Token::Let);
+    } else {
+      debug_assert_eq!(self.cur(), Token::Var);
+    };
+
+    self.advance()?;
     let mut vars = Vec::new();
     let mut is_vars = false;
     self.new_arrow_context();
@@ -2202,7 +2218,11 @@ impl Parser {
       };
 
       if let Some((ref cur, ref first)) = self.current_scope.declare_vars_without_lexical_duplication(
-        VariableType::Lexical,
+        if var_type == VariableDeclarationType::Var {
+          VariableType::LegacyVar
+        } else {
+          VariableType::Lexical
+        },
         self.expression_context.to_arrow_ctx_mut_unchecked().var_list(),
       ) {
         return parse_error!(
@@ -2262,18 +2282,6 @@ impl Parser {
         self.advance()?;
       }
     }
-  }
-  fn parse_lexical_binding<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
-    unreachable!();
-  }
-  fn parse_variable_statement<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
-    unreachable!();
-  }
-  fn parse_variable_declaration_list<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
-    unreachable!();
-  }
-  fn parse_variable_declaration<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
-    unreachable!();
   }
 
   fn parse_binding_pattern<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
@@ -3264,7 +3272,13 @@ impl Parser {
 
     match self.cur() {
       Token::Var => {
-        export_clause = Some(next_parse!(self, self.parse_variable_statement(builder))?.into());
+        export_clause = Some(
+          next_parse!(
+            self,
+            self.parse_lexical_or_variable_declaration(builder, VariableDeclarationType::Var)
+          )?
+          .into(),
+        );
       }
       Token::Const | Token::Function | Token::Class => {
         export_clause = Some(next_parse!(self, self.parse_declaration(builder))?.into());
