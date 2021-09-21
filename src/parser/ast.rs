@@ -299,6 +299,7 @@ _ast_enum! {
     LabelledStatement(Node<LabelledStatement>),
     WithStatement(Node<WithStatement>),
     VariableDeclaration(Node<VariableDeclaration>),
+    VariableDeclarations(Node<VariableDeclarations>),
     ClassField(Node<ClassField>),
     Class(Node<Class>),
     SkipStmt(Node<SkipStmt>),
@@ -1991,7 +1992,27 @@ impl_stmt!(
   }
 );
 
-#[derive(PartialEq, Debug)]
+pub struct VariableDeclarations {
+  decls: Vec<Stmt>,
+}
+impl_stmt!(
+  VariableDeclarations,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    let str = format!("{}[VariableDeclarations {}]\n", indent, source_position.to_string());
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    self.to_string(indent, result, source_position);
+    to_string_list(&self.decls, indent, result);
+  }
+);
+impl VariableDeclarations {
+  pub fn new(region: &mut Region, decls: Vec<Stmt>) -> Node<Self> {
+    return Node::<VariableDeclarations>::new(region, VariableDeclarations { decls });
+  }
+}
+
+#[derive(PartialEq, Debug, Copy, Clone)]
 pub enum VariableDeclarationType {
   Let,
   Const,
@@ -2022,6 +2043,18 @@ impl_stmt!(
     }
   }
 );
+impl VariableDeclaration {
+  pub fn new(region: &mut Region, decl_type: VariableDeclarationType, binding: Expr, initializer: Option<Expr>) -> Node<Self> {
+    return Node::<VariableDeclaration>::new(
+      region,
+      VariableDeclaration {
+        decl_type,
+        binding,
+        initializer,
+      },
+    );
+  }
+}
 
 bitflags! {
   pub struct SkipExprType: u32 {
@@ -2109,8 +2142,10 @@ impl_expr!(
 
 bitflags! {
   pub struct SkipStmtType: u8 {
-    const STMT = 1;
-    const CLASS_FIELD = 2;
+    const STMT = 0x1;
+    const CLASS_FIELD = 0x2;
+    const VARS = 0x4;
+    const VAR = 0x8;
   }
 }
 
@@ -2124,6 +2159,14 @@ impl SkipStmt {
 
   pub fn is_class_field(&self) -> bool {
     return self.flag == SkipStmtType::CLASS_FIELD;
+  }
+
+  pub fn is_vars(&self) -> bool {
+    return self.flag == SkipStmtType::VARS;
+  }
+
+  pub fn is_var(&self) -> bool {
+    return self.flag == SkipStmtType::VAR;
   }
 }
 impl_stmt!(

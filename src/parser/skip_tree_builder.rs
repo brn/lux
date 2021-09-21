@@ -24,6 +24,8 @@ pub struct SkipTreeBuilder {
   skip_class_field: Stmt,
   skip_class: Ast,
   skip_function: Ast,
+  skip_vars: Stmt,
+  skip_var: Stmt,
 }
 
 impl SkipTreeBuilder {
@@ -47,6 +49,8 @@ impl SkipTreeBuilder {
       skip_class_field: SkipStmt::new(&mut region, SkipStmtType::CLASS_FIELD).into(),
       skip_class: SkipAny::new(&mut region, SkipAnyType::CLASS).into(),
       skip_function: SkipAny::new(&mut region, SkipAnyType::FUNCTION).into(),
+      skip_vars: SkipStmt::new(&mut region, SkipStmtType::VARS).into(),
+      skip_var: SkipStmt::new(&mut region, SkipStmtType::VAR).into(),
     };
   }
 }
@@ -299,5 +303,19 @@ impl NodeOps for SkipTreeBuilder {
     pos: Option<&RuntimeSourcePosition>,
   ) -> Ast {
     return self.skip_class;
+  }
+
+  fn new_var(
+    &mut self,
+    decl_type: VariableDeclarationType,
+    binding: Expr,
+    initialzier: Option<Expr>,
+    pos: Option<&RuntimeSourcePosition>,
+  ) -> Stmt {
+    return self.skip_var;
+  }
+
+  fn new_vars(&mut self, vars: Vec<Stmt>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_vars;
   }
 }

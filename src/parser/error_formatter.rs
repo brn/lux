@@ -86,32 +86,47 @@ fn format_one_line(target_source: &str, source_position: &SourcePosition) -> (St
   return (indicator_buffer, formatted_source);
 }
 
-pub fn format_error(filename: &str, source: FixedU16CodePointArray, message: &str, source_position: &SourcePosition) -> String {
+pub fn format_error(
+  filename: &str,
+  source: FixedU16CodePointArray,
+  message: &str,
+  source_position: &SourcePosition,
+  should_omit_position: bool,
+) -> String {
   let utf8_source = source.to_utf8();
   let line_sources = utf8_source.split("\n").collect::<Vec<_>>();
   if source_position.start_line_number() == source_position.end_line_number() {
     if source_position.start_line_number() < line_sources.len() as u32 {
       let (indicator_buffer, target_source) = format_one_line(line_sources[source_position.start_line_number() as usize], source_position);
 
-      return format!(
-        "{} at {}:{}:{}\n{}\n{}",
-        message,
-        filename,
-        source_position.start_col(),
-        source_position.start_line_number() + 1,
-        target_source,
-        indicator_buffer
-      );
+      if !should_omit_position {
+        return format!(
+          "{} at {}:{}:{}\n{}\n{}",
+          message,
+          filename,
+          source_position.start_col(),
+          source_position.start_line_number() + 1,
+          target_source,
+          indicator_buffer
+        );
+      } else {
+        return format!("{}\n{}\n{}", message, target_source, indicator_buffer);
+      }
     }
   } else {
     if source_position.start_line_number() < line_sources.len() as u32 && source_position.end_line_number() < line_sources.len() as u32 {
-      let mut msgs = format!(
-        "{} at {}:{}:{}",
-        message,
-        filename,
-        source_position.start_col(),
-        source_position.start_line_number() + 1
-      );
+      let mut msgs = if !should_omit_position {
+        format!(
+          "{} at {}:{}:{}",
+          message,
+          filename,
+          source_position.start_col(),
+          source_position.start_line_number() + 1
+        )
+      } else {
+        format!("{}", message,)
+      };
+
       for line in source_position.start_line_number()..source_position.end_line_number() + 1 {
         msgs.push_str("\n");
         let target_source = line_sources[line as usize];
@@ -161,6 +176,7 @@ mod error_formatter_test {
       FixedU16CodePointArray::from_utf8(context, source),
       "Invalid Token",
       &SourcePosition::with(Some(21), Some(28), Some(0), Some(0)),
+      false,
     );
     assert_eq!(msg, format!("Invalid Token at anonymous:21:1\n{}\n{}", source, indicator));
   }
@@ -174,6 +190,7 @@ mod error_formatter_test {
       FixedU16CodePointArray::from_utf8(context, source),
       "Invalid Token",
       &SourcePosition::with(Some(25), Some(36), Some(0), Some(0)),
+      false,
     );
     assert_eq!(
       msg,
@@ -190,6 +207,7 @@ mod error_formatter_test {
       FixedU16CodePointArray::from_utf8(context, source),
       "Invalid Token",
       &SourcePosition::with(Some(9), Some(1), Some(0), Some(2)),
+      false,
     );
     assert_eq!(
       msg,
@@ -207,6 +225,7 @@ mod error_formatter_test {
       FixedU16CodePointArray::from_utf8(context, source),
       "Invalid Token",
       &SourcePosition::with(Some(94), Some(101), Some(0), Some(0)),
+      false,
     );
     assert_eq!(
       msg,
@@ -226,6 +245,7 @@ mod error_formatter_test {
       FixedU16CodePointArray::from_utf8(context, source),
       "Invalid Token",
       &SourcePosition::with(Some(21), Some(100), Some(0), Some(0)),
+      false,
     );
     assert_eq!(
       msg,
@@ -242,6 +262,7 @@ mod error_formatter_test {
       FixedU16CodePointArray::from_utf8(context, source),
       "Invalid Token",
       &SourcePosition::with(Some(9), Some(11), Some(0), Some(3)),
+      false,
     );
     assert_eq!(
       msg,

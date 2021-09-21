@@ -289,4 +289,18 @@ pub trait NodeOps {
   ) -> Ast {
     return new_node!(Class, self.region(), pos, name, heritage, methods, fields).into();
   }
+
+  fn new_var(
+    &mut self,
+    decl_type: VariableDeclarationType,
+    binding: Expr,
+    initialzier: Option<Expr>,
+    pos: Option<&RuntimeSourcePosition>,
+  ) -> Stmt {
+    return new_node!(VariableDeclaration, self.region(), pos, decl_type, binding, initialzier).into();
+  }
+
+  fn new_vars(&mut self, vars: Vec<Stmt>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(VariableDeclarations, self.region(), pos, vars).into();
+  }
 }

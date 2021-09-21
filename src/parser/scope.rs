@@ -12,11 +12,19 @@ bitflags! {
     const STRICT_MODE = 0x2;
     const OPAQUE = 0x4;
     const TRANSPARENT = 0x8;
-    const HAS_SUPER_CALL = 0x10;
-    const SIMPLE_PARAMETER = 0x20;
-    const ASYNC_CONTEXT = 0x40;
-    const GENERATOR_CONTEXT = 0x80;
+    const LEXICAL = 0x10;
+    const HAS_SUPER_CALL = 0x20;
+    const SIMPLE_PARAMETER = 0x40;
+    const ASYNC_CONTEXT = 0x80;
+    const GENERATOR_CONTEXT = 0x100;
   }
+}
+
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+pub enum VariableType {
+  FormalParameter,
+  Lexical,
+  LegacyVar,
 }
 
 #[derive(Property)]
@@ -31,7 +39,7 @@ pub struct Scope {
   scope_flag: ScopeFlag,
 
   #[property(skip)]
-  var_list: Vec<(Vec<u16>, SourcePosition)>,
+  var_list: Vec<(Vec<u16>, SourcePosition, VariableType)>,
 
   #[property(skip)]
   children: Vec<Exotic<Scope>>,
@@ -41,6 +49,9 @@ pub struct Scope {
 
   #[property(skip)]
   nearest_opaque_scope: Option<Exotic<Scope>>,
+
+  #[property(skip)]
+  var_map: HashMap<Vec<u16>, (SourcePosition, VariableType)>,
 }
 
 impl Scope {
@@ -49,6 +60,7 @@ impl Scope {
       scope_flag,
       children: Vec::new(),
       var_list: Vec::new(),
+      var_map: HashMap::new(),
       parent_scope: None,
       nearest_opaque_scope: None,
       first_super_call_position: None,
@@ -108,6 +120,10 @@ impl Scope {
     return self.scope_flag.contains(ScopeFlag::OPAQUE);
   }
 
+  pub fn is_lexical(&self) -> bool {
+    return self.scope_flag.contains(ScopeFlag::LEXICAL);
+  }
+
   pub fn is_transparent(&self) -> bool {
     return self.scope_flag.contains(ScopeFlag::TRANSPARENT);
   }
@@ -123,18 +139,33 @@ impl Scope {
     return self.children.iter();
   }
 
-  pub fn declare_vars(&mut self, vars: &Vec<(Vec<u16>, SourcePosition)>) {
+  pub fn declare_vars(&mut self, var_type: VariableType, vars: &Vec<(Vec<u16>, SourcePosition)>) {
     for var in vars.iter() {
-      self.declare_var(var.clone());
+      self.declare_var(var_type, var.clone());
     }
   }
 
-  pub fn declare_var(&mut self, var: (Vec<u16>, SourcePosition)) {
+  pub fn declare_vars_without_lexical_duplication(
+    &mut self,
+    var_type: VariableType,
+    vars: &Vec<(Vec<u16>, SourcePosition)>,
+  ) -> Option<(SourcePosition, SourcePosition)> {
+    for var in vars.iter() {
+      if let Some(pos) = self.get_already_declared_var_position(&var.0) {
+        return Some((var.1.clone(), pos.clone()));
+      }
+      self.declare_var(var_type, var.clone());
+    }
+    return None;
+  }
+
+  pub fn declare_var(&mut self, var_type: VariableType, var: (Vec<u16>, SourcePosition)) {
     if self.is_opaque() {
-      self.var_list.push(var);
+      self.var_list.push((var.0.clone(), var.1.clone(), var_type));
+      self.var_map.insert(var.0, (var.1, var_type));
     } else {
       if let Some(mut scope) = self.nearest_opaque_scope {
-        scope.declare_var(var);
+        scope.declare_var(var_type, var);
         return;
       }
       let mut parent = self.parent_scope;
@@ -142,8 +173,24 @@ impl Scope {
         parent = parent.unwrap().parent_scope;
       }
       self.nearest_opaque_scope = parent;
-      parent.unwrap().declare_var(var);
+      parent.unwrap().declare_var(var_type, var);
     }
+  }
+
+  pub fn get_already_declared_var_position(&self, var: &Vec<u16>) -> Option<&SourcePosition> {
+    if let Some(ref val) = self.var_map.get(var) {
+      return Some(&val.0);
+    }
+    if self.is_lexical() {
+      if let Some(ref scope) = self.parent_scope {
+        return scope.get_already_declared_var_position(var);
+      }
+    }
+    return None;
+  }
+
+  pub fn print_var_map(&self) {
+    println!("{:?}", self.var_map);
   }
 }
 

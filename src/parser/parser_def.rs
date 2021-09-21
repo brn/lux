@@ -189,7 +189,7 @@ pub struct ArrowFunctionContext {
   #[property(get(type = "copy"), set(type = "ref"))]
   is_simple_parameter: bool,
 
-  #[property(mut(public, suffix = "_mut"), set(disable))]
+  #[property(get(type = "ref"), set(disable))]
   var_list: Vec<(Vec<u16>, SourcePosition)>,
 }
 
@@ -255,6 +255,10 @@ impl ArrowFunctionContext {
 
   pub fn set_var_list(&mut self, v: &Vec<(Vec<u16>, SourcePosition)>) {
     self.var_list = v.clone();
+  }
+
+  pub fn var_list_mut(&mut self) -> &mut Vec<(Vec<u16>, SourcePosition)> {
+    return &mut self.var_list;
   }
 }
 
@@ -339,9 +343,10 @@ macro_rules! context_enum {
       }
 
       pub fn reset(&mut self) {
-        self.reset();
         if let Ok(a) = self.to_arrow_ctx_mut() {
           a.reset();
+        } else {
+          self.reset();
         }
       }
     }

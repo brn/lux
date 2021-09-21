@@ -337,6 +337,23 @@ mod parser_test {
     }};
   }
 
+  macro_rules! var {
+    ($type:expr, $pos:expr, $lhs:expr, $rhs:expr) => {{
+      let attr = format!("type = {}", $type);
+      ast_with_children!("VariableDeclaration", &attr, $pos, $lhs, $rhs)
+    }};
+    ($type:expr, $pos:expr, $lhs:expr) => {{
+      let attr = format!("type = {}", $type);
+      ast_with_children!("VariableDeclaration", &attr, $pos, $lhs)
+    }};
+  }
+
+  macro_rules! vars {
+    ($pos:expr, $($asts:expr),*$(,)*) => {{
+      ast_with_children!("VariableDeclarations", "", $pos, $($asts,)*)
+    }};
+  }
+
   type Expectations<'a> = [&'a str; 3];
 
   fn parse_test<'a>(env_list: &[(Option<&'a str>, &'a str); 3], code: &str, expectations: &'a Expectations, parser_option: ParserOption) {
@@ -414,6 +431,7 @@ mod parser_test {
     scope_count: u32,
     parser_option: ParserOption,
     mut before_line_break_col_count: u64,
+    is_stmt: bool,
   ) -> (F, String) {
     let buf = String::new();
     let original_blb_cc = before_line_break_col_count;
@@ -448,10 +466,14 @@ mod parser_test {
             exprs!(pos!(base_position + 1, 0)),
             stmts!(
               pos!(base_position + 4, 0),
-              stmt!(
-                pos!(base_position + 5, 0),
+              if !is_stmt {
+                stmt!(
+                  pos!(base_position + 5, 0),
+                  ast_builder((base_position + 5, 0, false, !parser_option.disable_skip_parser()))
+                )
+              } else {
                 ast_builder((base_position + 5, 0, false, !parser_option.disable_skip_parser()))
-              )
+              }
             ),
           )
         )
@@ -466,13 +488,13 @@ mod parser_test {
   }
 
   fn single_expression_test<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str) {
-    let ast_b = single_expression_test_with_options(ast_builder, value, ParserOption::new(), 0, false, 0);
-    single_expression_test_with_options(ast_b, value, ParserOption::with(true), 0, false, 0);
+    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::new(), 0, false, 0, false);
+    parser_ast_test_with_options(ast_b, value, ParserOption::with(true), 0, false, 0, false);
   }
 
   fn single_expression_test_with_scope<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str, scope_count: u32) {
-    let ast_b = single_expression_test_with_options(ast_builder, value, ParserOption::new(), scope_count, false, 0);
-    single_expression_test_with_options(ast_b, value, ParserOption::with(true), scope_count, false, 0);
+    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::new(), scope_count, false, 0, false);
+    parser_ast_test_with_options(ast_b, value, ParserOption::with(true), scope_count, false, 0, false);
   }
 
   fn single_expression_test_with_options<F: Fn((u64, u32, bool, bool)) -> TestableAst>(
@@ -482,6 +504,45 @@ mod parser_test {
     scope_count: u32,
     is_skip_strict_mode: bool,
     before_line_break_count: u64,
+  ) {
+    let ast_b = parser_ast_test_with_options(
+      ast_builder,
+      value,
+      parser_option.clone(),
+      scope_count,
+      is_skip_strict_mode,
+      before_line_break_count,
+      false,
+    );
+    parser_ast_test_with_options(
+      ast_b,
+      value,
+      parser_option.clone(),
+      scope_count,
+      is_skip_strict_mode,
+      before_line_break_count,
+      false,
+    );
+  }
+
+  fn stmt_test<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str) {
+    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::new(), 0, false, 0, true);
+    parser_ast_test_with_options(ast_b, value, ParserOption::with(true), 0, false, 0, true);
+  }
+
+  fn stmt_test_with_scope<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str, scope_count: u32) {
+    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::new(), scope_count, false, 0, true);
+    parser_ast_test_with_options(ast_b, value, ParserOption::with(true), scope_count, false, 0, true);
+  }
+
+  fn parser_ast_test_with_options<F: Fn((u64, u32, bool, bool)) -> TestableAst>(
+    ast_builder: F,
+    value: &str,
+    parser_option: ParserOption,
+    scope_count: u32,
+    is_skip_strict_mode: bool,
+    before_line_break_count: u64,
+    is_stmt: bool,
   ) -> F {
     let env: [(Option<&str>, &str); 3] = [
       (Some(""), ""),
@@ -499,10 +560,11 @@ mod parser_test {
       scope_count,
       parser_option.clone(),
       before_line_break_count,
+      is_stmt,
     );
     let normal = stmts!(
       pos!(0, 0),
-      stmt!(pos!(0, 0), product1),
+      if !is_stmt { stmt!(pos!(0, 0), product1) } else { product1 },
       stmt!(
         pos!((size + 1) - before_line_break_count, lb_count),
         ident!("PARSER_SENTINEL", pos!((size + 1) - before_line_break_count, lb_count))
@@ -518,7 +580,7 @@ mod parser_test {
     let product2 = ast_b((13, 0, true, !parser_option.disable_skip_parser()));
     let strict = stmts!(
       pos!(13, 0),
-      stmt!(pos!(13, 0), product2),
+      if !is_stmt { stmt!(pos!(13, 0), product2) } else { product2 },
       stmt!(
         pos!(sentinel_start_col, lb_count),
         ident!("PARSER_SENTINEL", pos!(sentinel_start_col, lb_count))
@@ -531,16 +593,16 @@ mod parser_test {
     return ast_b;
   }
 
-  const BASIC_ENV: [(Option<&str>, &str); 3] = [(Some(""), ""), (Some("'use strict';"), ""), (Some("!function X() {"), "")];
+  const BASIC_ENV: [(Option<&str>, &str); 3] = [(Some(""), ""), (Some("'use strict';"), ""), (Some("!function X() {"), "}")];
 
-  fn basic_env_expression_eary_error_test(start_col: u64, end_col: u64, code: &str) {
+  fn basic_env_expression_eary_error_test(start: u64, end: u64, code: &str) {
     syntax_error_test(
       &BASIC_ENV,
       code,
       &[
-        &s_pos!(start_col, end_col, 0, 0),
-        &s_pos!(start_col + 13, end_col + 13, 0, 0),
-        &s_pos!(start_col + 15, end_col + 15, 0, 0),
+        &s_pos!(start, end, 0, 0),
+        &s_pos!(start + 13, end + 13, 0, 0),
+        &s_pos!(start + 15, end + 15, 0, 0),
       ],
       false,
     );
@@ -997,7 +1059,7 @@ mod parser_test {
     syntax_error_test(
       &BASIC_ENV,
       "'test",
-      &[&s_pos!(0, 21, 0, 0), &s_pos!(13, 34, 0, 0), &s_pos!(15, 36, 0, 0)],
+      &[&s_pos!(0, 21, 0, 0), &s_pos!(13, 34, 0, 0), &s_pos!(15, 37, 0, 0)],
       false,
     )
   }
@@ -1007,29 +1069,19 @@ mod parser_test {
     syntax_error_test(
       &BASIC_ENV,
       "'test\\n",
-      &[&s_pos!(0, 23, 0, 0), &s_pos!(13, 36, 0, 0), &s_pos!(15, 38, 0, 0)],
+      &[&s_pos!(0, 23, 0, 0), &s_pos!(13, 36, 0, 0), &s_pos!(15, 39, 0, 0)],
       false,
     )
   }
 
   #[test]
   fn parse_invalid_unicode_sequence_error_test() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "'\\u0041_\\u0042_\\u043_\\u0044'",
-      &[&s_pos!(15, 21, 0, 0), &s_pos!(28, 34, 0, 0), &s_pos!(30, 36, 0, 0)],
-      false,
-    )
+    basic_env_expression_eary_error_test(15, 21, "'\\u0041_\\u0042_\\u043_\\u0044'");
   }
 
   #[test]
   fn template_literal_not_allow_octal_escape_early_error_test() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "`\\071`",
-      &[&s_pos!(1, 4, 0, 0), &s_pos!(14, 17, 0, 0), &s_pos!(16, 19, 0, 0)],
-      false,
-    )
+    basic_env_expression_eary_error_test(1, 4, "`\\071`");
   }
 
   #[test]
@@ -3649,11 +3701,136 @@ mod parser_test {
   }
 
   #[test]
+  fn function_body_contains_lexical_binding_same_key_of_formal_params_early_error_test() {
+    basic_env_expression_eary_error_test(19, 20, "(function (a) {let a = 0;})");
+    basic_env_expression_eary_error_test(45, 46, "(function ({a: {b: {c}}}) {let a = 0, b = 0, c = 0})");
+    basic_env_expression_eary_error_test(26, 27, "(function ([a, b]) {const b = 1})");
+  }
+
+  #[test]
   fn function_contains_super_property_or_call_early_error_test() {
     basic_env_expression_eary_error_test(15, 20, "(function (a = super.a) {})");
     basic_env_expression_eary_error_test(15, 20, "(function (a = super()) {})");
     basic_env_expression_eary_error_test(15, 20, "(function (a) {super()})");
     basic_env_expression_eary_error_test(15, 20, "(function (a) {super.a})");
     basic_env_expression_eary_error_test(11, 16, "(function (super) {})");
+  }
+
+  #[test]
+  fn parse_let_binding() {
+    macro_rules! let_or_const {
+      ($type:expr, $type_l:expr) => {
+        let len = ($type_l.len() + 1) as u64;
+        stmt_test(
+          |(col, line, _, _)| {
+            return var!(
+              $type,
+              pos!(col, line),
+              ident!("a", pos!(col + len, line)),
+              number!("1", pos!(col + 4 + len, line))
+            );
+          },
+          concat!($type_l, " a = 1"),
+        );
+      };
+    }
+    let_or_const!("Let", "let");
+    let_or_const!("Const", "const");
+  }
+
+  #[test]
+  fn parse_let_pattern_binding() {
+    macro_rules! let_or_const {
+      ($type:expr, $type_l:expr) => {
+        let len = ($type_l.len() + 1) as u64;
+        stmt_test(
+          |(col, line, _, _)| {
+            return var!(
+              $type,
+              pos!(col, line),
+              objectlit!(
+                ObjectLitType::NONE,
+                pos!(col + len, line),
+                object_props!(
+                  pos!(col + 1 + len, line),
+                  ident!("a", pos!(col + 1 + len, line)),
+                  objectlit!(
+                    ObjectLitType::NONE,
+                    pos!(col + 4 + len, line),
+                    object_props!(
+                      pos!(col + 5 + len, line),
+                      ident!("b", pos!(col + 5 + len, line)),
+                      number!("1", pos!(col + 9 + len, line))
+                    )
+                  )
+                )
+              ),
+              ident!("a", pos!(col + 15 + len, line))
+            );
+          },
+          concat!($type_l, " {a: {b = 1}} = a"),
+        );
+      };
+    }
+    let_or_const!("Let", "let");
+    let_or_const!("Const", "const");
+  }
+
+  #[test]
+  fn parse_let_bindings() {
+    macro_rules! let_or_const {
+      ($type:expr, $type_l:expr) => {
+        let len = ($type_l.len() + 1) as u64;
+        stmt_test(
+          |(col, line, _, _)| {
+            return vars!(
+              pos!(col, line),
+              var!(
+                $type,
+                pos!(col, line),
+                ident!("a", pos!(col + len, line)),
+                number!("1", pos!(col + 4 + len, line))
+              ),
+              var!(
+                $type,
+                pos!(col, line),
+                ident!("b", pos!(col + 7 + len, line)),
+                number!("2", pos!(col + 11 + len, line))
+              ),
+              var!(
+                $type,
+                pos!(col, line),
+                objectlit!(
+                  ObjectLitType::NONE,
+                  pos!(col + 14 + len, line),
+                  object_props!(pos!(col + 15 + len, line), ident!("c", pos!(col + 15 + len, line)),)
+                ),
+                ident!("x", pos!(col + 20 + len, line))
+              )
+            );
+          },
+          concat!($type_l, " a = 1, b = 2, {c} = x"),
+        );
+      };
+    }
+    let_or_const!("Let", "let");
+    let_or_const!("Const", "const");
+  }
+
+  #[test]
+  fn const_requires_initializer_early_error_test() {
+    basic_env_expression_eary_error_test(0, 7, "const a");
+  }
+
+  #[test]
+  fn lexical_binding_not_allowed_duplication_early_error_test() {
+    basic_env_expression_eary_error_test(14, 15, "let a = 1, b, a = 3");
+    basic_env_expression_eary_error_test(20, 21, "const a = 1, b = 2, a = 3");
+  }
+
+  #[test]
+  fn lexical_binding_not_allowed_let_as_identifier_early_error_test() {
+    basic_env_expression_eary_error_test(4, 7, "let let = 1");
+    basic_env_expression_eary_error_test(6, 9, "const let = 1");
   }
 }

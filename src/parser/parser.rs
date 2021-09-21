@@ -1,6 +1,7 @@
 use super::super::structs::FixedU16CodePointArray;
 use super::ast::*;
 use super::ast_builder::*;
+use super::error_formatter::*;
 use super::error_reporter::*;
 use super::node_ops::*;
 use super::parser_def::*;
@@ -638,6 +639,10 @@ impl Parser {
     return decode_utf16(value.iter().cloned()).map(|r| r.unwrap_or('#')).collect::<String>();
   }
 
+  fn utf8_to_utf16(value: &str) -> Vec<u16> {
+    return value.encode_utf16().collect::<Vec<_>>();
+  }
+
   fn is_strict_mode(&self) -> bool {
     return self.root_scope.is_strict_mode() || self.current_scope.is_strict_mode();
   }
@@ -935,6 +940,9 @@ impl Parser {
         } else {
           append_var_if!(self, self.cur(), self.value(), self.source_position());
           let expr = next_parse!(self, self.parse_assignment_expression(builder))?;
+          if let Some(e) = self.expression_context.first_value_error() {
+            return Err(e);
+          }
           builder.push_expr(&mut properties, expr);
         }
       }
@@ -960,6 +968,9 @@ impl Parser {
     self.advance()?;
     let maybe_identifier_value = self.value().clone();
     let expr = next_parse!(self, self.parse_assignment_expression(builder))?;
+    if let Some(e) = self.expression_context.first_value_error() {
+      return Err(e);
+    }
     let expr_end_pos = self.prev_source_position().clone();
     if builder.is_identifier(expr) {
       if let Ok(arrow_ctx) = self.expression_context.to_arrow_ctx_mut() {
@@ -1070,7 +1081,12 @@ impl Parser {
             self.expression_context.set_first_pattern_error(e);
           }
           self.advance()?;
+          let parent_ctx = self.new_expression_context();
           let value = next_parse!(self, self.parse_assignment_expression(builder))?;
+          if let Some(e) = self.expression_context.first_value_error() {
+            return Err(e);
+          }
+          self.set_expression_context(parent_ctx);
           let node = build!(@pos, builder, object_property_expression, start,
                             key,
                             None,
@@ -1154,6 +1170,9 @@ impl Parser {
         }
         expect!(self, self.cur(), Token::LeftBracket);
         let ret = next_parse!(self, self.parse_assignment_expression(builder))?;
+        if let Some(e) = self.expression_context.first_value_error() {
+          return Err(e);
+        }
         expect!(self, self.cur(), Token::RightBracket);
         return Ok(ret);
       }
@@ -1240,6 +1259,12 @@ impl Parser {
     }
 
     expect!(self, self.cur(), Token::RightParen);
+
+    if self.cur() != Token::ArrowFunctionGlyph {
+      if let Some(e) = self.expression_context.first_value_error() {
+        return Err(e);
+      }
+    }
     return Ok(expr);
   }
 
@@ -1488,6 +1513,9 @@ impl Parser {
     }
     expect!(self, self.cur(), Token::LeftParen);
     let expr = next_parse!(self, self.parse_assignment_expression(builder))?;
+    if let Some(e) = self.expression_context.first_value_error() {
+      return Err(e);
+    }
     expect!(self, self.cur(), Token::RightParen);
     return Ok(build!(self, builder, call_expression, CallReceiverType::Import, None, Some(expr)));
   }
@@ -1506,6 +1534,9 @@ impl Parser {
       } else {
         append_var_if!(self, self.cur(), self.value(), self.source_position());
         let expr = next_parse!(self, self.parse_assignment_expression(builder))?;
+        if let Some(e) = self.expression_context.first_value_error() {
+          return Err(e);
+        }
         if !builder.is_identifier(expr) {
           self
             .expression_context
@@ -1846,11 +1877,17 @@ impl Parser {
       self.expression_context.set_assignment_target_type(AssignmentTargetType::Invalid);
       self.advance()?;
       let lhs = next_parse!(self, self.parse_assignment_expression(builder))?;
+      if let Some(e) = self.expression_context.first_value_error() {
+        return Err(e);
+      }
       if self.cur() != Token::Colon {
         return parse_error!(self.region, "':' expected", self.source_position());
       }
       self.advance()?;
       let rhs = next_parse!(self, self.parse_assignment_expression(builder))?;
+      if let Some(e) = self.expression_context.first_value_error() {
+        return Err(e);
+      }
       return Ok(build!(@runtime_pos,
         builder,
         conditional_expression,
@@ -1950,9 +1987,6 @@ impl Parser {
       self.set_expression_context(ec);
       return Ok(build!(@runtime_pos, builder, binary_expr, expr.source_position(), op, expr, assignment));
     }
-    if let Some(e) = self.expression_context.first_value_error() {
-      return Err(e);
-    }
     self.expression_context.propagate(&mut ec);
     self.set_expression_context(ec);
     return Ok(expr);
@@ -2047,7 +2081,7 @@ impl Parser {
   fn parse_declaration<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
     let mut is_async = false;
     match self.cur() {
-      Token::Identifier => {
+      Token::Identifier | Token::Const => {
         if self.contextual_keyword() != Token::Async || self.peek()? != Token::Function {
           return self.parse_lexical_declaration(builder);
         }
@@ -2077,6 +2111,9 @@ impl Parser {
     let mut items = Vec::<Stmt>::new();
     while self.has_more() && condition(self.cur()) {
       let stmt = next_parse!(self, self.parse_statement_list_item(builder))?;
+      if self.cur() == Token::Terminate {
+        self.advance()?;
+      }
       builder.push_stmt(&mut items, stmt);
     }
 
@@ -2102,8 +2139,129 @@ impl Parser {
 
     return next_parse!(self, self.parse_statement(builder));
   }
+
   fn parse_lexical_declaration<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
-    unreachable!();
+    let start_pos = self.source_position().clone();
+    let var_type = if self.cur() == Token::Const {
+      VariableDeclarationType::Const
+    } else if self.contextual_keyword() == Token::Let {
+      VariableDeclarationType::Let
+    } else {
+      return parse_error!(self.region, "let or const expected", self.source_position());
+    };
+    self.advance()?;
+
+    let mut vars = Vec::new();
+    let mut is_vars = false;
+    self.new_arrow_context();
+
+    loop {
+      let lhs_pos = self.source_position().clone();
+      let lhs = match self.cur() {
+        Token::Identifier | Token::Yield | Token::Await => {
+          let token = self.cur();
+          let val = if self.cur() == Token::Identifier {
+            if self.contextual_keyword() == Token::Let {
+              return parse_error!(
+                self.region,
+                "Lexical declaration may not contains let keyword as an identifier",
+                &lhs_pos
+              );
+            }
+            let value = self.value().clone();
+            self.expression_context.to_arrow_ctx_mut_unchecked().new_var(value, lhs_pos.clone());
+            LiteralValue::String(
+              FixedU16CodePointArray::from_u16_vec(self.context, self.value()),
+              self.contextual_keyword(),
+            )
+          } else {
+            let value = Parser::utf8_to_utf16(self.cur().symbol());
+            self.expression_context.to_arrow_ctx_mut_unchecked().new_var(value, lhs_pos.clone());
+            LiteralValue::String(FixedU16CodePointArray::from_utf8(self.context, self.cur().symbol()), self.cur())
+          };
+          self.advance()?;
+          build!(
+            @pos,
+            builder,
+            literal,
+            lhs_pos,
+            token,
+            val,
+          )
+        }
+        Token::LeftBrace | Token::LeftBracket => {
+          let lhs = next_parse!(self, self.parse_binding_pattern(builder))?;
+          if let Some(e) = self.expression_context.first_pattern_error() {
+            return Err(e);
+          }
+          lhs
+        }
+        _ => {
+          return parse_error!(self.region, "Unexpected token found", self.source_position());
+        }
+      };
+
+      if let Some((ref cur, ref first)) = self.current_scope.declare_vars_without_lexical_duplication(
+        VariableType::Lexical,
+        self.expression_context.to_arrow_ctx_mut_unchecked().var_list(),
+      ) {
+        return parse_error!(
+          self.region,
+          &format!(
+            "Lexical declaration may not contains any duplicated identifiers\n\n{}\nBut found",
+            format_error(&self.source.filename(), self.source.source_code(), "First defined", first, false)
+          ),
+          cur
+        );
+      }
+
+      self.expression_context.reset();
+      let rhs = if self.cur() == Token::OpAssign {
+        self.advance()?;
+        let rhs = next_parse!(self, self.parse_assignment_expression(builder))?;
+        if let Some(e) = self.expression_context.first_value_error() {
+          return Err(e);
+        }
+        Some(rhs)
+      } else {
+        if var_type == VariableDeclarationType::Const {
+          return parse_error!(
+            self.region,
+            "const declared variable requires initial value",
+            &pos_range!(@start start_pos, lhs_pos)
+          );
+        }
+        None
+      };
+
+      let var = build!(
+        @pos,
+        builder,
+        var,
+        start_pos,
+        var_type,
+        lhs,
+        rhs
+      );
+
+      if self.cur() != Token::Comma {
+        if !is_vars {
+          return Ok(var);
+        }
+        builder.push_stmt(&mut vars, var);
+        return Ok(build!(
+          @pos,
+          builder,
+          vars,
+          start_pos,
+          vars
+        ));
+      } else {
+        is_vars = true;
+        builder.push_stmt(&mut vars, var);
+        self.advance()?;
+      }
+    }
   }
   fn parse_lexical_binding<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
     unreachable!();
@@ -2181,6 +2339,9 @@ impl Parser {
     if constraints.is_initializer_allowed() && self.cur() == Token::OpAssign {
       self.advance()?;
       let expr = next_parse!(self, self.parse_assignment_expression(builder))?;
+      if let Some(e) = self.expression_context.first_value_error() {
+        return Err(e);
+      }
       return Ok(build!(self, builder, binary_expr, Token::OpAssign, identifier, expr).into());
     } else {
       self.advance()?;
@@ -2338,7 +2499,6 @@ impl Parser {
     var_list.append(self.expression_context.to_arrow_ctx_mut_unchecked().var_list_mut());
     expect!(self, self.cur(), Token::RightParen);
     let child_ctx = self.set_expression_context(parent_ctx);
-    self.current_scope.declare_vars(&var_list);
 
     let scope = self.declare_child_scope(
       ScopeFlag::OPAQUE
@@ -2358,41 +2518,40 @@ impl Parser {
           ScopeFlag::NONE
         },
     );
-    let mut this = scoped!(self, |this| {
-      this.escape_scope(scope);
-    });
+    self.current_scope.declare_vars(VariableType::FormalParameter, &var_list);
 
-    let body_start_position = this.source_position().clone();
-    let mut function_body_start = (this.scanner.source_index()) as u32;
-    expect!(this, this.cur(), Token::LeftBrace);
-    next_parse!(this, this.parse_directive_prologue(scope))?;
+    let body_start_position = self.source_position().clone();
+    let mut function_body_start = (self.scanner.source_index()) as u32;
+    expect!(self, self.cur(), Token::LeftBrace);
+    next_parse!(self, self.parse_directive_prologue(scope))?;
     let mut function_body_end = 0;
 
-    let parent_ctx = this.new_expression_context();
-    let body = if this.should_use_tree_builder() {
-      this.expression_context.set_is_maybe_immediate_function(false);
+    let parent_ctx = self.new_expression_context();
+    let body = if self.should_use_tree_builder() {
+      self.expression_context.set_is_maybe_immediate_function(false);
       function_body_start = 0;
       function_body_end = 0;
-      let mut body = next_parse!(this, this.parse_function_body(builder))?;
+      let mut body = next_parse!(self, self.parse_function_body(builder))?;
       body.set_source_position(&body_start_position.runtime_source_position());
       Some(Into::<Ast>::into(body))
     } else {
-      let skip_tree_builder = this.skip_tree_builder;
-      next_skip_parse!(this, this.parse_function_body(skip_tree_builder))?;
-      function_body_end = (this.scanner.source_index() - 1) as u32;
+      let skip_tree_builder = self.skip_tree_builder;
+      next_skip_parse!(self, self.parse_function_body(skip_tree_builder))?;
+      function_body_end = (self.scanner.source_index() - 1) as u32;
       None
     };
-    if this.current_scope.first_super_call_position().is_some() {
-      let pos = this.current_scope.first_super_call_position().unwrap().clone();
-      return parse_error!(this.region, "Super not allowed here", &pos);
+    if self.current_scope.first_super_call_position().is_some() {
+      let pos = self.current_scope.first_super_call_position().unwrap().clone();
+      return parse_error!(self.region, "Super not allowed here", &pos);
     }
-    if this.current_scope.first_super_property_position().is_some() {
-      let pos = this.current_scope.first_super_property_position().unwrap().clone();
-      return parse_error!(this.region, "Super not allowed here", &pos);
+    if self.current_scope.first_super_property_position().is_some() {
+      let pos = self.current_scope.first_super_property_position().unwrap().clone();
+      return parse_error!(self.region, "Super not allowed here", &pos);
     }
-    this.set_expression_context(parent_ctx);
-    this.escape_scope(scope);
-    expect!(this, this.cur(), Token::RightBrace);
+    self.set_expression_context(parent_ctx);
+    self.escape_scope(scope);
+    expect!(self, self.cur(), Token::RightBrace);
+    self.escape_scope(scope);
 
     return Ok(build!(
       @pos,
@@ -2702,7 +2861,7 @@ impl Parser {
         ScopeFlag::NONE
       };
     let scope = self.declare_child_scope(scope_flag);
-    self.current_scope.declare_vars(&var_list);
+    self.current_scope.declare_vars(VariableType::FormalParameter, &var_list);
     self.set_expression_context(ec);
 
     let mut this = scoped!(self, |this| {
@@ -2824,6 +2983,9 @@ impl Parser {
     if self.cur() == Token::OpMul {
       self.advance()?;
       let expr = next_parse!(self, self.parse_assignment_expression(builder))?;
+      if let Some(e) = self.expression_context.first_value_error() {
+        return Err(e);
+      }
       return Ok(build!(
         @pos,
         builder,
@@ -2836,6 +2998,9 @@ impl Parser {
     }
 
     let expr = next_parse!(self, self.parse_assignment_expression(builder))?;
+    if let Some(e) = self.expression_context.first_value_error() {
+      return Err(e);
+    }
     return Ok(build!(
       @pos,
       builder,
@@ -2969,6 +3134,9 @@ impl Parser {
         let value = if self.cur() == Token::OpAssign {
           self.advance()?;
           let expr = next_parse!(self, self.parse_assignment_expression(builder))?;
+          if let Some(e) = self.expression_context.first_value_error() {
+            return Err(e);
+          }
           build!(
             @pos,
             builder,
@@ -3085,6 +3253,9 @@ impl Parser {
         }
         _ => {
           export_clause = Some(next_parse!(self, self.parse_assignment_expression(builder))?.into());
+          if let Some(e) = self.expression_context.first_value_error() {
+            return Err(e);
+          }
         }
       }
 
