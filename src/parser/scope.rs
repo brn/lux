@@ -52,6 +52,12 @@ pub struct Scope {
 
   #[property(skip)]
   var_map: HashMap<Vec<u16>, (SourcePosition, VariableType)>,
+
+  #[property(skip)]
+  label_stack: Vec<Vec<u16>>,
+
+  #[property(skip)]
+  label_map: HashMap<Vec<u16>, SourcePosition>,
 }
 
 impl Scope {
@@ -65,6 +71,8 @@ impl Scope {
       nearest_opaque_scope: None,
       first_super_call_position: None,
       first_super_property_position: None,
+      label_stack: Vec::new(),
+      label_map: HashMap::new(),
     });
   }
 
@@ -160,10 +168,14 @@ impl Scope {
   }
 
   pub fn declare_var(&mut self, var_type: VariableType, var: (Vec<u16>, SourcePosition)) {
-    if self.is_opaque() {
+    if self.is_opaque() || (self.is_lexical() && var_type == VariableType::Lexical) {
       self.var_list.push((var.0.clone(), var.1.clone(), var_type));
       self.var_map.insert(var.0, (var.1, var_type));
     } else {
+      if self.is_lexical() && var_type == VariableType::LegacyVar {
+        self.var_list.push((var.0.clone(), var.1.clone(), var_type));
+        self.var_map.insert(var.0.clone(), (var.1.clone(), var_type));
+      }
       if let Some(mut scope) = self.nearest_opaque_scope {
         scope.declare_var(var_type, var);
         return;
@@ -187,16 +199,51 @@ impl Scope {
         return Some(&val.0);
       }
     }
-    if self.is_lexical() {
-      if let Some(ref scope) = self.parent_scope {
-        return scope.get_already_declared_var_position(var, should_search_only_lexical_decl);
-      }
-    }
     return None;
+  }
+
+  pub fn push_label_without_duplication(&mut self, label: Vec<u16>, source_position: SourcePosition) -> Option<SourcePosition> {
+    if self.is_lexical() {
+      let mut scope = self.get_nearest_non_lexical_scope();
+      return scope.push_label_without_duplication(label, source_position);
+    }
+    if self.label_map.contains_key(&label) {
+      return self.label_map.get(&label).cloned();
+    }
+    self.label_stack.push(label.clone());
+    self.label_map.insert(label, source_position);
+    return None;
+  }
+
+  pub fn pop_label(&mut self) {
+    if self.is_lexical() {
+      let mut scope = self.get_nearest_non_lexical_scope();
+      scope.pop_label();
+      return;
+    }
+    if let Some(label) = self.label_stack.pop() {
+      self.label_map.remove(&label);
+    }
+  }
+
+  pub fn has_escape_target(&self, name: &Vec<u16>) -> bool {
+    let scope = self.get_nearest_non_lexical_scope();
+    return scope.label_map.contains_key(name);
   }
 
   pub fn print_var_map(&self) {
     println!("{:?}", self.var_map);
+  }
+
+  pub fn get_nearest_non_lexical_scope(&self) -> Exotic<Scope> {
+    if !self.is_lexical() {
+      return Exotic::from_self(self);
+    }
+    let mut parent = self.parent_scope;
+    while parent.is_some() && parent.unwrap().is_lexical() {
+      parent = parent.unwrap().parent_scope;
+    }
+    return parent.unwrap();
   }
 }
 
@@ -205,10 +252,16 @@ impl std::fmt::Debug for Scope {
     return write!(
       f,
       "Scope {{ type = {} strict_mode = {} children = {} has_parent = {} }}",
-      if self.is_opaque() { "opaque" } else { "transparent" },
+      if self.is_opaque() {
+        "opaque"
+      } else if self.is_transparent() {
+        "transparent"
+      } else {
+        "lexical"
+      },
       self.is_strict_mode(),
       self.children.len(),
-      self.parent_scope.is_some()
+      self.parent_scope.is_some(),
     );
   }
 }

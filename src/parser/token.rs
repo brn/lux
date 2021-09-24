@@ -212,5 +212,6 @@ token_enum! {
     (Prototype,            false, true,  true,  "prototype"),
     (Public,               false, true,  true,  "public"),
     (Static,               false, true,  true,  "static"),
+    (Of,                   false, true,  true,  "of"),
   }
 }

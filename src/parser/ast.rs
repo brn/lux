@@ -107,6 +107,33 @@ macro_rules! _ast_enum {
       }
     }
   };
+  (@both, $name:ident { $($item:ident(Node<$type:ty>),)* }) => {
+    _ast_enum!(@expr, $name { $($item(Node<$type>),)* });
+
+    impl TryFrom<$name> for Expr {
+      type Error = ();
+      fn try_from(a: $name) -> Result<Expr, ()> {
+        match a {
+          $(
+            $name::$item(node) => Ok(Expr::from(node)),
+          )*
+          _ => Err(()),
+        }
+      }
+    }
+
+    impl TryFrom<$name> for Stmt {
+      type Error = ();
+      fn try_from(a: $name) -> Result<Stmt, ()> {
+        match a {
+          $(
+            $name::$item(node) => Ok(Stmt::from(node)),
+          )*
+          _ => Err(()),
+        }
+      }
+    }
+  };
   ($name:ident { $($item:ident(Node<$type:ty>),)* }) => {
     #[derive(Copy, Clone, Debug)]
     pub enum $name {
@@ -248,6 +275,16 @@ macro_rules! impl_expr {
       }
     }
 
+    impl TryFrom<Ast> for Node<$name> {
+      type Error = ();
+      fn try_from(a: Ast) -> Result<Node<$name>, ()> {
+        match a {
+          Ast::Expr(r) => Node::<$name>::try_from(r),
+          _ => Err(()),
+        }
+      }
+    }
+
     impl Is<Ast> for Node<$name> {
       fn is(value: Ast) -> bool {
         match value {
@@ -266,16 +303,6 @@ macro_rules! impl_expr {
         }
       }
     }
-
-    impl TryFrom<Ast> for Node<$name> {
-      type Error = ();
-      fn try_from(a: Ast) -> Result<Node<$name>, ()> {
-        match a {
-          Ast::Expr(r) => Node::<$name>::try_from(r),
-          _ => Err(()),
-        }
-      }
-    }
   };
 }
 
@@ -287,15 +314,17 @@ _ast_enum! {
     Statements(Node<Statements>),
     Statement(Node<Statement>),
     Function(Node<Function>),
+    BlockStatement(Node<BlockStatement>),
     ForStatement(Node<ForStatement>),
+    ForInStatement(Node<ForInStatement>),
+    ForOfStatement(Node<ForOfStatement>),
     WhileStatement(Node<WhileStatement>),
     DoWhileStatement(Node<DoWhileStatement>),
     IfStatement(Node<IfStatement>),
     SwitchStatement(Node<SwitchStatement>),
-    SwitchCases(Node<SwitchCases>),
+    SwitchCase(Node<SwitchCase>),
     BreakStatement(Node<BreakStatement>),
     ContinueStatement(Node<ContinueStatement>),
-    BlockStatement(Node<BlockStatement>),
     LabelledStatement(Node<LabelledStatement>),
     WithStatement(Node<WithStatement>),
     VariableDeclaration(Node<VariableDeclaration>),
@@ -306,8 +335,44 @@ _ast_enum! {
     SkipAny(Node<SkipAny>),
   }
 }
-macro_rules! impl_stmt_conv {
-  ($name:tt) => {
+
+macro_rules! impl_stmt {
+  ($name:tt, $to_string:item, $to_string_tree:item) => {
+    impl AstNode for $name {
+      fn is_expr(&self) -> bool {
+        return false;
+      }
+
+      $to_string
+
+      $to_string_tree
+    }
+
+    impl From<Node<$name>> for Ast {
+      fn from(a: Node<$name>) -> Ast {
+        return Ast::Stmt(Stmt::$name(a));
+      }
+    }
+
+    impl Is<Ast> for Node<$name> {
+      fn is(value: Ast) -> bool {
+        match value {
+          Ast::Stmt(stmt) => Node::<$name>::is(stmt),
+          _ => false,
+        }
+      }
+    }
+
+    impl TryFrom<Ast> for Node<$name> {
+      type Error = ();
+      fn try_from(a: Ast) -> Result<Node<$name>, ()> {
+        match a {
+          Ast::Stmt(r) => Node::<$name>::try_from(r),
+          _ => Err(()),
+        }
+      }
+    }
+
     impl From<Node<$name>> for Stmt {
       fn from(a: Node<$name>) -> Stmt {
         return Stmt::$name(a);
@@ -323,30 +388,45 @@ macro_rules! impl_stmt_conv {
         }
       }
     }
+
+    impl Is<Stmt> for Node<$name> {
+      fn is(value: Stmt) -> bool {
+        match value {
+          Stmt::$name(_) => true,
+          _ => false,
+        }
+      }
+    }
   };
 }
-macro_rules! impl_stmt {
+
+_ast_enum! {
+  @both,
+  AnyAst {
+    Empty(Node<Empty>),
+    Function(Node<Function>),
+    Class(Node<Class>),
+    SkipAny(Node<SkipAny>),
+  }
+}
+
+macro_rules! impl_both {
   ($name:tt, $to_string:item, $to_string_tree:item) => {
     impl AstNode for $name {
       fn is_expr(&self) -> bool {
-        return false;
+        return true;
       }
 
       $to_string
 
       $to_string_tree
     }
-    impl From<Node<$name>> for Ast {
-      fn from(a: Node<$name>) -> Ast {
-        return Ast::Stmt(Stmt::$name(a));
-      }
-    }
 
-    impl Is<Stmt> for Node<$name> {
-      fn is(value: Stmt) -> bool {
+    impl Is<AnyAst> for Node<$name> {
+      fn is(value: AnyAst) -> bool {
         match value {
-          Stmt::$name(_) => true,
-          _ => false
+          AnyAst::$name(_) => true,
+          _ => false,
         }
       }
     }
@@ -354,8 +434,46 @@ macro_rules! impl_stmt {
     impl Is<Ast> for Node<$name> {
       fn is(value: Ast) -> bool {
         match value {
-          Ast::Stmt(stmt) => Node::<$name>::is(stmt),
-          _ => false
+          Ast::Any(node) => Node::<$name>::is(node),
+          _ => false,
+        }
+      }
+    }
+
+    impl Is<Stmt> for Node<$name> {
+      fn is(value: Stmt) -> bool {
+        match value {
+          Stmt::$name(_) => true,
+          _ => false,
+        }
+      }
+    }
+
+    impl Is<Expr> for Node<$name> {
+      fn is(value: Expr) -> bool {
+        match value {
+          Expr::$name(_) => true,
+          _ => false,
+        }
+      }
+    }
+
+    impl Node<$name> {
+      fn set_parenthesized(&mut self) {
+        self.0.meta.flag |= AstMetaFlag::PARENTHESIZED;
+      }
+
+      fn is_parenthesized(&self) -> bool {
+        return self.0.meta.flag.contains(AstMetaFlag::PARENTHESIZED);
+      }
+    }
+
+    impl TryFrom<AnyAst> for Node<$name> {
+      type Error = ();
+      fn try_from(a: AnyAst) -> Result<Node<$name>, ()> {
+        match a {
+          AnyAst::$name(n) => Ok(n),
+          _ => Err(()),
         }
       }
     }
@@ -364,19 +482,63 @@ macro_rules! impl_stmt {
       type Error = ();
       fn try_from(a: Ast) -> Result<Node<$name>, ()> {
         match a {
-          Ast::Stmt(r) => Node::<$name>::try_from(r),
+          Ast::Any(r) => Node::<$name>::try_from(r),
           _ => Err(()),
         }
       }
     }
-    impl_stmt_conv!($name);
-  };
+
+    impl TryFrom<Stmt> for Node<$name> {
+      type Error = ();
+      fn try_from(a: Stmt) -> Result<Node<$name>, ()> {
+        match a {
+          Stmt::$name(r) => Ok(r),
+          _ => Err(()),
+        }
+      }
+    }
+
+    impl TryFrom<Expr> for Node<$name> {
+      type Error = ();
+      fn try_from(a: Expr) -> Result<Node<$name>, ()> {
+        match a {
+          Expr::$name(r) => Ok(r),
+          _ => Err(()),
+        }
+      }
+    }
+
+    impl From<Node<$name>> for Expr {
+      fn from(a: Node<$name>) -> Expr {
+        return Expr::$name(a);
+      }
+    }
+
+    impl From<Node<$name>> for Stmt {
+      fn from(a: Node<$name>) -> Stmt {
+        return Stmt::$name(a);
+      }
+    }
+
+    impl From<Node<$name>> for AnyAst {
+      fn from(a: Node<$name>) -> AnyAst {
+        return AnyAst::$name(a);
+      }
+    }
+
+    impl From<Node<$name>> for Ast {
+      fn from(a: Node<$name>) -> Ast {
+        return Ast::Any(a.into());
+      }
+    }
+  }
 }
 
 #[derive(Copy, Clone, Debug)]
 pub enum Ast {
   Expr(Expr),
   Stmt(Stmt),
+  Any(AnyAst),
 }
 
 impl AstStringifyInternal for Ast {
@@ -384,6 +546,7 @@ impl AstStringifyInternal for Ast {
     return match self {
       &Ast::Expr(ref expr) => expr.to_string_internal(indent, result),
       &Ast::Stmt(ref stmt) => stmt.to_string_internal(indent, result),
+      &Ast::Any(ref any) => any.to_string_internal(indent, result),
     };
   }
 
@@ -391,6 +554,7 @@ impl AstStringifyInternal for Ast {
     return match self {
       &Ast::Expr(ref expr) => expr.to_string_tree_internal(indent, result),
       &Ast::Stmt(ref stmt) => stmt.to_string_tree_internal(indent, result),
+      &Ast::Any(ref any) => any.to_string_tree_internal(indent, result),
     };
   }
 }
@@ -400,6 +564,7 @@ impl AstStringify for Ast {
     return match self {
       &Ast::Expr(ref expr) => expr.to_string(),
       &Ast::Stmt(ref stmt) => stmt.to_string(),
+      &Ast::Any(ref any) => any.to_string(),
     };
   }
 
@@ -407,6 +572,7 @@ impl AstStringify for Ast {
     return match self {
       &Ast::Expr(ref expr) => expr.to_string_tree(),
       &Ast::Stmt(ref stmt) => stmt.to_string_tree(),
+      &Ast::Any(ref any) => any.to_string_tree(),
     };
   }
 }
@@ -416,6 +582,7 @@ impl AstMetaInfo for Ast {
     return match self {
       &Ast::Expr(ref expr) => expr.source_position(),
       &Ast::Stmt(ref stmt) => stmt.source_position(),
+      &Ast::Any(ref any) => any.source_position(),
     };
   }
 
@@ -423,6 +590,7 @@ impl AstMetaInfo for Ast {
     return match self {
       &mut Ast::Expr(ref mut expr) => expr.source_position_mut(),
       &mut Ast::Stmt(ref mut stmt) => stmt.source_position_mut(),
+      &mut Ast::Any(ref mut any) => any.source_position_mut(),
     };
   }
 
@@ -430,6 +598,7 @@ impl AstMetaInfo for Ast {
     return match self {
       &Ast::Expr(_) => true,
       &Ast::Stmt(_) => false,
+      &Ast::Any(_) => true,
     };
   }
 }
@@ -443,11 +612,17 @@ impl From<Stmt> for Ast {
     return Ast::Stmt(a);
   }
 }
+impl From<AnyAst> for Ast {
+  fn from(a: AnyAst) -> Ast {
+    return Ast::Any(a);
+  }
+}
 impl std::convert::TryFrom<Ast> for Stmt {
   type Error = ();
   fn try_from(a: Ast) -> Result<Stmt, ()> {
     return match a {
       Ast::Stmt(st) => Ok(st),
+      Ast::Any(st) => Stmt::try_from(st),
       _ => Err(()),
     };
   }
@@ -457,6 +632,16 @@ impl std::convert::TryFrom<Ast> for Expr {
   fn try_from(a: Ast) -> Result<Expr, ()> {
     return match a {
       Ast::Expr(exp) => Ok(exp),
+      Ast::Any(exp) => Expr::try_from(exp),
+      _ => Err(()),
+    };
+  }
+}
+impl std::convert::TryFrom<Ast> for AnyAst {
+  type Error = ();
+  fn try_from(a: Ast) -> Result<AnyAst, ()> {
+    return match a {
+      Ast::Any(exp) => Ok(exp),
       _ => Err(()),
     };
   }
@@ -561,7 +746,7 @@ fn to_string_list<T: AstStringifyInternal>(list: &Vec<T>, indent: &mut String, r
 }
 
 pub struct Empty;
-impl_expr!(
+impl_both!(
   Empty,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[Empty {}]\n", indent, source_position.to_string());
@@ -571,7 +756,7 @@ impl_expr!(
     self.to_string(indent, result, source_position);
   }
 );
-impl_stmt_conv!(Empty);
+
 impl Empty {
   #[inline]
   pub fn new(region: &mut Region) -> Node<Empty> {
@@ -1117,7 +1302,7 @@ pub struct Function {
   #[property(get(type = "copy"), set(type = "ref"))]
   function_body_end: u32,
 }
-impl_expr!(
+impl_both!(
   Function,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
@@ -1157,7 +1342,6 @@ impl_expr!(
     }
   }
 );
-impl_stmt_conv!(Function);
 
 impl Function {
   pub fn new(
@@ -1302,7 +1486,7 @@ impl Class {
     );
   }
 }
-impl_expr!(
+impl_both!(
   Class,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[Class {}]\n", indent, source_position.to_string());
@@ -1321,7 +1505,6 @@ impl_expr!(
     to_string_list(&self.methods, indent, result);
   }
 );
-impl_stmt_conv!(Class);
 
 #[derive(Property)]
 pub struct ObjectPropertyExpression {
@@ -1806,10 +1989,42 @@ impl ExportDeclaration {
   }
 }
 
+#[derive(Property)]
+pub struct BlockStatement {
+  #[property(get(type = "copy"), set(disable))]
+  stmt: Stmt,
+
+  #[property(get(type = "copy"), set(disable))]
+  scope: Exotic<Scope>,
+}
+impl_stmt!(
+  BlockStatement,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    let str = format!("{}[BlockStatement {:?} {}]\n", indent, *self.scope, source_position.to_string());
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    self.to_string(indent, result, source_position);
+    let mut ni = format!("  {}", indent);
+    self.stmt.to_string_tree_internal(&mut ni, result);
+  }
+);
+impl BlockStatement {
+  pub fn new(region: &mut Region, stmt: Stmt, scope: Exotic<Scope>) -> Node<Self> {
+    return Node::<Self>::new(region, BlockStatement { stmt, scope });
+  }
+}
+
+#[derive(Property)]
 pub struct ForStatement {
-  declarations: Node<Statements>,
-  comparison: Expr,
+  #[property(get(type = "copy"), set(disable))]
+  declarations: Ast,
+  #[property(get(type = "copy"), set(disable))]
+  condition: Expr,
+  #[property(get(type = "copy"), set(disable))]
   computation: Expr,
+  #[property(get(type = "copy"), set(disable))]
+  body: Stmt,
 }
 impl_stmt!(
   ForStatement,
@@ -1821,51 +2036,151 @@ impl_stmt!(
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.declarations.to_string_tree_internal(&mut ni, result);
-    self.comparison.to_string_tree_internal(&mut ni, result);
+    self.condition.to_string_tree_internal(&mut ni, result);
     self.computation.to_string_tree_internal(&mut ni, result);
+    self.body.to_string_tree_internal(&mut ni, result);
   }
 );
+impl ForStatement {
+  pub fn new(region: &mut Region, declarations: Ast, condition: Expr, computation: Expr, body: Stmt) -> Node<Self> {
+    return Node::<Self>::new(
+      region,
+      ForStatement {
+        declarations,
+        condition,
+        computation,
+        body,
+      },
+    );
+  }
+}
+
+#[derive(Property)]
+pub struct ForInStatement {
+  #[property(get(type = "copy"), set(disable))]
+  lhs: Ast,
+
+  #[property(get(type = "copy"), set(disable))]
+  rhs: Expr,
+
+  #[property(get(type = "copy"), set(disable))]
+  body: Stmt,
+}
+impl_stmt!(
+  ForInStatement,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    let str = format!("{}[ForInStatement {}]\n", indent, source_position.to_string());
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    self.to_string(indent, result, source_position);
+    let mut ni = format!("  {}", indent);
+    self.lhs.to_string_tree_internal(&mut ni, result);
+    self.rhs.to_string_tree_internal(&mut ni, result);
+    self.body.to_string_tree_internal(&mut ni, result);
+  }
+);
+impl ForInStatement {
+  pub fn new(region: &mut Region, lhs: Ast, rhs: Expr, body: Stmt) -> Node<Self> {
+    return Node::<Self>::new(region, ForInStatement { lhs, rhs, body });
+  }
+}
+
+#[derive(Property)]
+pub struct ForOfStatement {
+  #[property(get(type = "copy"), set(disable))]
+  lhs: Ast,
+
+  #[property(get(type = "copy"), set(disable))]
+  rhs: Expr,
+
+  #[property(get(type = "copy"), set(disable))]
+  is_await: bool,
+
+  #[property(get(type = "copy"), set(disable))]
+  body: Stmt,
+}
+impl_stmt!(
+  ForOfStatement,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    let str = format!(
+      "{}[ForOfStatement{} {}]\n",
+      indent,
+      if self.is_await { " await" } else { "" },
+      source_position.to_string()
+    );
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    self.to_string(indent, result, source_position);
+    let mut ni = format!("  {}", indent);
+    self.lhs.to_string_tree_internal(&mut ni, result);
+    self.rhs.to_string_tree_internal(&mut ni, result);
+    self.body.to_string_tree_internal(&mut ni, result);
+  }
+);
+impl ForOfStatement {
+  pub fn new(region: &mut Region, is_await: bool, lhs: Ast, rhs: Expr, body: Stmt) -> Node<Self> {
+    return Node::<Self>::new(region, ForOfStatement { lhs, rhs, is_await, body });
+  }
+}
 
 pub struct WhileStatement {
-  comparison: Expr,
-  body: Node<Statements>,
+  condition: Expr,
+  body: Stmt,
 }
 impl_stmt!(
   WhileStatement,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
-    let str = format!("{}[ForStatement {}]\n", indent, source_position.to_string());
+    let str = format!("{}[WhileStatement {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
-    self.comparison.to_string_tree_internal(&mut ni, result);
+    self.condition.to_string_tree_internal(&mut ni, result);
     self.body.to_string_tree_internal(&mut ni, result);
   }
 );
+impl WhileStatement {
+  pub fn new(region: &mut Region, condition: Expr, body: Stmt) -> Node<Self> {
+    return Node::<Self>::new(region, WhileStatement { condition, body });
+  }
+}
 
 pub struct DoWhileStatement {
-  comparison: Expr,
-  body: Node<Statements>,
+  condition: Expr,
+  body: Stmt,
 }
 impl_stmt!(
   DoWhileStatement,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
-    let str = format!("{}[ForStatement {}]\n", indent, source_position.to_string());
+    let str = format!("{}[DoWhileStatement {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
-    self.comparison.to_string_tree_internal(&mut ni, result);
+    self.condition.to_string_tree_internal(&mut ni, result);
     self.body.to_string_tree_internal(&mut ni, result);
   }
 );
+impl DoWhileStatement {
+  pub fn new(region: &mut Region, condition: Expr, body: Stmt) -> Node<Self> {
+    return Node::<Self>::new(region, DoWhileStatement { condition, body });
+  }
+}
 
+#[derive(Property)]
 pub struct IfStatement {
+  #[property(get(type = "copy"), set(disable))]
   condition: Expr,
-  then_body: Node<Statements>,
-  else_body: Node<Statement>,
+
+  #[property(get(type = "copy"), set(disable))]
+  then_stmt: Stmt,
+
+  #[property(get(type = "copy"), set(disable))]
+  else_stmt: Option<Stmt>,
 }
 impl_stmt!(
   IfStatement,
@@ -1877,19 +2192,40 @@ impl_stmt!(
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
     self.condition.to_string_tree_internal(&mut ni, result);
-    self.then_body.to_string_tree_internal(&mut ni, result);
-    self.else_body.to_string_tree_internal(&mut ni, result);
+    self.then_stmt.to_string_tree_internal(&mut ni, result);
+    if let Some(es) = self.else_stmt {
+      es.to_string_tree_internal(&mut ni, result);
+    }
   }
 );
+impl IfStatement {
+  pub fn new(region: &mut Region, condition: Expr, then_stmt: Stmt, else_stmt: Option<Stmt>) -> Node<Self> {
+    return Node::<Self>::new(
+      region,
+      IfStatement {
+        condition,
+        then_stmt,
+        else_stmt,
+      },
+    );
+  }
+}
 
+#[derive(Property)]
 pub struct SwitchStatement {
+  #[property(get(type = "copy"), set(disable))]
+  scope: Exotic<Scope>,
+
+  #[property(get(type = "copy"), set(disable))]
   condition: Expr,
-  cases: Vec<Node<SwitchCases>>,
+
+  #[property(get(type = "ref"), set(disable))]
+  cases: Vec<Stmt>,
 }
 impl_stmt!(
   SwitchStatement,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
-    let str = format!("{}[SwitchStatement {}]\n", indent, source_position.to_string());
+    let str = format!("{}[SwitchStatement {:?} {}]\n", indent, *self.scope, source_position.to_string());
     result.push_str(&str);
   },
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
@@ -1899,26 +2235,45 @@ impl_stmt!(
     to_string_list(&self.cases, indent, result);
   }
 );
+impl SwitchStatement {
+  pub fn new(region: &mut Region, scope: Exotic<Scope>, condition: Expr, cases: Vec<Stmt>) -> Node<Self> {
+    return Node::<Self>::new(region, SwitchStatement { scope, condition, cases });
+  }
+}
 
-pub struct SwitchCases {
-  condition: Expr,
-  body: Node<Statements>,
+pub struct SwitchCase {
+  condition: Option<Expr>,
+  body: Stmt,
 }
 impl_stmt!(
-  SwitchCases,
+  SwitchCase,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
-    let str = format!("{}[SwitchCases {}]\n", indent, source_position.to_string());
+    let str = format!(
+      "{}[SwitchCase{} {}]\n",
+      indent,
+      if !self.condition.is_some() { " default" } else { "" },
+      source_position.to_string()
+    );
     result.push_str(&str);
   },
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
-    self.condition.to_string_tree_internal(&mut ni, result);
+    if let Some(cond) = self.condition {
+      cond.to_string_tree_internal(&mut ni, result);
+    }
     self.body.to_string_tree_internal(&mut ni, result);
   }
 );
+impl SwitchCase {
+  pub fn new(region: &mut Region, condition: Option<Expr>, body: Stmt) -> Node<Self> {
+    return Node::<Self>::new(region, SwitchCase { condition, body });
+  }
+}
 
-pub struct BreakStatement;
+pub struct BreakStatement {
+  label_name: FixedU16CodePointArray,
+}
 impl_stmt!(
   BreakStatement,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
@@ -1930,7 +2285,9 @@ impl_stmt!(
   }
 );
 
-pub struct ContinueStatement;
+pub struct ContinueStatement {
+  label_name: FixedU16CodePointArray,
+}
 impl_stmt!(
   ContinueStatement,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
@@ -1942,41 +2299,36 @@ impl_stmt!(
   }
 );
 
-pub struct BlockStatement {
-  body: Node<Statements>,
-}
-impl_stmt!(
-  BlockStatement,
-  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
-    let str = format!("{}[BlockStatement {}]\n", indent, source_position.to_string());
-    result.push_str(&str);
-  },
-  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
-    self.to_string(indent, result, source_position);
-    let mut ni = format!("  {}", indent);
-    self.body.to_string_tree_internal(&mut ni, result);
-  }
-);
-
+#[derive(Property)]
 pub struct LabelledStatement {
-  stmt: Node<Statement>,
+  #[property(get(type = "copy"), set(disable))]
+  identifier: Expr,
+  #[property(get(type = "copy"), set(disable))]
+  stmt: Stmt,
 }
 impl_stmt!(
   LabelledStatement,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
-    let str = format!("{}[BlockStatement {}]\n", indent, source_position.to_string());
+    let str = format!("{}[LabelledStatement {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
     let mut ni = format!("  {}", indent);
+    self.identifier.to_string_tree_internal(&mut ni, result);
     self.stmt.to_string_tree_internal(&mut ni, result);
   }
 );
 
+impl LabelledStatement {
+  pub fn new(region: &mut Region, identifier: Expr, stmt: Stmt) -> Node<Self> {
+    return Node::<Self>::new(region, LabelledStatement { identifier, stmt });
+  }
+}
+
 pub struct WithStatement {
   expr: Expr,
-  body: Node<Statement>,
+  body: Stmt,
 }
 impl_stmt!(
   WithStatement,
@@ -1992,7 +2344,9 @@ impl_stmt!(
   }
 );
 
+#[derive(Property)]
 pub struct VariableDeclarations {
+  #[property(get(type = "ref"), set(disable))]
   decls: Vec<Stmt>,
 }
 impl_stmt!(
@@ -2018,9 +2372,13 @@ pub enum VariableDeclarationType {
   Const,
   Var,
 }
+#[derive(Property)]
 pub struct VariableDeclaration {
+  #[property(get(type = "copy"), set(disable))]
   decl_type: VariableDeclarationType,
+  #[property(get(type = "copy"), set(disable))]
   binding: Expr,
+  #[property(get(type = "copy"), set(disable))]
   initializer: Option<Expr>,
 }
 impl_stmt!(
@@ -2073,6 +2431,7 @@ bitflags! {
     const STRING_LITERAL = 0x800;
     const IMPORT_META = 0x1000;
     const CLASS = 0x2000;
+    const INITIALIZER = 0x4000;
   }
 }
 pub struct SkipExpr(SkipExprType);
@@ -2128,6 +2487,10 @@ impl SkipExpr {
   pub fn is_spread(&self) -> bool {
     return self.0.contains(SkipExprType::SPREAD);
   }
+
+  pub fn is_initializer(&self) -> bool {
+    return self.0.contains(SkipExprType::INITIALIZER);
+  }
 }
 impl_expr!(
   SkipExpr,
@@ -2146,6 +2509,9 @@ bitflags! {
     const CLASS_FIELD = 0x2;
     const VARS = 0x4;
     const VAR = 0x8;
+    const VAR_WITHOUT_INITIALIZER = 0x10;
+    const LABEL = 0x20;
+    const LABELLED_FUNCTION = 0x40;
   }
 }
 
@@ -2166,7 +2532,19 @@ impl SkipStmt {
   }
 
   pub fn is_var(&self) -> bool {
-    return self.flag == SkipStmtType::VAR;
+    return self.flag.contains(SkipStmtType::VAR);
+  }
+
+  pub fn is_var_without_init(&self) -> bool {
+    return self.flag.contains(SkipStmtType::VAR_WITHOUT_INITIALIZER);
+  }
+
+  pub fn is_label(&self) -> bool {
+    return self.flag == SkipStmtType::LABEL;
+  }
+
+  pub fn is_labelled_fn(&self) -> bool {
+    return self.flag == SkipStmtType::LABELLED_FUNCTION;
   }
 }
 impl_stmt!(
@@ -2203,7 +2581,7 @@ impl SkipAny {
     return self.flag == SkipAnyType::CLASS;
   }
 }
-impl_expr!(
+impl_both!(
   SkipAny,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!("{}[SkipAny {}]\n", indent, source_position.to_string());
@@ -2213,7 +2591,6 @@ impl_expr!(
     self.to_string(indent, result, source_position);
   }
 );
-impl_stmt_conv!(SkipAny);
 
 #[cfg(test)]
 mod ast_test {

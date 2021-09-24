@@ -122,7 +122,7 @@ impl ExpressionContext {
       first_value_error: None,
       first_strict_mode_error: None,
       is_maybe_immediate_function: false,
-      is_in_allowed: false,
+      is_in_allowed: true,
       assignment_target_type: AssignmentTargetType::Simple,
     }
   }
@@ -168,11 +168,12 @@ impl std::fmt::Debug for ExpressionContext {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     return write!(
       f,
-      "pattern_error = {} value_errr = {} strict_mode_error = {}, imm_fn = {} assignment_target_type = {:?}",
+      "pattern_error = {} value_errr = {} strict_mode_error = {}, imm_fn = {} in = {} assignment_target_type = {:?}",
       self.first_pattern_error.is_some(),
       self.first_value_error.is_some(),
       self.first_strict_mode_error.is_some(),
       self.is_maybe_immediate_function,
+      self.is_in_allowed,
       self.assignment_target_type
     );
   }

@@ -146,6 +146,9 @@ mod parser_test {
     (@transparent $is_strict:expr, $children_scope_len:expr, $has_parent:expr) => {
       scope!("transparent", $is_strict, $children_scope_len, $has_parent)
     };
+    (@lexical $is_strict:expr, $children_scope_len:expr, $has_parent:expr) => {
+      scope!("lexical", $is_strict, $children_scope_len, $has_parent)
+    };
     ($scope_type:expr, $is_strict:expr, $children_scope_len:expr, $has_parent:expr) => {
       format!(
         "Scope {{ type = {} strict_mode = {} children = {} has_parent = {} }}",
@@ -335,6 +338,18 @@ mod parser_test {
     ($pos:expr) => {{
       ast!("Empty", "", $pos)
     }};
+    () => {{
+      ast!("Empty", "", pos!(0, 0))
+    }};
+  }
+
+  macro_rules! block {
+    ($pos:expr, $scope:expr, $($asts:expr),*$(,)*) => {{
+      ast_with_children!("BlockStatement", &$scope, $pos, $($asts,)*)
+    }};
+    ($pos:expr, $scope:expr) => {{
+      ast!("BlockStatement", &$scope, $pos)
+    }};
   }
 
   macro_rules! var {
@@ -351,6 +366,72 @@ mod parser_test {
   macro_rules! vars {
     ($pos:expr, $($asts:expr),*$(,)*) => {{
       ast_with_children!("VariableDeclarations", "", $pos, $($asts,)*)
+    }};
+  }
+
+  macro_rules! if_stmt {
+    ($pos:expr, $($asts:expr),*$(,)*) => {{
+      ast_with_children!("IfStatement", "", $pos, $($asts,)*)
+    }};
+  }
+
+  macro_rules! if_stmt {
+    ($pos:expr, $($asts:expr),*$(,)*) => {{
+      ast_with_children!("IfStatement", "", $pos, $($asts,)*)
+    }};
+  }
+
+  macro_rules! label {
+    ($pos:expr, $($asts:expr),*$(,)*) => {{
+      ast_with_children!("LabelledStatement", "", $pos, $($asts,)*)
+    }};
+  }
+
+  macro_rules! switch {
+    ($pos:expr, $scope:expr, $($asts:expr),*$(,)*) => {{
+      ast_with_children!("SwitchStatement", &$scope, $pos, $($asts,)*)
+    }};
+  }
+
+  macro_rules! case {
+    ($pos:expr, $($asts:expr),*$(,)*) => {{
+      ast_with_children!("SwitchCase", "", $pos, $($asts,)*)
+    }};
+    (@default, $pos:expr, $($asts:expr),*$(,)*) => {{
+      ast_with_children!("SwitchCase", "default", $pos, $($asts,)*)
+    }};
+  }
+
+  macro_rules! while_stmt {
+    ($pos:expr, $($asts:expr),*$(,)*) => {{
+      ast_with_children!("WhileStatement", "", $pos, $($asts,)*)
+    }};
+  }
+
+  macro_rules! do_while {
+    ($pos:expr, $($asts:expr),*$(,)*) => {{
+      ast_with_children!("DoWhileStatement", "", $pos, $($asts,)*)
+    }};
+  }
+
+  macro_rules! for_stmt {
+    ($pos:expr, $($asts:expr),*$(,)*) => {{
+      ast_with_children!("ForStatement", "", $pos, $($asts,)*)
+    }};
+  }
+
+  macro_rules! forin {
+    ($pos:expr, $($asts:expr),*$(,)*) => {{
+      ast_with_children!("ForInStatement", "", $pos, $($asts,)*)
+    }};
+  }
+
+  macro_rules! forof {
+    (@await, $pos:expr, $($asts:expr),*$(,)*) => {{
+      ast_with_children!("ForOfStatement", "await", $pos, $($asts,)*)
+    }};
+    ($pos:expr, $($asts:expr),*$(,)*) => {{
+      ast_with_children!("ForOfStatement", "", $pos, $($asts,)*)
     }};
   }
 
@@ -464,17 +545,14 @@ mod parser_test {
             scope!(@opaque scope_count, true),
             ident!("X", pos!(base_position, 0)),
             exprs!(pos!(base_position + 1, 0)),
-            stmts!(
-              pos!(base_position + 4, 0),
-              if !is_stmt {
-                stmt!(
-                  pos!(base_position + 5, 0),
-                  ast_builder((base_position + 5, 0, false, !parser_option.disable_skip_parser()))
-                )
-              } else {
+            if !is_stmt {
+              stmt!(
+                pos!(base_position + 5, 0),
                 ast_builder((base_position + 5, 0, false, !parser_option.disable_skip_parser()))
-              }
-            ),
+              )
+            } else {
+              ast_builder((base_position + 5, 0, false, !parser_option.disable_skip_parser()))
+            }
           )
         )
       ),
@@ -533,6 +611,32 @@ mod parser_test {
   fn stmt_test_with_scope<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str, scope_count: u32) {
     let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::new(), scope_count, false, 0, true);
     parser_ast_test_with_options(ast_b, value, ParserOption::with(true), scope_count, false, 0, true);
+  }
+
+  fn stmt_test_with_linebreak<F: Fn((u64, u32, bool, bool)) -> TestableAst>(
+    ast_builder: F,
+    value: &str,
+    scope_count: u32,
+    before_line_break_count: u64,
+  ) {
+    let ast_b = parser_ast_test_with_options(
+      ast_builder,
+      value,
+      ParserOption::new(),
+      scope_count,
+      false,
+      before_line_break_count,
+      true,
+    );
+    parser_ast_test_with_options(
+      ast_b,
+      value,
+      ParserOption::with(true),
+      scope_count,
+      false,
+      before_line_break_count,
+      true,
+    );
   }
 
   fn parser_ast_test_with_options<F: Fn((u64, u32, bool, bool)) -> TestableAst>(
@@ -2322,7 +2426,7 @@ mod parser_test {
               scope!(@opaque is_strict, 0, true),
               ident!("a", pos!(col + 2, line)),
               exprs!(pos!(col + 4, line)),
-              if is_skip_parser { void!() } else { stmts!(pos!(col + 7, line)) }
+              if is_skip_parser { void!() } else { empty!() }
             )
           ),
           object_props!(
@@ -2336,7 +2440,7 @@ mod parser_test {
               scope!(@opaque is_strict, 0, true),
               ident!("b", pos!(col + 10, line)),
               exprs!(pos!(col + 12, line)),
-              if is_skip_parser { void!() } else { stmts!(pos!(col + 15, line)) }
+              if is_skip_parser { void!() } else { empty!() }
             )
           ),
         );
@@ -2365,7 +2469,7 @@ mod parser_test {
               scope!(@opaque is_strict, 0, true),
               ident!("a", pos!(col + 6, line)),
               exprs!(pos!(col + 8, line)),
-              if is_skip_parser { void!() } else { stmts!(pos!(col + 11, line)) }
+              if is_skip_parser { void!() } else { empty!() }
             )
           ),
           object_props!(
@@ -2380,7 +2484,7 @@ mod parser_test {
               scope!(@opaque is_strict, 0, true),
               ident!("b", pos!(col + 18, line)),
               exprs!(pos!(col + 20, line), ident!("x", pos!(col + 20, line))),
-              if is_skip_parser { void!() } else { stmts!(pos!(col + 24, line)) }
+              if is_skip_parser { void!() } else { empty!() }
             )
           ),
         );
@@ -2407,7 +2511,7 @@ mod parser_test {
               if is_skip_parser { col + 13 } else { 0 },
               scope!(@transparent is_strict, 0, true),
               exprs!(pos!(col + 5, line)),
-              if is_skip_parser { void!() } else { stmts!(pos!(col + 12, line)) }
+              if is_skip_parser { void!() } else { empty!() }
             )
           ),
         );
@@ -2434,7 +2538,7 @@ mod parser_test {
               if is_skip_parser { col + 17 } else { 0 },
               scope!(@opaque is_strict, 0, true),
               exprs!(pos!(col + 13, line)),
-              if is_skip_parser { void!() } else { stmts!(pos!(col + 16, line)) }
+              if is_skip_parser { void!() } else { empty!() }
             )
           ),
         );
@@ -2462,7 +2566,7 @@ mod parser_test {
               scope!(@opaque is_strict,0, true),
               ident!("a", pos!(col + 8, line)),
               exprs!(pos!(col + 10, line)),
-              if is_skip_parser { void!() } else { stmts!(pos!(col + 13, line)) }
+              if is_skip_parser { void!() } else { empty!() }
             )
           ),
           object_props!(
@@ -2476,7 +2580,7 @@ mod parser_test {
               scope!(@opaque is_strict,0, true),
               ident!("b", pos!(col + 16, line)),
               exprs!(pos!(col + 18, line)),
-              if is_skip_parser { void!() } else { stmts!(pos!(col + 21, line)) }
+              if is_skip_parser { void!() } else { empty!() }
             )
           ),
         );
@@ -2507,20 +2611,17 @@ mod parser_test {
               if is_skip_parser {
                 void!()
               } else {
-                stmts!(
+                stmt!(
                   pos!(col + 13, line),
-                  stmt!(
+                  unary!(
+                    "Await",
+                    "Pre",
                     pos!(col + 13, line),
-                    unary!(
-                      "Await",
-                      "Pre",
-                      pos!(col + 13, line),
-                      callexpr!(
-                        "Expr",
-                        pos!(col + 19, line),
-                        ident!("x", pos!(col + 19, line)),
-                        exprs!(pos!(col + 20, line))
-                      )
+                    callexpr!(
+                      "Expr",
+                      pos!(col + 19, line),
+                      ident!("x", pos!(col + 19, line)),
+                      exprs!(pos!(col + 20, line))
                     )
                   )
                 )
@@ -2555,20 +2656,17 @@ mod parser_test {
               if is_skip_parser {
                 void!()
               } else {
-                stmts!(
+                stmt!(
                   pos!(col + 8, line),
-                  stmt!(
+                  unary!(
+                    "Yield",
+                    "Pre",
                     pos!(col + 8, line),
-                    unary!(
-                      "Yield",
-                      "Pre",
-                      pos!(col + 8, line),
-                      callexpr!(
-                        "Expr",
-                        pos!(col + 14, line),
-                        ident!("x", pos!(col + 14, line)),
-                        exprs!(pos!(col + 15, line))
-                      )
+                    callexpr!(
+                      "Expr",
+                      pos!(col + 14, line),
+                      ident!("x", pos!(col + 14, line)),
+                      exprs!(pos!(col + 15, line))
                     )
                   )
                 )
@@ -3468,7 +3566,7 @@ mod parser_test {
             scope!(@opaque 0, true)
           },
           exprs!(pos!(col + 9, line)),
-          stmts!(pos!(col + 12, line))
+          empty!()
         );
       },
       "(function() {})",
@@ -3491,7 +3589,7 @@ mod parser_test {
             scope!(@opaque 0, true)
           },
           exprs!(pos!(col + 10, line)),
-          stmts!(pos!(col + 13, line))
+          empty!()
         );
       },
       "(function*() {})",
@@ -3514,7 +3612,7 @@ mod parser_test {
             scope!(@opaque 0, true)
           },
           exprs!(pos!(col + 15, line)),
-          stmts!(pos!(col + 18, line))
+          empty!()
         );
       },
       "(async function() {})",
@@ -3537,7 +3635,7 @@ mod parser_test {
             scope!(@opaque 0, true)
           },
           exprs!(pos!(col + 16, line)),
-          stmts!(pos!(col + 19, line))
+          empty!()
         );
       },
       "(async function*() {})",
@@ -3633,7 +3731,7 @@ mod parser_test {
             ),
             unary!("Spread", "Pre", pos!(col + 75, line), ident!("g", pos!(col + 78, line)))
           ),
-          stmts!(pos!(col + 81, line))
+          empty!()
         );
       },
       "(function X(a, {b, test: {c}}, [d, {e: f}], k = 1, {j: {l}} = {j: {l: 1}}, ...g) {})",
@@ -3853,13 +3951,815 @@ mod parser_test {
   fn lexical_binding_not_allowed_duplication_early_error_test() {
     basic_env_expression_eary_error_test(14, 15, "let a = 1, b, a = 3");
     basic_env_expression_eary_error_test(20, 21, "const a = 1, b = 2, a = 3");
-    basic_env_expression_eary_error_test(16, 17, "let a = 1; var a = 2;");
-    basic_env_expression_eary_error_test(18, 19, "const a = 1; var a = 2;");
+    basic_env_expression_eary_error_test(15, 16, "let a = 1; var a = 2;");
+    basic_env_expression_eary_error_test(17, 18, "const a = 1; var a = 2;");
   }
 
   #[test]
   fn lexical_binding_not_allowed_let_as_identifier_early_error_test() {
     basic_env_expression_eary_error_test(4, 7, "let let = 1");
     basic_env_expression_eary_error_test(6, 9, "const let = 1");
+  }
+
+  #[test]
+  fn parse_empty_block_stmt() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return block!(pos!(col, line), scope!(@lexical is_strict, 0, true), empty!());
+      },
+      "{}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_block_stmt() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return block!(
+          pos!(col, line),
+          scope!(@lexical is_strict, 0, true),
+          var!(
+            "Let",
+            pos!(col + 1, line),
+            ident!("a", pos!(col + 5, line)),
+            number!("1", pos!(col + 9, line))
+          )
+        );
+      },
+      "{let a = 1;}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_netsted_block_stmt() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return block!(
+          pos!(col, line),
+          scope!(@lexical is_strict, 1, true),
+          stmts!(
+            pos!(col + 1, line),
+            var!(
+              "Let",
+              pos!(col + 1, line),
+              ident!("a", pos!(col + 5, line)),
+              number!("1", pos!(col + 9, line))
+            ),
+            block!(
+              pos!(col + 12, line),
+              scope!(@lexical is_strict, 0, true),
+              var!(
+                "Let",
+                pos!(col + 13, line),
+                ident!("a", pos!(col + 17, line)),
+                number!("1", pos!(col + 21, line))
+              )
+            )
+          )
+        );
+      },
+      "{let a = 1; {let a = 1}}",
+      1,
+    )
+  }
+
+  #[test]
+  fn lexical_scope_early_error_test() {
+    basic_env_expression_eary_error_test(15, 16, "{let a = 1, b, a = 3}");
+    basic_env_expression_eary_error_test(21, 22, "{const a = 1, b = 2, a = 3}");
+    basic_env_expression_eary_error_test(16, 17, "{let a = 1; var a = 2;}");
+    basic_env_expression_eary_error_test(18, 19, "{const a = 1; var a = 2;}");
+  }
+
+  #[test]
+  fn parse_labelled_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return label!(
+          pos!(col, line),
+          ident!("X", pos!(col, line)),
+          block!(
+            pos!(col + 3, line),
+            scope!(@lexical is_strict, 1, true),
+            label!(
+              pos!(col + 4, line),
+              ident!("Y", pos!(col + 4, line)),
+              block!(
+                pos!(col + 7, line),
+                scope!(@lexical is_strict, 1, true),
+                label!(
+                  pos!(col + 8, line),
+                  ident!("Z", pos!(col + 8, line)),
+                  block!(pos!(col + 11, line), scope!(@lexical is_strict, 0, true), empty!())
+                )
+              )
+            )
+          )
+        );
+      },
+      "X: {Y: {Z: {}}}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_parallel_labelled_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return block!(
+          pos!(col, line),
+          scope!(@lexical is_strict, 2, true),
+          stmts!(
+            pos!(col + 1, line),
+            label!(
+              pos!(col + 1, line),
+              ident!("X", pos!(col + 1, line)),
+              block!(pos!(col + 4, line), scope!(@lexical is_strict, 0, true), empty!())
+            ),
+            label!(
+              pos!(col + 7, line),
+              ident!("X", pos!(col + 7, line)),
+              block!(pos!(col + 10, line), scope!(@lexical is_strict, 0, true), empty!())
+            )
+          )
+        );
+      },
+      "{X: {} X: {}}",
+      1,
+    )
+  }
+
+  #[test]
+  fn duplicated_label_early_error_test() {
+    basic_env_expression_eary_error_test(4, 5, "X: {X: {}}");
+  }
+
+  #[test]
+  fn parse_if_statement() {
+    stmt_test_with_linebreak(
+      |(col, line, _, _)| {
+        return if_stmt!(
+          pos!(col, 0),
+          ident!("a", pos!(col + 4, 0)),
+          stmt!(
+            pos!(2, 1),
+            binary!("OpAssign", pos!(2, 1), ident!("x", pos!(2, 1)), number!("1", pos!(6, 1)))
+          ),
+          if_stmt!(
+            pos!(2, 3),
+            ident!("b", pos!(6, 3)),
+            stmt!(
+              pos!(4, 4),
+              binary!("OpAssign", pos!(4, 4), ident!("x", pos!(4, 4)), number!("2", pos!(8, 4)))
+            ),
+            stmt!(
+              pos!(4, 6),
+              binary!("OpAssign", pos!(4, 6), ident!("x", pos!(4, 6)), number!("3", pos!(8, 6)))
+            ),
+          )
+        );
+      },
+      "if (a)
+  x = 1
+else
+  if (b)
+    x = 2
+  else
+    x = 3",
+      0,
+      46,
+    )
+  }
+
+  #[test]
+  fn parse_if_block_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return if_stmt!(
+          pos!(col, 0),
+          ident!("a", pos!(col + 4, 0)),
+          block!(
+            pos!(col + 7, line),
+            scope!(@lexical is_strict, 0, true),
+            stmt!(
+              pos!(col + 8, line),
+              binary!(
+                "OpAssign",
+                pos!(col + 8, line),
+                ident!("x", pos!(col + 8, line)),
+                number!("1", pos!(col + 12, line))
+              )
+            )
+          ),
+          if_stmt!(
+            pos!(col + 20, line),
+            ident!("b", pos!(col + 24, line)),
+            block!(
+              pos!(col + 27, line),
+              scope!(@lexical is_strict, 0, true),
+              stmt!(
+                pos!(col + 28, line),
+                binary!(
+                  "OpAssign",
+                  pos!(col + 28, line),
+                  ident!("x", pos!(col + 28, line)),
+                  number!("2", pos!(col + 32, line))
+                )
+              )
+            ),
+            block!(
+              pos!(col + 40, line),
+              scope!(@lexical is_strict, 0, true),
+              stmt!(
+                pos!(col + 41, line),
+                binary!(
+                  "OpAssign",
+                  pos!(col + 41, line),
+                  ident!("x", pos!(col + 41, line)),
+                  number!("3", pos!(col + 45, line))
+                )
+              )
+            ),
+          )
+        );
+      },
+      "if (a) {x = 1} else if (b) {x = 2} else {x = 3}",
+      3,
+    )
+  }
+
+  #[test]
+  fn labelled_fn_contains_if_stmt_early_error_test() {
+    let env = [(Some(""), ""), (None, ""), (None, "")];
+    syntax_error_test(
+      &env,
+      "if (a) X:function K() {}",
+      &[&s_pos!(7, 24, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    )
+  }
+
+  #[test]
+  fn parse_switch_statement() {
+    stmt_test_with_linebreak(
+      |(col, line, is_strict, _)| {
+        return switch!(
+          pos!(col, line),
+          scope!(@lexical is_strict, 0, true),
+          ident!("a", pos!(col + 8, line)),
+          case!(
+            pos!(2, 1),
+            number!("1", pos!(7, 1)),
+            stmt!(
+              pos!(4, 2),
+              binary!("OpAssign", pos!(4, 2), ident!("a", pos!(4, 2)), number!("2", pos!(8, 2)))
+            )
+          ),
+          case!(
+            pos!(2, 3),
+            number!("2", pos!(7, 3)),
+            stmt!(
+              pos!(4, 4),
+              binary!("OpAssign", pos!(4, 4), ident!("a", pos!(4, 4)), number!("3", pos!(8, 4)))
+            )
+          ),
+          case!(
+            @default,
+            pos!(2, 5),
+            stmt!(
+              pos!(4, 6),
+              binary!("OpAssign", pos!(4, 6), ident!("a", pos!(4, 6)), number!("4", pos!(8, 6)))
+            )
+          ),
+        );
+      },
+      "switch (a) {
+  case 1:
+    a = 2;
+  case 2:
+    a = 3;
+  default:
+    a = 4;
+}",
+      1,
+      77,
+    )
+  }
+
+  #[test]
+  fn parse_switch_statement_with_block() {
+    stmt_test_with_linebreak(
+      |(col, line, is_strict, _)| {
+        return switch!(
+          pos!(col, line),
+          scope!(@lexical is_strict, 2, true),
+          ident!("a", pos!(col + 8, line)),
+          case!(
+            pos!(2, 1),
+            number!("1", pos!(7, 1)),
+            block!(
+              pos!(10, 1),
+              scope!(@lexical is_strict, 0, true),
+              stmts!(
+                pos!(4, 2),
+                var!("Let", pos!(4, 2), ident!("v", pos!(8, 2)), number!("1", pos!(12, 2))),
+                stmt!(
+                  pos!(4, 3),
+                  binary!("OpAssign", pos!(4, 3), ident!("a", pos!(4, 3)), number!("2", pos!(8, 3)))
+                )
+              )
+            )
+          ),
+          case!(
+            pos!(2, 5),
+            number!("2", pos!(7, 5)),
+            block!(
+              pos!(10, 5),
+              scope!(@lexical is_strict, 0, true),
+              stmts!(
+                pos!(4, 6),
+                var!("Let", pos!(4, 6), ident!("v", pos!(8, 6)), number!("1", pos!(12, 6))),
+                stmt!(
+                  pos!(4, 7),
+                  binary!("OpAssign", pos!(4, 7), ident!("a", pos!(4, 7)), number!("3", pos!(8, 7)))
+                )
+              )
+            )
+          ),
+          case!(
+            @default,
+            pos!(2, 9),
+            stmts!(
+              pos!(4, 10),
+              var!(
+                "Let",
+                pos!(4, 10),
+                ident!("v", pos!(8, 10)),
+                number!("1", pos!(12, 10))
+              ),
+              stmt!(
+                pos!(4, 11),
+                binary!("OpAssign", pos!(4, 11), ident!("a", pos!(4, 11)), number!("4", pos!(8, 11)))
+              )
+            )
+          ),
+          case!(
+            pos!(2, 12),
+            number!("3", pos!(7, 12)),
+            stmts!(
+              pos!(4, 13),
+              var!("Let", pos!(4, 13), ident!("w", pos!(8, 13)), number!("1", pos!(12, 13))),
+              stmt!(
+                pos!(4, 14),
+                binary!("OpAssign", pos!(4, 14), ident!("a", pos!(4, 14)), number!("3", pos!(8, 14)))
+              )
+            )
+          ),
+        );
+      },
+      "switch (a) {
+  case 1: {
+    let v = 1;
+    a = 2;
+  }
+  case 2: {
+    let v = 1;
+    a = 3;
+  }
+  default:
+    let v = 1;
+    a = 4;
+  case 3:
+    let w = 1;
+    a = 3;
+}",
+      1,
+      170,
+    )
+  }
+
+  #[test]
+  fn switch_stmt_block_duplicated_lexical_binding_early_error_test() {
+    basic_env_expression_eary_error_test(43, 44, "switch (a) {case 1: let a = 1; case 2: let a = 2}");
+    basic_env_expression_eary_error_test(43, 44, "switch (a) {case 1: var a = 1; case 2: let a = 2}");
+    basic_env_expression_eary_error_test(43, 44, "switch (a) {case 1: let a = 1; case 2: var a = 2}");
+
+    basic_env_expression_eary_error_test(47, 48, "switch (a) {case 1: const a = 1; case 2: const a = 2}");
+    basic_env_expression_eary_error_test(47, 48, "switch (a) {case 1: const a = 1; case 2: const a = 2}");
+    basic_env_expression_eary_error_test(47, 48, "switch (a) {case 1: const a = 1; case 2: const a = 2}");
+  }
+
+  #[test]
+  fn parse_while_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return while_stmt!(
+          pos!(col, line),
+          number!("1", pos!(col + 7, line)),
+          block!(
+            pos!(col + 10, line),
+            scope!(@lexical is_strict, 0, true),
+            var!(
+              "Let",
+              pos!(col + 11, line),
+              ident!("a", pos!(col + 15, line)),
+              number!("0", pos!(col + 19, line))
+            )
+          )
+        );
+      },
+      "while (1) {let a = 0;}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_do_while_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return do_while!(
+          pos!(col, line),
+          number!("1", pos!(col + 22, line)),
+          block!(
+            pos!(col + 3, line),
+            scope!(@lexical is_strict, 0, true),
+            var!(
+              "Let",
+              pos!(col + 4, line),
+              ident!("a", pos!(col + 8, line)),
+              number!("0", pos!(col + 12, line))
+            )
+          )
+        );
+      },
+      "do {let a = 0;} while(1)",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_for_iteration_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return for_stmt!(
+          pos!(col, line),
+          var!(
+            "Var",
+            pos!(col + 5, line),
+            ident!("i", pos!(col + 9, line)),
+            number!("0", pos!(col + 13, line))
+          ),
+          binary!(
+            "OpLessThan",
+            pos!(col + 16, line),
+            ident!("i", pos!(col + 16, line)),
+            number!("10", pos!(col + 20, line))
+          ),
+          unary!("OpIncrement", "Post", pos!(col + 24, line), ident!("i", pos!(col + 24, line))),
+          block!(pos!(col + 29, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for (var i = 0; i < 10; i++) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_lexical_declaration_for_iteration_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return for_stmt!(
+          pos!(col, line),
+          var!(
+            "Let",
+            pos!(col + 5, line),
+            ident!("i", pos!(col + 9, line)),
+            number!("0", pos!(col + 13, line))
+          ),
+          binary!(
+            "OpLessThan",
+            pos!(col + 16, line),
+            ident!("i", pos!(col + 16, line)),
+            number!("10", pos!(col + 20, line))
+          ),
+          unary!("OpIncrement", "Post", pos!(col + 24, line), ident!("i", pos!(col + 24, line))),
+          block!(pos!(col + 29, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for (let i = 0; i < 10; i++) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_expression_declaration_for_iteration_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return for_stmt!(
+          pos!(col, line),
+          binary!(
+            "OpAssign",
+            pos!(col + 5, line),
+            ident!("i", pos!(col + 5, line)),
+            number!("0", pos!(col + 9, line))
+          ),
+          binary!(
+            "OpLessThan",
+            pos!(col + 12, line),
+            ident!("i", pos!(col + 12, line)),
+            number!("10", pos!(col + 16, line))
+          ),
+          unary!("OpIncrement", "Post", pos!(col + 20, line), ident!("i", pos!(col + 20, line))),
+          block!(pos!(col + 25, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for (i = 0; i < 10; i++) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_for_iteration_empty_declaration_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return for_stmt!(
+          pos!(col, line),
+          empty!(),
+          binary!(
+            "OpLessThan",
+            pos!(col + 7, line),
+            ident!("i", pos!(col + 7, line)),
+            number!("10", pos!(col + 11, line))
+          ),
+          unary!("OpIncrement", "Post", pos!(col + 15, line), ident!("i", pos!(col + 15, line))),
+          block!(pos!(col + 20, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for (; i < 10; i++) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_empty_condition_for_iteration_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return for_stmt!(
+          pos!(col, line),
+          var!(
+            "Let",
+            pos!(col + 5, line),
+            ident!("i", pos!(col + 9, line)),
+            number!("0", pos!(col + 13, line))
+          ),
+          empty!(),
+          unary!("OpIncrement", "Post", pos!(col + 16, line), ident!("i", pos!(col + 16, line))),
+          block!(pos!(col + 21, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for (let i = 0;;i++) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_empty_computation_for_iteration_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return for_stmt!(
+          pos!(col, line),
+          var!(
+            "Let",
+            pos!(col + 5, line),
+            ident!("i", pos!(col + 9, line)),
+            number!("0", pos!(col + 13, line))
+          ),
+          binary!(
+            "OpLessThan",
+            pos!(col + 16, line),
+            ident!("i", pos!(col + 16, line)),
+            number!("10", pos!(col + 20, line))
+          ),
+          empty!(),
+          block!(pos!(col + 25, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for (let i = 0; i < 10;) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_all_empty_for_iteration_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return for_stmt!(
+          pos!(col, line),
+          empty!(),
+          empty!(),
+          empty!(),
+          block!(pos!(col + 9, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for (;;) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_lhs_expr_for_in_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return forin!(
+          pos!(col, line),
+          ident!("x", pos!(col + 5, line)),
+          ident!("obj", pos!(col + 10, line)),
+          block!(pos!(col + 15, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for (x in obj) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_lexical_lhs_for_in_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return forin!(
+          pos!(col, line),
+          var!("Let", pos!(col + 5, line), ident!("x", pos!(col + 9, line))),
+          ident!("obj", pos!(col + 14, line)),
+          block!(pos!(col + 19, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for (let x in obj) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_var_lhs_for_in_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return forin!(
+          pos!(col, line),
+          var!("Var", pos!(col + 5, line), ident!("x", pos!(col + 9, line))),
+          ident!("obj", pos!(col + 14, line)),
+          block!(pos!(col + 19, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for (var x in obj) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_lhs_expr_for_of_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return forof!(
+          pos!(col, line),
+          ident!("x", pos!(col + 5, line)),
+          ident!("obj", pos!(col + 10, line)),
+          block!(pos!(col + 15, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for (x of obj) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_lexical_lhs_for_of_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return forof!(
+          pos!(col, line),
+          var!("Let", pos!(col + 5, line), ident!("x", pos!(col + 9, line))),
+          ident!("obj", pos!(col + 14, line)),
+          block!(pos!(col + 19, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for (let x of obj) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_var_lhs_for_of_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return forof!(
+          pos!(col, line),
+          var!("Var", pos!(col + 5, line), ident!("x", pos!(col + 9, line))),
+          ident!("obj", pos!(col + 14, line)),
+          block!(pos!(col + 19, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for (var x of obj) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_lhs_expr_for_await_of_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return forof!(
+          @await,
+          pos!(col, line),
+          ident!("x", pos!(col + 11, line)),
+          ident!("obj", pos!(col + 16, line)),
+          block!(pos!(col + 21, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for await (x of obj) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_lexical_lhs_for_await_of_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return forof!(
+          @await,
+          pos!(col, line),
+          var!("Let", pos!(col + 11, line), ident!("x", pos!(col + 15, line))),
+          ident!("obj", pos!(col + 20, line)),
+          block!(pos!(col + 25, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for await (let x of obj) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_var_lhs_for_await_of_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return forof!(
+          @await,
+          pos!(col, line),
+          var!("Var", pos!(col + 11, line), ident!("x", pos!(col + 15, line))),
+          ident!("obj", pos!(col + 20, line)),
+          block!(pos!(col + 25, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "for await (var x of obj) {}",
+      1,
+    )
+  }
+
+  #[test]
+  fn labelled_fn_contains_for_stmt_early_error_test() {
+    let env = [(Some(""), ""), (None, ""), (None, "")];
+    syntax_error_test(
+      &env,
+      "for (var i = 0; i < 10; i++) X:function K() {}",
+      &[&s_pos!(29, 46, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
+    syntax_error_test(
+      &env,
+      "for (const k in v) X:function K() {}",
+      &[&s_pos!(19, 36, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
+    syntax_error_test(
+      &env,
+      "for (const k of v) X:function K() {}",
+      &[&s_pos!(19, 36, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
+  }
+
+  #[test]
+  fn lexical_duplicated_name_in_for_stmt_early_error_test() {
+    basic_env_expression_eary_error_test(33, 34, "for (let i = 0; i < 10; i++) var i = 0");
+    basic_env_expression_eary_error_test(21, 22, "for (let i in k) var i = 0");
+    basic_env_expression_eary_error_test(21, 22, "for (let i of k) var i = 0");
+    basic_env_expression_eary_error_test(9, 12, "for (let let in k) var i = 0");
+    basic_env_expression_eary_error_test(9, 12, "for (let let of k) var i = 0");
+    basic_env_expression_eary_error_test(13, 14, "for (let {i, i} in k) {}");
+    basic_env_expression_eary_error_test(13, 14, "for (let {i, i} of k) {}");
+  }
+
+  #[test]
+  fn invalid_pattern_in_for_in_of_stmt_early_error_test() {
+    basic_env_expression_eary_error_test(13, 16, "for (let {a: x()} in k) {}");
+    basic_env_expression_eary_error_test(13, 16, "for (let {a: x()} of k) {}");
+    basic_env_expression_eary_error_test(19, 22, "for await (let {a: x()} of k) {}");
+  }
+
+  #[test]
+  fn invalid_assignment_target_type_in_for_in_of_stmt_early_error_test() {
+    basic_env_expression_eary_error_test(5, 8, "for (a++ in k) {}");
+    basic_env_expression_eary_error_test(5, 8, "for (a++ of k) {}");
+    basic_env_expression_eary_error_test(11, 14, "for await (a++ of k) {}");
   }
 }

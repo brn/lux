@@ -181,6 +181,19 @@ pub trait NodeOps {
     };
   }
 
+  fn is_initializer(&self, expr: Expr) -> bool {
+    return match expr {
+      Expr::BinaryExpression(node) => {
+        node.op() == Token::OpAssign
+          && match node.lhs() {
+            Expr::Literal(n) => n.is_identifier(),
+            _ => false,
+          }
+      }
+      _ => false,
+    };
+  }
+
   fn is_call_expr(&self, expr: Expr) -> bool {
     return match expr {
       Expr::CallExpression(node) => node.receiver().contains(CallReceiverType::Expr),
@@ -290,6 +303,10 @@ pub trait NodeOps {
     return new_node!(Class, self.region(), pos, name, heritage, methods, fields).into();
   }
 
+  fn new_block(&mut self, stmt: Stmt, scope: Exotic<Scope>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(BlockStatement, self.region(), pos, stmt, scope).into();
+  }
+
   fn new_var(
     &mut self,
     decl_type: VariableDeclarationType,
@@ -302,5 +319,69 @@ pub trait NodeOps {
 
   fn new_vars(&mut self, vars: Vec<Stmt>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
     return new_node!(VariableDeclarations, self.region(), pos, vars).into();
+  }
+
+  fn new_labelled_stmt(&mut self, identifier: Expr, stmt: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(LabelledStatement, self.region(), pos, identifier, stmt).into();
+  }
+
+  fn new_if_stmt(&mut self, condition: Expr, then_stmt: Stmt, else_stmt: Option<Stmt>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(IfStatement, self.region(), pos, condition, then_stmt, else_stmt).into();
+  }
+
+  fn is_labelled_function(&self, labelled_stmt: Stmt) -> bool {
+    return match labelled_stmt {
+      Stmt::LabelledStatement(node) => match node.stmt() {
+        Stmt::Function(_) => true,
+        _ => false,
+      },
+      _ => false,
+    };
+  }
+
+  fn new_switch_stmt(&mut self, scope: Exotic<Scope>, condition: Expr, cases: Vec<Stmt>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(SwitchStatement, self.region(), pos, scope, condition, cases).into();
+  }
+
+  fn new_switch_case(&mut self, condition: Option<Expr>, stmt: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(SwitchCase, self.region(), pos, condition, stmt).into();
+  }
+
+  fn new_while_stmt(&mut self, condition: Expr, body: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(WhileStatement, self.region(), pos, condition, body).into();
+  }
+
+  fn new_do_while_stmt(&mut self, condition: Expr, body: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(DoWhileStatement, self.region(), pos, condition, body).into();
+  }
+
+  fn new_for_stmt(
+    &mut self,
+    declarations: Ast,
+    condition: Expr,
+    computation: Expr,
+    body: Stmt,
+    pos: Option<&RuntimeSourcePosition>,
+  ) -> Stmt {
+    return new_node!(ForStatement, self.region(), pos, declarations, condition, computation, body).into();
+  }
+
+  fn new_for_in_stmt(&mut self, lhs: Ast, rhs: Expr, body: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(ForInStatement, self.region(), pos, lhs, rhs, body).into();
+  }
+
+  fn new_for_of_stmt(&mut self, is_await: bool, lhs: Ast, rhs: Expr, body: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(ForOfStatement, self.region(), pos, is_await, lhs, rhs, body).into();
+  }
+
+  fn is_valid_for_of_in_lhs(&self, var: Ast) -> bool {
+    if let Ok(stmt) = Stmt::try_from(var) {
+      return match stmt {
+        Stmt::VariableDeclaration(node) => node.initializer().is_none(),
+        Stmt::VariableDeclarations(_) => false,
+        _ => true,
+      };
+    }
+    return true;
   }
 }

@@ -1081,6 +1081,8 @@ impl Scanner {
     }, 'n' => {
       "new": New,
       "null": Null,
+    }, 'o' => {
+      "of": Of,
     }, 'p' => {
       "package": Package,
       "private": Private,
@@ -1123,8 +1125,12 @@ impl Scanner {
     if pos != self.iter.pos() {
       self.iter.back();
     }
-    let next_pos = if self.iter.pos() >= 0 { self.iter.pos() as u32 } else { 0_u32 };
-    self.current_position_mut().set_end_col(next_pos);
+    let next_pos = if self.iter.pos() > pos {
+      (self.iter.pos() - pos - 1) as u64
+    } else {
+      0_u64
+    };
+    self.current_position_mut().add_end_col(next_pos);
     self.advance();
     if let Ok((value, kind)) = result {
       self.set_current_numeric_value(value);

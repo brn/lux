@@ -16,6 +16,7 @@ pub struct SkipTreeBuilder {
   skip_literal: Expr,
   skip_string: Expr,
   skip_binary_expr: Expr,
+  skip_initializer: Expr,
   skip_exprs: Expr,
   skip_expr: Expr,
   skip_template: Expr,
@@ -26,6 +27,9 @@ pub struct SkipTreeBuilder {
   skip_function: Ast,
   skip_vars: Stmt,
   skip_var: Stmt,
+  skip_var_without_init: Stmt,
+  skip_label: Stmt,
+  skip_labelled_fn: Stmt,
 }
 
 impl SkipTreeBuilder {
@@ -41,6 +45,7 @@ impl SkipTreeBuilder {
       skip_literal: SkipExpr::new(&mut region, SkipExprType::LITERAL).into(),
       skip_string: SkipExpr::new(&mut region, SkipExprType::STRING_LITERAL).into(),
       skip_binary_expr: SkipExpr::new(&mut region, SkipExprType::BINARY_EXPR).into(),
+      skip_initializer: SkipExpr::new(&mut region, SkipExprType::BINARY_EXPR | SkipExprType::INITIALIZER).into(),
       skip_expr: SkipExpr::new(&mut region, SkipExprType::EXPR).into(),
       skip_template: SkipExpr::new(&mut region, SkipExprType::TEMPLATE).into(),
       skip_import_meta: SkipExpr::new(&mut region, SkipExprType::IMPORT_META).into(),
@@ -51,6 +56,9 @@ impl SkipTreeBuilder {
       skip_function: SkipAny::new(&mut region, SkipAnyType::FUNCTION).into(),
       skip_vars: SkipStmt::new(&mut region, SkipStmtType::VARS).into(),
       skip_var: SkipStmt::new(&mut region, SkipStmtType::VAR).into(),
+      skip_var_without_init: SkipStmt::new(&mut region, SkipStmtType::VAR_WITHOUT_INITIALIZER).into(),
+      skip_label: SkipStmt::new(&mut region, SkipStmtType::LABEL).into(),
+      skip_labelled_fn: SkipStmt::new(&mut region, SkipStmtType::LABELLED_FUNCTION).into(),
     };
   }
 }
@@ -79,6 +87,14 @@ impl NodeOps for SkipTreeBuilder {
   }
 
   fn new_binary_expr(&mut self, op: Token, lhs: Expr, rhs: Expr, pos: Option<&RuntimeSourcePosition>) -> Expr {
+    if op == Token::OpAssign
+      && match lhs {
+        Expr::SkipExpr(n) => n.is_identifier(),
+        _ => false,
+      }
+    {
+      return self.skip_initializer;
+    }
     return self.skip_binary_expr;
   }
 
@@ -197,6 +213,13 @@ impl NodeOps for SkipTreeBuilder {
     };
   }
 
+  fn is_initializer(&self, expr: Expr) -> bool {
+    return match expr {
+      Expr::SkipExpr(node) => node.is_initializer(),
+      _ => false,
+    };
+  }
+
   fn is_structural_literal(&self, expr: Expr) -> bool {
     return match expr {
       Expr::StructuralLiteral(_) => true,
@@ -305,6 +328,10 @@ impl NodeOps for SkipTreeBuilder {
     return self.skip_class;
   }
 
+  fn new_block(&mut self, stmt: Stmt, scope: Exotic<Scope>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_stmt;
+  }
+
   fn new_var(
     &mut self,
     decl_type: VariableDeclarationType,
@@ -312,10 +339,79 @@ impl NodeOps for SkipTreeBuilder {
     initialzier: Option<Expr>,
     pos: Option<&RuntimeSourcePosition>,
   ) -> Stmt {
-    return self.skip_var;
+    if initialzier.is_some() {
+      return self.skip_var;
+    }
+    return self.skip_var_without_init;
   }
 
   fn new_vars(&mut self, vars: Vec<Stmt>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
     return self.skip_vars;
+  }
+
+  fn new_labelled_stmt(&mut self, identifier: Expr, stmt: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    if match stmt {
+      Stmt::SkipAny(node) => node.is_function(),
+      _ => false,
+    } {
+      return self.skip_labelled_fn;
+    }
+    return self.skip_label;
+  }
+
+  fn new_if_stmt(&mut self, condition: Expr, then_stmt: Stmt, else_stmt: Option<Stmt>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_stmt;
+  }
+
+  fn is_labelled_function(&self, labelled_stmt: Stmt) -> bool {
+    return match labelled_stmt {
+      Stmt::SkipStmt(node) => node.is_labelled_fn(),
+      _ => false,
+    };
+  }
+
+  fn new_switch_stmt(&mut self, scope: Exotic<Scope>, condition: Expr, cases: Vec<Stmt>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_stmt;
+  }
+
+  fn new_switch_case(&mut self, condition: Option<Expr>, stmt: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_stmt;
+  }
+
+  fn new_while_stmt(&mut self, condition: Expr, body: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_stmt;
+  }
+
+  fn new_do_while_stmt(&mut self, condition: Expr, body: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_stmt;
+  }
+
+  fn new_for_stmt(
+    &mut self,
+    declarations: Ast,
+    condition: Expr,
+    computation: Expr,
+    body: Stmt,
+    pos: Option<&RuntimeSourcePosition>,
+  ) -> Stmt {
+    return self.skip_stmt;
+  }
+
+  fn new_for_in_stmt(&mut self, lhs: Ast, rhs: Expr, body: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_stmt;
+  }
+
+  fn new_for_of_stmt(&mut self, is_await: bool, lhs: Ast, rhs: Expr, body: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_stmt;
+  }
+
+  fn is_valid_for_of_in_lhs(&self, var: Ast) -> bool {
+    if let Ok(stmt) = Stmt::try_from(var) {
+      return match stmt {
+        Stmt::SkipStmt(node) => node.is_var_without_init() || !node.is_vars(),
+        _ => true,
+      };
+    }
+    return true;
   }
 }
