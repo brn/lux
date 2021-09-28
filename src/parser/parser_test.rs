@@ -5012,8 +5012,8 @@ else
 
   #[test]
   fn break_statement_outside_iteration_or_switch_early_error() {
-    basic_env_expression_eary_error_test(0, 1, "break");
-    basic_env_expression_eary_error_test(26, 27, "while (1) {function m () {break;}}");
+    basic_env_expression_eary_error_test(0, 5, "break");
+    basic_env_expression_eary_error_test(26, 31, "while (1) {function m () {break;}}");
   }
 
   #[test]
@@ -5220,5 +5220,11 @@ else
   fn continue_statement_undefined_label_early_error() {
     basic_env_expression_eary_error_test(23, 24, "X: while (1) {continue Y;}");
     basic_env_expression_eary_error_test(51, 52, "X: while (1) {function m() {Y: while (1) {continue X;}}}");
+  }
+
+  #[test]
+  fn continue_statement_outside_iteration_or_switch_early_error() {
+    basic_env_expression_eary_error_test(0, 8, "continue");
+    basic_env_expression_eary_error_test(26, 34, "while (1) {function m () {continue;}}");
   }
 }
