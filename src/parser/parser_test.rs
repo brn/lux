@@ -5011,6 +5011,12 @@ else
   }
 
   #[test]
+  fn break_statement_outside_iteration_or_switch_early_error() {
+    basic_env_expression_eary_error_test(0, 1, "break");
+    basic_env_expression_eary_error_test(26, 27, "while (1) {function m () {break;}}");
+  }
+
+  #[test]
   fn parse_continue_statement_in_while() {
     stmt_test_with_scope(
       |(col, line, is_strict, _)| {
