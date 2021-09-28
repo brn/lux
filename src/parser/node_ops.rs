@@ -2,6 +2,7 @@ use super::ast::*;
 use super::scope::*;
 use super::source_position::*;
 use super::token::*;
+use crate::structs::FixedU16CodePointArray;
 use crate::utility::*;
 
 macro_rules! new_node {
@@ -383,5 +384,13 @@ pub trait NodeOps {
       };
     }
     return true;
+  }
+
+  fn new_break_stmt(&mut self, identifier: Option<FixedU16CodePointArray>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(BreakStatement, self.region(), pos, identifier).into();
+  }
+
+  fn new_continue_stmt(&mut self, identifier: Option<FixedU16CodePointArray>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(ContinueStatement, self.region(), pos, identifier).into();
   }
 }

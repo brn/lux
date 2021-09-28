@@ -215,6 +215,15 @@ impl Scope {
     return None;
   }
 
+  pub fn is_label_exists(&self, label: &Vec<u16>) -> bool {
+    if self.is_lexical() {
+      let mut scope = self.get_nearest_non_lexical_scope();
+      return scope.is_label_exists(label);
+    }
+
+    return self.label_map.contains_key(label);
+  }
+
   pub fn pop_label(&mut self) {
     if self.is_lexical() {
       let mut scope = self.get_nearest_non_lexical_scope();

@@ -3,6 +3,7 @@ use super::node_ops::*;
 use super::scope::Scope;
 use super::source_position::RuntimeSourcePosition;
 use super::token::Token;
+use crate::structs::FixedU16CodePointArray;
 use crate::utility::*;
 
 pub struct SkipTreeBuilder {
@@ -413,5 +414,13 @@ impl NodeOps for SkipTreeBuilder {
       };
     }
     return true;
+  }
+
+  fn new_break_stmt(&mut self, identifier: Option<FixedU16CodePointArray>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_stmt;
+  }
+
+  fn new_continue_stmt(&mut self, identifier: Option<FixedU16CodePointArray>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_stmt;
   }
 }

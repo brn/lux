@@ -435,6 +435,26 @@ mod parser_test {
     }};
   }
 
+  macro_rules! break_stmt {
+    ($pos:expr, $ident:expr) => {{
+      let attr = format!("identifier = '{}'", $ident);
+      ast!("BreakStatement", &attr, $pos)
+    }};
+    ($pos:expr) => {{
+      ast!("BreakStatement", "", $pos)
+    }};
+  }
+
+  macro_rules! continue_stmt {
+    ($pos:expr, $ident:expr) => {{
+      let attr = format!("identifier = '{}'", $ident);
+      ast!("ContinueStatement", &attr, $pos)
+    }};
+    ($pos:expr) => {{
+      ast!("ContinueStatement", "", $pos)
+    }};
+  }
+
   type Expectations<'a> = [&'a str; 3];
 
   fn parse_test<'a>(env_list: &[(Option<&'a str>, &'a str); 3], code: &str, expectations: &'a Expectations, parser_option: ParserOption) {
@@ -454,6 +474,7 @@ mod parser_test {
             Err(em) => {
               println!("{}", em);
               parser.print_stack_trace();
+              panic!("Parser test failed");
             }
             _ => {}
           }
@@ -4761,5 +4782,437 @@ else
     basic_env_expression_eary_error_test(5, 8, "for (a++ in k) {}");
     basic_env_expression_eary_error_test(5, 8, "for (a++ of k) {}");
     basic_env_expression_eary_error_test(11, 14, "for await (a++ of k) {}");
+  }
+
+  #[test]
+  fn parse_break_statement_in_while() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return while_stmt!(
+          pos!(col, line),
+          number!("1", pos!(col + 7, line)),
+          block!(
+            pos!(col + 10, line),
+            scope!(@lexical is_strict, 0, true),
+            break_stmt!(pos!(col + 11, line))
+          )
+        );
+      },
+      "while (1) {break;}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_break_statement_in_do_while() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return do_while!(
+          pos!(col, line),
+          number!("1", pos!(col + 19, line)),
+          block!(
+            pos!(col + 3, line),
+            scope!(@lexical is_strict, 0, true),
+            break_stmt!(pos!(col + 4, line))
+          )
+        );
+      },
+      "do {break;} while (1)",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_break_statement_in_for() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return for_stmt!(
+          pos!(col, line),
+          var!(
+            "Let",
+            pos!(col + 5, line),
+            ident!("i", pos!(col + 9, line)),
+            number!("0", pos!(col + 13, line))
+          ),
+          binary!(
+            "OpLessThan",
+            pos!(col + 16, line),
+            ident!("i", pos!(col + 16, line)),
+            number!("10", pos!(col + 20, line))
+          ),
+          unary!("OpIncrement", "Post", pos!(col + 24, line), ident!("i", pos!(col + 24, line))),
+          block!(
+            pos!(col + 29, line),
+            scope!(@lexical is_strict, 0, true),
+            break_stmt!(pos!(col + 30, line))
+          )
+        );
+      },
+      "for (let i = 0; i < 10; i++) {break;}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_break_statement_in_switch() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return switch!(
+          pos!(col, line),
+          scope!(@lexical is_strict, 0, true),
+          ident!("a", pos!(col + 8, line)),
+          case!(
+            pos!(col + 12, line),
+            number!("1", pos!(col + 17, line)),
+            break_stmt!(pos!(col + 20, line))
+          ),
+        );
+      },
+      "switch (a) {case 1: break;}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_nested_break_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return while_stmt!(
+          pos!(col, line),
+          number!("1", pos!(col + 7, line)),
+          block!(
+            pos!(col + 10, line),
+            scope!(@lexical is_strict, 1, true),
+            stmt!(
+              pos!(col + 11, line),
+              unary!(
+                "OpNot",
+                "Pre",
+                pos!(col + 11, line),
+                fnexpr!(
+                  pos!(col + 12, line),
+                  "Function",
+                  0,
+                  0,
+                  scope!(@opaque is_strict, 1, true),
+                  ident!("m", pos!(col + 21, line)),
+                  exprs!(pos!(col + 22, line)),
+                  while_stmt!(
+                    pos!(col + 26, line),
+                    number!("1", pos!(col + 33, line)),
+                    block!(
+                      pos!(col + 36, line),
+                      scope!(@lexical is_strict, 0, true),
+                      break_stmt!(pos!(col + 37, line))
+                    )
+                  )
+                )
+              )
+            )
+          )
+        );
+      },
+      "while (1) {!function m() {while (1) {break;}}}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_break_statement_in_while_with_label() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return label!(
+          pos!(col, line),
+          ident!("X", pos!(col, line)),
+          while_stmt!(
+            pos!(col + 3, line),
+            number!("1", pos!(col + 10, line)),
+            block!(
+              pos!(col + 13, line),
+              scope!(@lexical is_strict, 0, true),
+              break_stmt!(pos!(col + 14, line), "X")
+            )
+          )
+        );
+      },
+      "X: while (1) {break X;}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_break_statement_in_while_with_nested_label() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return label!(
+          pos!(col, line),
+          ident!("X", pos!(col, line)),
+          while_stmt!(
+            pos!(col + 3, line),
+            number!("1", pos!(col + 10, line)),
+            block!(
+              pos!(col + 13, line),
+              scope!(@lexical is_strict, 1, true),
+              stmts!(
+                pos!(col + 14, line),
+                stmt!(
+                  pos!(col + 14, line),
+                  unary!(
+                    "OpNot",
+                    "Pre",
+                    pos!(col + 14, line),
+                    fnexpr!(
+                      pos!(col + 15, line),
+                      "Function",
+                      0,
+                      0,
+                      scope!(@opaque is_strict, 1, true),
+                      ident!("m", pos!(col + 24, line)),
+                      exprs!(pos!(col + 25, line)),
+                      label!(
+                        pos!(col + 29, line),
+                        ident!("X", pos!(col + 29, line)),
+                        label!(
+                          pos!(col + 32, line),
+                          ident!("Y", pos!(col + 32, line)),
+                          while_stmt!(
+                            pos!(col + 35, line),
+                            number!("1", pos!(col + 42, line)),
+                            block!(
+                              pos!(col + 45, line),
+                              scope!(@lexical is_strict, 0, true),
+                              stmts!(
+                                pos!(col + 46, line),
+                                break_stmt!(pos!(col + 46, line), "X"),
+                                break_stmt!(pos!(col + 55, line), "Y")
+                              )
+                            )
+                          )
+                        ),
+                      ),
+                    )
+                  )
+                ),
+                break_stmt!(pos!(col + 66, line), "X"),
+              )
+            )
+          )
+        );
+      },
+      "X: while (1) {!function m() {X: Y: while (1) {break X; break Y;}};break X;}",
+      1,
+    )
+  }
+
+  #[test]
+  fn break_statement_undefined_label_early_error() {
+    basic_env_expression_eary_error_test(20, 21, "X: while (1) {break Y;}");
+    basic_env_expression_eary_error_test(48, 49, "X: while (1) {function m() {Y: while (1) {break X;}}}");
+  }
+
+  #[test]
+  fn parse_continue_statement_in_while() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return while_stmt!(
+          pos!(col, line),
+          number!("1", pos!(col + 7, line)),
+          block!(
+            pos!(col + 10, line),
+            scope!(@lexical is_strict, 0, true),
+            continue_stmt!(pos!(col + 11, line))
+          )
+        );
+      },
+      "while (1) {continue;}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_continue_statement_in_do_while() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return do_while!(
+          pos!(col, line),
+          number!("1", pos!(col + 22, line)),
+          block!(
+            pos!(col + 3, line),
+            scope!(@lexical is_strict, 0, true),
+            continue_stmt!(pos!(col + 4, line))
+          )
+        );
+      },
+      "do {continue;} while (1)",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_continue_statement_in_for() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return for_stmt!(
+          pos!(col, line),
+          var!(
+            "Let",
+            pos!(col + 5, line),
+            ident!("i", pos!(col + 9, line)),
+            number!("0", pos!(col + 13, line))
+          ),
+          binary!(
+            "OpLessThan",
+            pos!(col + 16, line),
+            ident!("i", pos!(col + 16, line)),
+            number!("10", pos!(col + 20, line))
+          ),
+          unary!("OpIncrement", "Post", pos!(col + 24, line), ident!("i", pos!(col + 24, line))),
+          block!(
+            pos!(col + 29, line),
+            scope!(@lexical is_strict, 0, true),
+            continue_stmt!(pos!(col + 30, line))
+          )
+        );
+      },
+      "for (let i = 0; i < 10; i++) {continue;}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_nested_continue_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return while_stmt!(
+          pos!(col, line),
+          number!("1", pos!(col + 7, line)),
+          block!(
+            pos!(col + 10, line),
+            scope!(@lexical is_strict, 1, true),
+            stmt!(
+              pos!(col + 11, line),
+              unary!(
+                "OpNot",
+                "Pre",
+                pos!(col + 11, line),
+                fnexpr!(
+                  pos!(col + 12, line),
+                  "Function",
+                  0,
+                  0,
+                  scope!(@opaque is_strict, 1, true),
+                  ident!("m", pos!(col + 21, line)),
+                  exprs!(pos!(col + 22, line)),
+                  while_stmt!(
+                    pos!(col + 26, line),
+                    number!("1", pos!(col + 33, line)),
+                    block!(
+                      pos!(col + 36, line),
+                      scope!(@lexical is_strict, 0, true),
+                      continue_stmt!(pos!(col + 37, line))
+                    )
+                  )
+                )
+              )
+            )
+          )
+        );
+      },
+      "while (1) {!function m() {while (1) {continue;}}}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_continue_statement_in_while_with_label() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return label!(
+          pos!(col, line),
+          ident!("X", pos!(col, line)),
+          while_stmt!(
+            pos!(col + 3, line),
+            number!("1", pos!(col + 10, line)),
+            block!(
+              pos!(col + 13, line),
+              scope!(@lexical is_strict, 0, true),
+              continue_stmt!(pos!(col + 14, line), "X")
+            )
+          )
+        );
+      },
+      "X: while (1) {continue X;}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_continue_statement_in_while_with_nested_label() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return label!(
+          pos!(col, line),
+          ident!("X", pos!(col, line)),
+          while_stmt!(
+            pos!(col + 3, line),
+            number!("1", pos!(col + 10, line)),
+            block!(
+              pos!(col + 13, line),
+              scope!(@lexical is_strict, 1, true),
+              stmts!(
+                pos!(col + 14, line),
+                stmt!(
+                  pos!(col + 14, line),
+                  unary!(
+                    "OpNot",
+                    "Pre",
+                    pos!(col + 14, line),
+                    fnexpr!(
+                      pos!(col + 15, line),
+                      "Function",
+                      0,
+                      0,
+                      scope!(@opaque is_strict, 1, true),
+                      ident!("m", pos!(col + 24, line)),
+                      exprs!(pos!(col + 25, line)),
+                      label!(
+                        pos!(col + 29, line),
+                        ident!("X", pos!(col + 29, line)),
+                        label!(
+                          pos!(col + 32, line),
+                          ident!("Y", pos!(col + 32, line)),
+                          while_stmt!(
+                            pos!(col + 35, line),
+                            number!("1", pos!(col + 42, line)),
+                            block!(
+                              pos!(col + 45, line),
+                              scope!(@lexical is_strict, 0, true),
+                              stmts!(
+                                pos!(col + 46, line),
+                                continue_stmt!(pos!(col + 46, line), "X"),
+                                continue_stmt!(pos!(col + 58, line), "Y")
+                              )
+                            )
+                          )
+                        ),
+                      ),
+                    )
+                  )
+                ),
+                continue_stmt!(pos!(col + 72, line), "X"),
+              )
+            )
+          )
+        );
+      },
+      "X: while (1) {!function m() {X: Y: while (1) {continue X; continue Y;}};continue X;}",
+      1,
+    )
+  }
+
+  #[test]
+  fn continue_statement_undefined_label_early_error() {
+    basic_env_expression_eary_error_test(23, 24, "X: while (1) {continue Y;}");
+    basic_env_expression_eary_error_test(51, 52, "X: while (1) {function m() {Y: while (1) {continue X;}}}");
   }
 }

@@ -2272,32 +2272,60 @@ impl SwitchCase {
 }
 
 pub struct BreakStatement {
-  label_name: FixedU16CodePointArray,
+  label_name: Option<FixedU16CodePointArray>,
 }
 impl_stmt!(
   BreakStatement,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
-    let str = format!("{}[BreakStatement {}]\n", indent, source_position.to_string());
+    let str = format!(
+      "{}[BreakStatement{} {}]\n",
+      indent,
+      if let Some(val) = self.label_name {
+        format!(" identifier = '{}'", val.to_utf8())
+      } else {
+        "".to_owned()
+      },
+      source_position.to_string()
+    );
     result.push_str(&str);
   },
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
   }
 );
+impl BreakStatement {
+  pub fn new(region: &mut Region, label_name: Option<FixedU16CodePointArray>) -> Node<Self> {
+    return Node::<Self>::new(region, BreakStatement { label_name });
+  }
+}
 
 pub struct ContinueStatement {
-  label_name: FixedU16CodePointArray,
+  label_name: Option<FixedU16CodePointArray>,
 }
 impl_stmt!(
   ContinueStatement,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
-    let str = format!("{}[ContinueStatement {}]\n", indent, source_position.to_string());
+    let str = format!(
+      "{}[ContinueStatement{} {}]\n",
+      indent,
+      if let Some(val) = self.label_name {
+        format!(" identifier = '{}'", val.to_utf8())
+      } else {
+        "".to_owned()
+      },
+      source_position.to_string()
+    );
     result.push_str(&str);
   },
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     self.to_string(indent, result, source_position);
   }
 );
+impl ContinueStatement {
+  pub fn new(region: &mut Region, label_name: Option<FixedU16CodePointArray>) -> Node<Self> {
+    return Node::<Self>::new(region, ContinueStatement { label_name });
+  }
+}
 
 #[derive(Property)]
 pub struct LabelledStatement {

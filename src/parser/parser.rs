@@ -287,6 +287,7 @@ pub struct Parser {
   root_scope: Exotic<Scope>,
   current_scope: Exotic<Scope>,
   expression_context: ExprCtx,
+  statement_block: StatementBlock,
   ast_builder: Exotic<AstBuilder>,
   skip_tree_builder: Exotic<SkipTreeBuilder>,
   err: SyntaxErrorFactory,
@@ -389,6 +390,7 @@ impl Parser {
       skip_tree_builder: region.alloc(SkipTreeBuilder::new(region.clone())),
       err: SyntaxErrorFactory::new(region.clone()),
       parser_option,
+      statement_block: StatementBlock::new(),
     };
     parser.current_scope = parser.root_scope;
     return parser;
@@ -583,6 +585,17 @@ impl Parser {
     };
     let ctx = ExprCtx::Expr(self.expression_context.create_child_context());
     return std::mem::replace(&mut self.expression_context, ctx);
+  }
+
+  #[inline(always)]
+  fn new_statement_block(&mut self) -> StatementBlock {
+    let next_block = self.statement_block.next_block();
+    return std::mem::replace(&mut self.statement_block, next_block);
+  }
+
+  #[inline(always)]
+  fn set_statement_block(&mut self, stmt_block: StatementBlock) -> StatementBlock {
+    return std::mem::replace(&mut self.statement_block, stmt_block);
   }
 
   #[inline(always)]
@@ -2105,6 +2118,9 @@ impl Parser {
       Break => {
         return next_parse!(self, self.parse_break_statement(builder));
       }
+      Continue => {
+        return next_parse!(self, self.parse_continue_statement(builder));
+      }
       Return => {
         return next_parse!(self, self.parse_return_statement(builder));
       }
@@ -2126,7 +2142,7 @@ impl Parser {
         }
         return next_parse!(self, self.parse_expression_statement(builder));
       }
-    }
+    };
   }
 
   fn parse_declaration<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
@@ -2493,6 +2509,9 @@ impl Parser {
   }
 
   fn parse_for_statement<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
+    let prev_block = self.new_statement_block();
+    self.statement_block.set_is_breakable(true);
+    self.statement_block.set_is_continuable(true);
     let start_pos = self.source_position().clone();
     let scope = self.declare_child_scope(ScopeFlag::LEXICAL);
     expect!(self, self.cur(), Token::For);
@@ -2656,6 +2675,7 @@ impl Parser {
     };
 
     self.escape_scope(scope);
+    self.set_statement_block(prev_block);
     return result;
   }
 
@@ -2668,11 +2688,53 @@ impl Parser {
   }
 
   fn parse_continue_statement<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
-    unreachable!();
+    if !self.statement_block.is_continuable() {
+      return parse_error!(self.region, "Continue statement not allowed here", self.source_position());
+    }
+    let start_pos = self.source_position().clone();
+    expect!(self, self.cur(), Token::Continue);
+    let identifier = if !self.has_line_break_before() && self.cur().one_of(&[Token::Identifier, Token::Yield, Token::Await]) {
+      let val = Some(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
+      if !self.current_scope.is_label_exists(self.value()) {
+        return parse_error!(self.region, "Label not exists", self.source_position());
+      }
+      self.advance()?;
+      val
+    } else {
+      None
+    };
+    return Ok(build!(
+      @pos,
+      builder,
+      continue_stmt,
+      start_pos,
+      identifier
+    ));
   }
 
   fn parse_break_statement<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
-    unreachable!();
+    if !self.statement_block.is_breakable() {
+      return parse_error!(self.region, "Break statement not allowed here", self.source_position());
+    }
+    let start_pos = self.source_position().clone();
+    expect!(self, self.cur(), Token::Break);
+    let identifier = if !self.has_line_break_before() && self.cur().one_of(&[Token::Identifier, Token::Yield, Token::Await]) {
+      let val = Some(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
+      if !self.current_scope.is_label_exists(self.value()) {
+        return parse_error!(self.region, "Label not exists", self.source_position());
+      }
+      self.advance()?;
+      val
+    } else {
+      None
+    };
+    return Ok(build!(
+      @pos,
+      builder,
+      break_stmt,
+      start_pos,
+      identifier
+    ));
   }
 
   fn parse_return_statement<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
@@ -2684,6 +2746,9 @@ impl Parser {
   }
 
   fn parse_while_statement<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
+    let prev_block = self.new_statement_block();
+    self.statement_block.set_is_breakable(true);
+    self.statement_block.set_is_continuable(true);
     let start_pos = self.source_position().clone();
     expect!(self, self.cur(), Token::While);
     expect!(self, self.cur(), Token::LeftParen);
@@ -2699,6 +2764,7 @@ impl Parser {
         &pos_range!(@start stmt_start_pos, stmt_end_pos)
       );
     }
+    self.set_statement_block(prev_block);
     return Ok(build!(
       @pos,
       builder,
@@ -2710,6 +2776,9 @@ impl Parser {
   }
 
   fn parse_do_while_statement<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
+    let prev_block = self.new_statement_block();
+    self.statement_block.set_is_breakable(true);
+    self.statement_block.set_is_continuable(true);
     let start_pos = self.source_position().clone();
     expect!(self, self.cur(), Token::Do);
     let stmt_start_pos = self.source_position().clone();
@@ -2728,6 +2797,7 @@ impl Parser {
     let condition = next_parse!(self, self.parse_expression_with_value_validation(builder, false))?;
     expect!(self, self.cur(), Token::RightParen);
 
+    self.set_statement_block(prev_block);
     return Ok(build!(
       @pos,
       builder,
@@ -2739,6 +2809,8 @@ impl Parser {
   }
 
   fn parse_switch_statement<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
+    let prev_block = self.new_statement_block();
+    self.statement_block.set_is_breakable(true);
     let swtich_start_pos = self.source_position().clone();
     expect!(self, self.cur(), Token::Switch);
     expect!(self, self.cur(), Token::LeftParen);
@@ -2793,6 +2865,7 @@ impl Parser {
     }
 
     expect!(self, self.cur(), Token::RightBrace);
+    self.set_statement_block(prev_block);
     return Ok(build!(
       @pos,
       builder,
@@ -2903,6 +2976,10 @@ impl Parser {
     mut attr: FunctionAttribute,
     is_name_ommitable: bool,
   ) -> ParseResult<Ast> {
+    let prev_block = self.new_statement_block();
+    self.statement_block.set_is_breakable(false);
+    self.statement_block.set_is_continuable(false);
+    self.statement_block.set_is_returnable(true);
     let start = self.source_position().clone();
     expect!(self, self.cur(), Token::Function);
     let mut identifier: Option<Expr> = None;
@@ -2995,7 +3072,7 @@ impl Parser {
     self.escape_scope(scope);
     expect!(self, self.cur(), Token::RightBrace);
     self.escape_scope(scope);
-
+    self.set_statement_block(prev_block);
     return Ok(build!(
       @pos,
       builder,
@@ -3149,7 +3226,11 @@ impl Parser {
     });
     let mut function_body_start = 0_u32;
     let mut function_body_end = 0_u32;
+    let prev_block = this.new_statement_block();
+    this.statement_block.set_is_breakable(false);
+    this.statement_block.set_is_continuable(false);
     let body = if has_brace {
+      this.statement_block.set_is_returnable(true);
       this.advance()?;
       next_parse!(this, this.parse_directive_prologue(scope))?;
       if this.should_use_tree_builder() {
@@ -3169,6 +3250,7 @@ impl Parser {
     if has_brace {
       this.advance()?;
     }
+    this.set_statement_block(prev_block);
     return Ok(
       Expr::try_from(build!(
         @runtime_pos,
@@ -3253,6 +3335,11 @@ impl Parser {
     expect!(self, self.cur(), Token::LeftParen);
     let param_start_pos = self.source_position().clone();
     let ec = self.new_arrow_context();
+    let prev_block = self.new_statement_block();
+    self.statement_block.set_is_breakable(false);
+    self.statement_block.set_is_continuable(false);
+    self.statement_block.set_is_returnable(true);
+
     if attr.contains(FunctionAttribute::GETTER) {
       if self.cur() != Token::RightParen {
         return parse_error!(self.region, "Getter must not have any formal parameters", self.source_position());
@@ -3338,6 +3425,7 @@ impl Parser {
     };
     expect!(this, this.cur(), Token::RightBrace);
     this.escape_scope(scope);
+    this.set_statement_block(prev_block);
     let function = build!(
       @pos,
       builder,
