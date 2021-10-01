@@ -393,4 +393,34 @@ pub trait NodeOps {
   fn new_continue_stmt(&mut self, identifier: Option<FixedU16CodePointArray>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
     return new_node!(ContinueStatement, self.region(), pos, identifier).into();
   }
+
+  fn new_return_stmt(&mut self, expr: Option<Expr>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(ReturnStatement, self.region(), pos, expr).into();
+  }
+
+  fn new_throw_stmt(&mut self, expr: Expr, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(ThrowStatement, self.region(), pos, expr).into();
+  }
+
+  fn new_catch_block(&mut self, param: Option<Expr>, block: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(CatchBlock, self.region(), pos, param, block).into();
+  }
+
+  fn new_try_catch_stmt(
+    &mut self,
+    try_block: Stmt,
+    catch_block: Option<Stmt>,
+    finally_block: Option<Stmt>,
+    pos: Option<&RuntimeSourcePosition>,
+  ) -> Stmt {
+    return new_node!(TryCatchStatement, self.region(), pos, try_block, catch_block, finally_block).into();
+  }
+
+  fn new_with_stmt(&mut self, expr: Expr, body: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(WithStatement, self.region(), pos, expr, body).into();
+  }
+
+  fn new_debugger_stmt(&mut self, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return new_node!(DebuggerStatement, self.region(), pos).into();
+  }
 }

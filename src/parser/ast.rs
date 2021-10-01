@@ -325,8 +325,13 @@ _ast_enum! {
     SwitchCase(Node<SwitchCase>),
     BreakStatement(Node<BreakStatement>),
     ContinueStatement(Node<ContinueStatement>),
+    ReturnStatement(Node<ReturnStatement>),
     LabelledStatement(Node<LabelledStatement>),
+    ThrowStatement(Node<ThrowStatement>),
+    TryCatchStatement(Node<TryCatchStatement>),
+    CatchBlock(Node<CatchBlock>),
     WithStatement(Node<WithStatement>),
+    DebuggerStatement(Node<DebuggerStatement>),
     VariableDeclaration(Node<VariableDeclaration>),
     VariableDeclarations(Node<VariableDeclarations>),
     ClassField(Node<ClassField>),
@@ -2327,6 +2332,29 @@ impl ContinueStatement {
   }
 }
 
+pub struct ReturnStatement {
+  expr: Option<Expr>,
+}
+impl_stmt!(
+  ReturnStatement,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    let str = format!("{}[ReturnStatement {}]\n", indent, source_position.to_string());
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    self.to_string(indent, result, source_position);
+    if let Some(expr) = self.expr {
+      let mut ni = format!("  {}", indent);
+      expr.to_string_tree_internal(&mut ni, result);
+    }
+  }
+);
+impl ReturnStatement {
+  pub fn new(region: &mut Region, expr: Option<Expr>) -> Node<Self> {
+    return Node::<Self>::new(region, ReturnStatement { expr });
+  }
+}
+
 #[derive(Property)]
 pub struct LabelledStatement {
   #[property(get(type = "copy"), set(disable))]
@@ -2354,14 +2382,119 @@ impl LabelledStatement {
   }
 }
 
-pub struct WithStatement {
+#[derive(Property)]
+pub struct ThrowStatement {
+  #[property(get(type = "copy"), set(disable))]
   expr: Expr,
+}
+impl_stmt!(
+  ThrowStatement,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    let str = format!("{}[ThrowStatement {}]\n", indent, source_position.to_string());
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    self.to_string(indent, result, source_position);
+    let mut ni = format!("  {}", indent);
+    self.expr.to_string_tree_internal(&mut ni, result);
+  }
+);
+
+impl ThrowStatement {
+  pub fn new(region: &mut Region, expr: Expr) -> Node<Self> {
+    return Node::<Self>::new(region, ThrowStatement { expr });
+  }
+}
+
+#[derive(Property)]
+pub struct CatchBlock {
+  #[property(get(type = "copy"), set(disable))]
+  block: Stmt,
+
+  #[property(get(type = "copy"), set(disable))]
+  parameter: Option<Expr>,
+}
+impl_stmt!(
+  CatchBlock,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    let str = format!("{}[CatchBlock {}]\n", indent, source_position.to_string());
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    self.to_string(indent, result, source_position);
+    let mut ni = format!("  {}", indent);
+    if let Some(param) = self.parameter {
+      param.to_string_tree_internal(&mut ni, result);
+    }
+    self.block.to_string_tree_internal(&mut ni, result);
+  }
+);
+
+impl CatchBlock {
+  pub fn new(region: &mut Region, parameter: Option<Expr>, block: Stmt) -> Node<Self> {
+    debug_assert!(Node::<BlockStatement>::is(block));
+    return Node::<Self>::new(region, CatchBlock { block, parameter });
+  }
+}
+
+#[derive(Property)]
+pub struct TryCatchStatement {
+  #[property(get(type = "copy"), set(disable))]
+  try_block: Stmt,
+
+  #[property(get(type = "copy"), set(disable))]
+  catch_block: Option<Stmt>,
+
+  #[property(get(type = "copy"), set(disable))]
+  finally_block: Option<Stmt>,
+}
+impl_stmt!(
+  TryCatchStatement,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    let str = format!("{}[TryCatchStatement {}]\n", indent, source_position.to_string());
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    self.to_string(indent, result, source_position);
+    let mut ni = format!("  {}", indent);
+    self.try_block.to_string_tree_internal(&mut ni, result);
+    if let Some(catch_block) = self.catch_block {
+      catch_block.to_string_tree_internal(&mut ni, result);
+    }
+    if let Some(finally) = self.finally_block {
+      finally.to_string_tree_internal(&mut ni, result);
+    }
+  }
+);
+
+impl TryCatchStatement {
+  pub fn new(region: &mut Region, try_block: Stmt, catch_block: Option<Stmt>, finally_block: Option<Stmt>) -> Node<Self> {
+    debug_assert!(Node::<BlockStatement>::is(try_block));
+    catch_block.map(|b| debug_assert!(Node::<CatchBlock>::is(b)));
+    finally_block.map(|b| debug_assert!(Node::<BlockStatement>::is(b)));
+    return Node::<Self>::new(
+      region,
+      TryCatchStatement {
+        try_block,
+        catch_block,
+        finally_block,
+      },
+    );
+  }
+}
+
+#[derive(Property)]
+pub struct WithStatement {
+  #[property(get(type = "copy"), set(disable))]
+  expr: Expr,
+
+  #[property(get(type = "copy"), set(disable))]
   body: Stmt,
 }
 impl_stmt!(
   WithStatement,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
-    let str = format!("{}[BlockStatement {}]\n", indent, source_position.to_string());
+    let str = format!("{}[WithStatement {}]\n", indent, source_position.to_string());
     result.push_str(&str);
   },
   fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
@@ -2371,6 +2504,28 @@ impl_stmt!(
     self.body.to_string_tree_internal(&mut ni, result);
   }
 );
+impl WithStatement {
+  pub fn new(region: &mut Region, expr: Expr, body: Stmt) -> Node<Self> {
+    return Node::<Self>::new(region, WithStatement { expr, body });
+  }
+}
+
+pub struct DebuggerStatement;
+impl_stmt!(
+  DebuggerStatement,
+  fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    let str = format!("{}[DebuggerStatement {}]\n", indent, source_position.to_string());
+    result.push_str(&str);
+  },
+  fn to_string_tree(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
+    self.to_string(indent, result, source_position);
+  }
+);
+impl DebuggerStatement {
+  pub fn new(region: &mut Region) -> Node<Self> {
+    return Node::<Self>::new(region, DebuggerStatement);
+  }
+}
 
 #[derive(Property)]
 pub struct VariableDeclarations {

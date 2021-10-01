@@ -481,7 +481,6 @@ impl Scanner {
           let start_col = self.current_position().start_col();
           self.current_position_mut().set_end_col(start_col);
         }
-        self.unset_linebreak_before();
       } else {
         break;
       }

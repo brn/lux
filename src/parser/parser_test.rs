@@ -14,6 +14,15 @@ mod parser_test {
 
   const STATIC_STR_LEN: u64 = "static ".len() as u64;
 
+  bitflags! {
+    struct EnvFlag: u16 {
+      const BASIC = 0x1;
+      const STRICT_MODE = 0x2;
+      const FUNCTION_WRAPPER = 0x4;
+    }
+  }
+  type EnvList = [Option<(&'static str, &'static str)>; 3];
+
   #[derive(Clone)]
   struct TestableAst {
     name: String,
@@ -455,46 +464,90 @@ mod parser_test {
     }};
   }
 
+  macro_rules! return_stmt {
+    ($pos:expr, $expr:expr) => {{
+      ast_with_children!("ReturnStatement", "", $pos, $expr)
+    }};
+    ($pos:expr) => {{
+      ast!("ReturnStatement", "", $pos)
+    }};
+  }
+
+  macro_rules! throw_stmt {
+    ($pos:expr, $expr:expr) => {{
+      ast_with_children!("ThrowStatement", "", $pos, $expr)
+    }};
+  }
+
+  macro_rules! catch_block {
+    ($pos:expr, $param:expr, $body:expr) => {{
+      ast_with_children!("CatchBlock", "", $pos, $param, $body)
+    }};
+    ($pos:expr, $body:expr) => {{
+      ast_with_children!("CatchBlock", "", $pos, $body)
+    }};
+  }
+
+  macro_rules! try_catch_stmt {
+    ($pos:expr, $try_block:expr, $catch_block:expr, $finally_block:expr) => {{
+      ast_with_children!("TryCatchStatement", "", $pos, $try_block, $catch_block, $finally_block)
+    }};
+    ($pos:expr, $try_block:expr, $finally_or_catch_block:expr) => {{
+      ast_with_children!("TryCatchStatement", "", $pos, $try_block, $finally_or_catch_block)
+    }};
+  }
+
+  macro_rules! with_stmt {
+    ($pos:expr, $expr:expr, $body:expr) => {{
+      ast_with_children!("WithStatement", "", $pos, $expr, $body)
+    }};
+  }
+
+  macro_rules! debugger_stmt {
+    ($pos:expr) => {{
+      ast!("DebuggerStatement", "", $pos)
+    }};
+  }
+
   type Expectations<'a> = [&'a str; 3];
 
-  fn parse_test<'a>(env_list: &[(Option<&'a str>, &'a str); 3], code: &str, expectations: &'a Expectations, parser_option: ParserOption) {
+  fn parse_test<'a>(env_list: &EnvList, code: &str, expectations: &'a Expectations, parser_option: ParserOption) {
     for i in 0..3 {
-      let env = env_list[i];
-      if env.0.is_none() {
-        continue;
-      }
-      let str = format!("{}{}{};PARSER_SENTINEL", env.0.unwrap(), code, env.1);
-      let context = LuxContext::new_until_internal_object_records();
-      let source = Source::new(context, "anonymouse", &str);
-      let mut parser = Parser::new(context, source.clone(), parser_option.clone());
-      match parser.parse(ParserType::Script) {
-        Ok(ast) => {
-          let tree = ast.to_string_tree();
-          match compare_node(&str, &tree, expectations[i]) {
-            Err(em) => {
-              println!("{}", em);
-              parser.print_stack_trace();
-              panic!("Parser test failed");
+      let maybe_env = env_list[i];
+      if let Some(env) = maybe_env {
+        let str = format!("{}{}{};PARSER_SENTINEL", env.0, code, env.1);
+        let context = LuxContext::new_until_internal_object_records();
+        let source = Source::new(context, "anonymouse", &str);
+        let mut parser = Parser::new(context, source.clone(), parser_option.clone());
+        match parser.parse(ParserType::Script) {
+          Ok(ast) => {
+            let tree = ast.to_string_tree();
+            match compare_node(&str, &tree, expectations[i]) {
+              Err(em) => {
+                println!("{}", em);
+                parser.print_stack_trace();
+                panic!("Parser test failed");
+              }
+              _ => {}
             }
-            _ => {}
           }
-        }
-        Err(err) => {
-          parser.print_stack_trace();
-          println!("code is {}", str);
-          panic!(err.error_message());
+          Err(err) => {
+            parser.print_stack_trace();
+            println!("code is {}", str);
+            panic!(err.error_message());
+          }
         }
       }
     }
   }
 
-  fn syntax_error_test<'a>(env_list: &[(Option<&str>, &str); 3], code: &str, source_positions: &[&SourcePosition], show_error: bool) {
-    let parser_options = [ParserOption::new(), ParserOption::with(true)];
+  fn syntax_error_test<'a>(env_list: &EnvList, code: &str, source_positions: &[&SourcePosition], show_error: bool) {
+    let parser_options = [ParserOption::default(), ParserOption::default().with_disable_skip_parser()];
     for opt in (&parser_options).iter() {
       for i in 0..3 {
-        let env = env_list[i];
-        if env.0.is_some() {
-          let str = format!("{}{}{};PARSER_SENTINEL", env.0.unwrap(), code, env.1);
+        let maybe_env = env_list[i];
+        if let Some(env) = maybe_env {
+          let str = format!("{}{}{};PARSER_SENTINEL", env.0, code, env.1);
           let context = LuxContext::new_until_internal_object_records();
           let source = Source::new(context, "anonymouse", &str);
           let mut parser = Parser::new(context, source.clone(), opt.clone());
@@ -587,13 +640,29 @@ mod parser_test {
   }
 
   fn single_expression_test<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str) {
-    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::new(), 0, false, 0, false);
-    parser_ast_test_with_options(ast_b, value, ParserOption::with(true), 0, false, 0, false);
+    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::default(), 0, EnvFlag::all(), 0, false);
+    parser_ast_test_with_options(
+      ast_b,
+      value,
+      ParserOption::default().with_disable_skip_parser(),
+      0,
+      EnvFlag::all(),
+      0,
+      false,
+    );
   }
 
   fn single_expression_test_with_scope<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str, scope_count: u32) {
-    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::new(), scope_count, false, 0, false);
-    parser_ast_test_with_options(ast_b, value, ParserOption::with(true), scope_count, false, 0, false);
+    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::default(), scope_count, EnvFlag::all(), 0, false);
+    parser_ast_test_with_options(
+      ast_b,
+      value,
+      ParserOption::default().with_disable_skip_parser(),
+      scope_count,
+      EnvFlag::all(),
+      0,
+      false,
+    );
   }
 
   fn single_expression_test_with_options<F: Fn((u64, u32, bool, bool)) -> TestableAst>(
@@ -601,7 +670,7 @@ mod parser_test {
     value: &str,
     parser_option: ParserOption,
     scope_count: u32,
-    is_skip_strict_mode: bool,
+    env_flag: EnvFlag,
     before_line_break_count: u64,
   ) {
     let ast_b = parser_ast_test_with_options(
@@ -609,7 +678,7 @@ mod parser_test {
       value,
       parser_option.clone(),
       scope_count,
-      is_skip_strict_mode,
+      env_flag,
       before_line_break_count,
       false,
     );
@@ -618,20 +687,36 @@ mod parser_test {
       value,
       parser_option.clone(),
       scope_count,
-      is_skip_strict_mode,
+      env_flag,
       before_line_break_count,
       false,
     );
   }
 
   fn stmt_test<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str) {
-    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::new(), 0, false, 0, true);
-    parser_ast_test_with_options(ast_b, value, ParserOption::with(true), 0, false, 0, true);
+    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::default(), 0, EnvFlag::all(), 0, true);
+    parser_ast_test_with_options(
+      ast_b,
+      value,
+      ParserOption::default().with_disable_skip_parser(),
+      0,
+      EnvFlag::all(),
+      0,
+      true,
+    );
   }
 
   fn stmt_test_with_scope<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str, scope_count: u32) {
-    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::new(), scope_count, false, 0, true);
-    parser_ast_test_with_options(ast_b, value, ParserOption::with(true), scope_count, false, 0, true);
+    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::default(), scope_count, EnvFlag::all(), 0, true);
+    parser_ast_test_with_options(
+      ast_b,
+      value,
+      ParserOption::default().with_disable_skip_parser(),
+      scope_count,
+      EnvFlag::all(),
+      0,
+      true,
+    );
   }
 
   fn stmt_test_with_linebreak<F: Fn((u64, u32, bool, bool)) -> TestableAst>(
@@ -643,18 +728,18 @@ mod parser_test {
     let ast_b = parser_ast_test_with_options(
       ast_builder,
       value,
-      ParserOption::new(),
+      ParserOption::default(),
       scope_count,
-      false,
+      EnvFlag::all(),
       before_line_break_count,
       true,
     );
     parser_ast_test_with_options(
       ast_b,
       value,
-      ParserOption::with(true),
+      ParserOption::default().with_disable_skip_parser(),
       scope_count,
-      false,
+      EnvFlag::all(),
       before_line_break_count,
       true,
     );
@@ -665,14 +750,22 @@ mod parser_test {
     value: &str,
     parser_option: ParserOption,
     scope_count: u32,
-    is_skip_strict_mode: bool,
+    env_flag: EnvFlag,
     before_line_break_count: u64,
     is_stmt: bool,
   ) -> F {
-    let env: [(Option<&str>, &str); 3] = [
-      (Some(""), ""),
-      (if is_skip_strict_mode { None } else { Some("'use strict';") }, ""),
-      (Some("!function X() {"), "}"),
+    let env: EnvList = [
+      if env_flag.contains(EnvFlag::BASIC) { Some(("", "")) } else { None },
+      if env_flag.contains(EnvFlag::STRICT_MODE) {
+        Some(("'use strict';", ""))
+      } else {
+        None
+      },
+      if env_flag.contains(EnvFlag::FUNCTION_WRAPPER) {
+        Some(("!function X() {", "}"))
+      } else {
+        None
+      },
     ];
     let lb_count = value.matches('\n').count() as u32;
 
@@ -718,11 +811,23 @@ mod parser_test {
     return ast_b;
   }
 
-  const BASIC_ENV: [(Option<&str>, &str); 3] = [(Some(""), ""), (Some("'use strict';"), ""), (Some("!function X() {"), "}")];
-
-  fn basic_env_expression_eary_error_test(start: u64, end: u64, code: &str) {
+  #[inline(always)]
+  fn basic_env_expression_eary_error_test(env_flag: EnvFlag, start: u64, end: u64, code: &str) {
+    let env: EnvList = [
+      if env_flag.contains(EnvFlag::BASIC) { Some(("", "")) } else { None },
+      if env_flag.contains(EnvFlag::STRICT_MODE) {
+        Some(("'use strict';", ""))
+      } else {
+        None
+      },
+      if env_flag.contains(EnvFlag::FUNCTION_WRAPPER) {
+        Some(("!function X() {", "}"))
+      } else {
+        None
+      },
+    ];
     syntax_error_test(
-      &BASIC_ENV,
+      &env,
       code,
       &[
         &s_pos!(start, end, 0, 0),
@@ -820,9 +925,9 @@ mod parser_test {
         return octal!("511", pos!(col, line));
       },
       "0777",
-      ParserOption::new(),
+      ParserOption::default(),
       0,
-      true,
+      EnvFlag::BASIC | EnvFlag::FUNCTION_WRAPPER,
       0,
     );
   }
@@ -839,51 +944,19 @@ mod parser_test {
 
   #[test]
   fn numeric_literal_error_test() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "0x_",
-      &[&s_pos!(0, 3, 0, 0), &s_pos!(13, 16, 0, 0), &s_pos!(15, 18, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 3, "0x_");
 
-    syntax_error_test(
-      &BASIC_ENV,
-      "0b_",
-      &[&s_pos!(0, 3, 0, 0), &s_pos!(13, 16, 0, 0), &s_pos!(15, 18, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 3, "0b_");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 3, "0o_");
 
-    syntax_error_test(
-      &BASIC_ENV,
-      "0o_",
-      &[&s_pos!(0, 3, 0, 0), &s_pos!(13, 16, 0, 0), &s_pos!(15, 18, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 3, "13e");
 
-    syntax_error_test(
-      &BASIC_ENV,
-      "13e",
-      &[&s_pos!(0, 3, 0, 0), &s_pos!(13, 16, 0, 0), &s_pos!(15, 18, 0, 0)],
-      false,
-    );
-
-    syntax_error_test(
-      &BASIC_ENV,
-      "13e+",
-      &[&s_pos!(0, 4, 0, 0), &s_pos!(13, 17, 0, 0), &s_pos!(15, 19, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 4, "13e+");
   }
 
   #[test]
   fn parse_implicit_octal_error_test() {
-    let env = [(None, ""), (None, ""), (Some("'use strict';"), "")];
-    syntax_error_test(
-      &env,
-      "0777",
-      &[&s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(13, 17, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::STRICT_MODE, 0, 4, "0777");
   }
 
   #[test]
@@ -1003,9 +1076,9 @@ mod parser_test {
         return tmpl!(pos!(col, line), str!("test\ntest", pos!(col + 1, line)));
       },
       "`test\ntest`",
-      ParserOption::new(),
+      ParserOption::default(),
       0,
-      false,
+      EnvFlag::all(),
       6,
     );
   }
@@ -1182,31 +1255,31 @@ mod parser_test {
   #[test]
   fn parse_unterminated_string_error_test() {
     syntax_error_test(
-      &BASIC_ENV,
+      &[Some(("", "")), Some(("'use strict';", "")), Some(("!function X() {", "}"))],
       "'test",
       &[&s_pos!(0, 21, 0, 0), &s_pos!(13, 34, 0, 0), &s_pos!(15, 37, 0, 0)],
       false,
-    )
+    );
   }
 
   #[test]
   fn parse_unterminated_string_error_with_linebreak_test() {
     syntax_error_test(
-      &BASIC_ENV,
+      &[Some(("", "")), Some(("'use strict';", "")), Some(("!function X() {", "}"))],
       "'test\\n",
       &[&s_pos!(0, 23, 0, 0), &s_pos!(13, 36, 0, 0), &s_pos!(15, 39, 0, 0)],
       false,
-    )
+    );
   }
 
   #[test]
   fn parse_invalid_unicode_sequence_error_test() {
-    basic_env_expression_eary_error_test(15, 21, "'\\u0041_\\u0042_\\u043_\\u0044'");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 15, 21, "'\\u0041_\\u0042_\\u043_\\u0044'");
   }
 
   #[test]
   fn template_literal_not_allow_octal_escape_early_error_test() {
-    basic_env_expression_eary_error_test(1, 4, "`\\071`");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 1, 4, "`\\071`");
   }
 
   #[test]
@@ -1261,24 +1334,12 @@ mod parser_test {
 
   #[test]
   fn unary_expression_delete_early_error_test() {
-    let env = &[(Some("'use strict';"), ""), (None, ""), (None, "")];
-    syntax_error_test(
-      &env,
-      "delete a",
-      &[&s_pos!(13, 21, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::STRICT_MODE, 0, 8, "delete a");
   }
 
   #[test]
   fn unary_expression_delete_rec_parenthesized_expr_early_error_test() {
-    let env = &[(Some("'use strict';"), ""), (None, ""), (None, "")];
-    syntax_error_test(
-      &env,
-      "delete ((((a))))",
-      &[&s_pos!(13, 29, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::STRICT_MODE, 0, 16, "delete ((((a))))");
   }
 
   #[test]
@@ -1318,9 +1379,9 @@ mod parser_test {
         return unary!("OpIncrement", "Pre", pos!(col, line), ident!("eval", pos!(col + 2, line)));
       },
       "++eval",
-      ParserOption::new(),
+      ParserOption::default(),
       0,
-      true,
+      EnvFlag::BASIC | EnvFlag::FUNCTION_WRAPPER,
       0,
     );
   }
@@ -1332,9 +1393,9 @@ mod parser_test {
         return unary!("OpIncrement", "Pre", pos!(col, line), ident!("arguments", pos!(col + 2, line)));
       },
       "++arguments",
-      ParserOption::new(),
+      ParserOption::default(),
       0,
-      true,
+      EnvFlag::BASIC | EnvFlag::FUNCTION_WRAPPER,
       0,
     );
   }
@@ -1356,9 +1417,9 @@ mod parser_test {
         return unary!("OpDecrement", "Pre", pos!(col, line), ident!("yield", pos!(col + 2, line)));
       },
       "--yield",
-      ParserOption::new(),
+      ParserOption::default(),
       0,
-      true,
+      EnvFlag::BASIC | EnvFlag::FUNCTION_WRAPPER,
       0,
     );
   }
@@ -1415,9 +1476,9 @@ mod parser_test {
         return unary!("OpDecrement", "Post", pos!(col, line), ident!("yield", pos!(col, line)));
       },
       "yield--",
-      ParserOption::new(),
+      ParserOption::default(),
       0,
-      true,
+      EnvFlag::BASIC | EnvFlag::FUNCTION_WRAPPER,
       0,
     );
   }
@@ -1439,9 +1500,9 @@ mod parser_test {
         return unary!("OpIncrement", "Post", pos!(col, line), ident!("eval", pos!(col, line)));
       },
       "eval++",
-      ParserOption::new(),
+      ParserOption::default(),
       0,
-      true,
+      EnvFlag::BASIC | EnvFlag::FUNCTION_WRAPPER,
       0,
     );
   }
@@ -1453,36 +1514,24 @@ mod parser_test {
         return unary!("OpDecrement", "Post", pos!(col, line), ident!("arguments", pos!(col, line)));
       },
       "arguments--",
-      ParserOption::new(),
+      ParserOption::default(),
       0,
-      true,
+      EnvFlag::BASIC | EnvFlag::FUNCTION_WRAPPER,
       0,
     );
   }
 
   #[test]
   fn pre_update_expression_assignment_target_early_error_test() {
-    let env = [(None, ""), (None, ""), (Some("'use strict';"), "")];
-    syntax_error_test(
-      &env,
-      "eval++",
-      &[&s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(13, 17, 0, 0)],
-      false,
-    );
-
-    syntax_error_test(
-      &env,
-      "arguments++",
-      &[&s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(13, 22, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::STRICT_MODE, 0, 4, "eval++");
+    basic_env_expression_eary_error_test(EnvFlag::STRICT_MODE, 0, 9, "arguments++");
   }
 
   #[test]
   fn pre_update_expression_assignment_target_yield_early_error_test() {
-    let env = [(Some("!function *x() {"), "}"), (None, ""), (None, "")];
+    const ENV: EnvList = [Some(("!function *x() {", "}")), None, None];
     syntax_error_test(
-      &env,
+      &ENV,
       "++yield",
       &[&s_pos!(18, 23, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(13, 17, 0, 0)],
       false,
@@ -1491,9 +1540,9 @@ mod parser_test {
 
   #[test]
   fn pre_update_expression_assignment_target_await_early_error_test() {
-    let env = [(Some("!async function x() {"), "}"), (None, ""), (None, "")];
+    const ENV: EnvList = [Some(("!async function x() {", "}")), None, None];
     syntax_error_test(
-      &env,
+      &ENV,
       "++await",
       &[&s_pos!(23, 28, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(13, 17, 0, 0)],
       false,
@@ -1502,98 +1551,98 @@ mod parser_test {
 
   #[test]
   fn pre_update_expression_assignment_target_primary_expr_early_error_test() {
-    basic_env_expression_eary_error_test(2, 6, "++this");
-    basic_env_expression_eary_error_test(2, 5, "++'a'");
-    basic_env_expression_eary_error_test(2, 3, "++1");
-    basic_env_expression_eary_error_test(2, 15, "++function() {}");
-    basic_env_expression_eary_error_test(2, 16, "++function*() {}");
-    basic_env_expression_eary_error_test(2, 21, "++async function() {}");
-    basic_env_expression_eary_error_test(2, 22, "++async function*() {}");
-    basic_env_expression_eary_error_test(2, 7, "++`abc`");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 6, "++this");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 5, "++'a'");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 3, "++1");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 15, "++function() {}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 16, "++function*() {}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 21, "++async function() {}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 22, "++async function*() {}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 7, "++`abc`");
   }
 
   #[test]
   fn pre_update_expression_assignment_target_call_expr_early_error_test() {
-    basic_env_expression_eary_error_test(2, 5, "++(1)");
-    basic_env_expression_eary_error_test(2, 9, "++super()");
-    basic_env_expression_eary_error_test(2, 15, "++import('abc')");
-    basic_env_expression_eary_error_test(2, 6, "++x(1)");
-    basic_env_expression_eary_error_test(2, 10, "++x()`abc`");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 5, "++(1)");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 9, "++super()");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 15, "++import('abc')");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 6, "++x(1)");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 10, "++x()`abc`");
   }
 
   #[test]
   fn pre_update_expression_assignment_target_new_to_left_hand_side_expr_early_error_test() {
-    basic_env_expression_eary_error_test(2, 7, "++new x");
-    basic_env_expression_eary_error_test(2, 9, "++new x()");
-    basic_env_expression_eary_error_test(2, 13, "++new new x()");
-    basic_env_expression_eary_error_test(2, 7, "++a`aa`");
-    basic_env_expression_eary_error_test(2, 12, "++new.target");
-    basic_env_expression_eary_error_test(2, 13, "++import.meta");
-    basic_env_expression_eary_error_test(2, 8, "++a.b?.c");
-    basic_env_expression_eary_error_test(2, 12, "++a.b?.['c']");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 7, "++new x");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 9, "++new x()");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 13, "++new new x()");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 7, "++a`aa`");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 12, "++new.target");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 13, "++import.meta");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 8, "++a.b?.c");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 12, "++a.b?.['c']");
   }
 
   #[test]
   fn pre_update_expression_assignment_target_update_to_unary_expr_early_error_test() {
-    basic_env_expression_eary_error_test(2, 5, "++x++");
-    basic_env_expression_eary_error_test(2, 5, "++x--");
-    basic_env_expression_eary_error_test(2, 5, "++++x");
-    basic_env_expression_eary_error_test(2, 5, "++++x");
-    basic_env_expression_eary_error_test(2, 12, "++delete a.b");
-    basic_env_expression_eary_error_test(2, 8, "++void a");
-    basic_env_expression_eary_error_test(2, 4, "+++a");
-    basic_env_expression_eary_error_test(2, 4, "++-a");
-    basic_env_expression_eary_error_test(2, 4, "++~a");
-    basic_env_expression_eary_error_test(2, 4, "++!a");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 5, "++x++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 5, "++x--");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 5, "++++x");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 5, "++++x");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 12, "++delete a.b");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 8, "++void a");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 4, "+++a");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 4, "++-a");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 4, "++~a");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 4, "++!a");
   }
 
   #[test]
   fn post_update_expression_assignment_target_primary_expr_early_error_test() {
-    basic_env_expression_eary_error_test(0, 4, "this++");
-    basic_env_expression_eary_error_test(0, 3, "'a'++");
-    basic_env_expression_eary_error_test(0, 1, "1++");
-    basic_env_expression_eary_error_test(0, 15, "(function() {})++");
-    basic_env_expression_eary_error_test(0, 16, "(function*() {})++");
-    basic_env_expression_eary_error_test(0, 21, "(async function() {})++");
-    basic_env_expression_eary_error_test(0, 22, "(async function*() {})++");
-    basic_env_expression_eary_error_test(0, 5, "`abc`++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 4, "this++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 3, "'a'++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 1, "1++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 15, "(function() {})++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 16, "(function*() {})++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 21, "(async function() {})++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 22, "(async function*() {})++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 5, "`abc`++");
   }
 
   #[test]
   fn post_update_expression_assignment_target_call_expr_early_error_test() {
-    basic_env_expression_eary_error_test(0, 3, "(1)++");
-    basic_env_expression_eary_error_test(0, 7, "super()++");
-    basic_env_expression_eary_error_test(0, 13, "import('abc')++");
-    basic_env_expression_eary_error_test(0, 4, "x(1)++");
-    basic_env_expression_eary_error_test(0, 8, "x()`abc`++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 3, "(1)++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 7, "super()++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 13, "import('abc')++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 4, "x(1)++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 8, "x()`abc`++");
   }
 
   #[test]
   fn post_update_expression_assignment_target_new_to_left_hand_side_expr_early_error_test() {
-    basic_env_expression_eary_error_test(0, 5, "new x++");
-    basic_env_expression_eary_error_test(0, 7, "new x()++");
-    basic_env_expression_eary_error_test(0, 11, "new new x()++");
-    basic_env_expression_eary_error_test(0, 5, "a`aa`++");
-    basic_env_expression_eary_error_test(0, 10, "new.target++");
-    basic_env_expression_eary_error_test(0, 11, "import.meta++");
-    basic_env_expression_eary_error_test(0, 6, "a.b?.c++");
-    basic_env_expression_eary_error_test(0, 10, "a.b?.['c']++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 5, "new x++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 7, "new x()++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 11, "new new x()++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 5, "a`aa`++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 10, "new.target++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 11, "import.meta++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 6, "a.b?.c++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 10, "a.b?.['c']++");
   }
 
   #[test]
   fn post_update_expression_assignment_target_update_to_unary_expr_early_error_test() {
-    basic_env_expression_eary_error_test(0, 12, "(delete a.b)++");
-    basic_env_expression_eary_error_test(0, 8, "(void a)++");
-    basic_env_expression_eary_error_test(0, 4, "(+a)++");
-    basic_env_expression_eary_error_test(0, 4, "(-a)++");
-    basic_env_expression_eary_error_test(0, 4, "(~a)++");
-    basic_env_expression_eary_error_test(0, 4, "(!a)++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 12, "(delete a.b)++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 8, "(void a)++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 4, "(+a)++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 4, "(-a)++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 4, "(~a)++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 4, "(!a)++");
   }
 
   #[test]
   fn pre_update_expression_assignment_await_expr_early_error_test() {
     syntax_error_test(
-      &[(Some("!async function() {"), "}"), (None, ""), (None, "")],
+      &[Some(("!async function() {", "}")), None, None],
       "++await a",
       &[&s_pos!(21, 26, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
       false,
@@ -1607,8 +1656,8 @@ mod parser_test {
         fn [<pre_update_expression_assignment_ $token _test>]() {
           use Token::*;
           let len = $token.symbol().len() as u64;
-          basic_env_expression_eary_error_test(2, 8 + len, &format!("++(a {} b)", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 6 + len, &format!("(a {} b)++", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 2, 8 + len, &format!("++(a {} b)", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 6 + len, &format!("(a {} b)++", $token.symbol()));
         }
       }
     };
@@ -1758,22 +1807,12 @@ mod parser_test {
 
   #[test]
   fn template_literal_not_allowed_after_op_chain_early_error_test() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "a?.`a`",
-      &[&s_pos!(3, 4, 0, 0), &s_pos!(16, 17, 0, 0), &s_pos!(18, 19, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::all(), 3, 4, "a?.`a`");
   }
 
   #[test]
   fn template_literal_not_allowed_after_op_chain_early_error_test_2() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "a?.a?.`a`",
-      &[&s_pos!(6, 7, 0, 0), &s_pos!(19, 20, 0, 0), &s_pos!(21, 22, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::all(), 6, 7, "a?.a?.`a`");
   }
 
   #[test]
@@ -2109,52 +2148,52 @@ mod parser_test {
         #[test]
         fn [<assignment_expr_primary_to_new_expr_early_error_test_ $token>]() {
           use Token::*;
-          basic_env_expression_eary_error_test(0, 4, &format!("this {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 3, &format!("'a' {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 1, &format!("1 {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 14,&format!("!function() {{}} {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 15, &format!("!function*() {{}} {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 20, &format!("!async function() {{}} {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 21, &format!("!async function*() {{}} {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 5, &format!("`abc` {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 4, &format!("this {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 3, &format!("'a' {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 1, &format!("1 {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 14,&format!("!function() {{}} {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 15, &format!("!function*() {{}} {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 20, &format!("!async function() {{}} {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 21, &format!("!async function*() {{}} {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 5, &format!("`abc` {} 1", $token.symbol()));
         }
 
         #[test]
         fn [<assignment_expr_call_expr_early_error_test_ $token>]() {
           use Token::*;
-          basic_env_expression_eary_error_test(0, 7, &format!("(((1))) {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 7, &format!("super() {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 13, &format!("import('abc') {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 4, &format!("x(1) {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 8, &format!("x()`abc` {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 7, &format!("(((1))) {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 7, &format!("super() {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 13, &format!("import('abc') {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 4, &format!("x(1) {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 8, &format!("x()`abc` {} 1", $token.symbol()));
         }
 
         #[test]
         fn [<assignment_expr_new_to_left_hand_side_expr_early_error_test_ $token>]() {
           use Token::*;
-          basic_env_expression_eary_error_test(0, 5, &format!("new x {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 7, &format!("new x() {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 11, &format!("new new x() {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 5, &format!("a`aa` {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 10, &format!("new.target {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 11, &format!("import.meta {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 6, &format!("a.b?.c {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 10, &format!("a.b?.['c'] {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 5, &format!("new x {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 7, &format!("new x() {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 11, &format!("new new x() {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 5, &format!("a`aa` {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 10, &format!("new.target {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 11, &format!("import.meta {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 6, &format!("a.b?.c {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 10, &format!("a.b?.['c'] {} 1", $token.symbol()));
         }
 
         #[test]
         fn [<assignment_expr_update_to_unary_expr_early_error_test_ $token>]() {
           use Token::*;
-          basic_env_expression_eary_error_test(0, 3, &format!("++x {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 3, &format!("++x {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 3, &format!("x++ {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 3, &format!("x-- {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 10, &format!("delete a.b {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 6, &format!("void a {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 2, &format!("+a {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 2, &format!("-a {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 2, &format!("~a {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(0, 2, &format!("!a {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 3, &format!("++x {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 3, &format!("++x {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 3, &format!("x++ {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 3, &format!("x-- {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 10, &format!("delete a.b {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 6, &format!("void a {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 2, &format!("+a {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 2, &format!("-a {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 2, &format!("~a {} 1", $token.symbol()));
+          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 2, &format!("!a {} 1", $token.symbol()));
         }
       }
     };
@@ -2164,19 +2203,8 @@ mod parser_test {
 
   #[test]
   fn identifier_reference_strict_mode_early_error_test() {
-    let env = [(None, ""), (Some("'use strict';"), ""), (None, "")];
-    syntax_error_test(
-      &env,
-      "eval = 1",
-      &[&s_pos!(0, 0, 0, 0), &s_pos!(13, 17, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
-    );
-    syntax_error_test(
-      &env,
-      "arguments = 1",
-      &[&s_pos!(0, 0, 0, 0), &s_pos!(13, 22, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
-    )
+    basic_env_expression_eary_error_test(EnvFlag::STRICT_MODE, 0, 4, "eval = 1");
+    basic_env_expression_eary_error_test(EnvFlag::STRICT_MODE, 0, 9, "arguments = 1")
   }
 
   #[test]
@@ -2442,8 +2470,8 @@ mod parser_test {
             fnexpr!(
               pos!(col + 2, line),
               "Function",
-              if is_skip_parser { col + 8 } else { 0 },
-              if is_skip_parser { col + 8 } else { 0 },
+              if is_skip_parser { col + 7 } else { 0 },
+              if is_skip_parser { col + 7 } else { 0 },
               scope!(@opaque is_strict, 0, true),
               ident!("a", pos!(col + 2, line)),
               exprs!(pos!(col + 4, line)),
@@ -2456,8 +2484,8 @@ mod parser_test {
             fnexpr!(
               pos!(col + 10, line),
               "Function",
-              if is_skip_parser { col + 16 } else { 0 },
-              if is_skip_parser { col + 16 } else { 0 },
+              if is_skip_parser { col + 15 } else { 0 },
+              if is_skip_parser { col + 15 } else { 0 },
               scope!(@opaque is_strict, 0, true),
               ident!("b", pos!(col + 10, line)),
               exprs!(pos!(col + 12, line)),
@@ -2485,8 +2513,8 @@ mod parser_test {
               pos!(col + 2, line),
               "Function",
               "get",
-              if is_skip_parser { col + 12 } else { 0 },
-              if is_skip_parser { col + 12 } else { 0 },
+              if is_skip_parser { col + 11 } else { 0 },
+              if is_skip_parser { col + 11 } else { 0 },
               scope!(@opaque is_strict, 0, true),
               ident!("a", pos!(col + 6, line)),
               exprs!(pos!(col + 8, line)),
@@ -2500,8 +2528,8 @@ mod parser_test {
               pos!(col + 14, line),
               "Function",
               "set",
-              if is_skip_parser { col + 25 } else { 0 },
-              if is_skip_parser { col + 25 } else { 0 },
+              if is_skip_parser { col + 24 } else { 0 },
+              if is_skip_parser { col + 24 } else { 0 },
               scope!(@opaque is_strict, 0, true),
               ident!("b", pos!(col + 18, line)),
               exprs!(pos!(col + 20, line), ident!("x", pos!(col + 20, line))),
@@ -2582,8 +2610,8 @@ mod parser_test {
             afnexpr!(
               pos!(col + 2, line),
               "Function",
-              if is_skip_parser { col + 14 } else { 0 },
-              if is_skip_parser { col + 14 } else { 0 },
+              if is_skip_parser { col + 13 } else { 0 },
+              if is_skip_parser { col + 13 } else { 0 },
               scope!(@opaque is_strict,0, true),
               ident!("a", pos!(col + 8, line)),
               exprs!(pos!(col + 10, line)),
@@ -2596,8 +2624,8 @@ mod parser_test {
             fnexpr!(
               pos!(col + 16, line),
               "Function",
-              if is_skip_parser { col + 22 } else { 0 },
-              if is_skip_parser { col + 22 } else { 0 },
+              if is_skip_parser { col + 21 } else { 0 },
+              if is_skip_parser { col + 21 } else { 0 },
               scope!(@opaque is_strict,0, true),
               ident!("b", pos!(col + 16, line)),
               exprs!(pos!(col + 18, line)),
@@ -2624,8 +2652,8 @@ mod parser_test {
             afnexpr!(
               pos!(col + 2, line),
               "Function",
-              if is_skip_parser { col + 18 } else { 0 },
-              if is_skip_parser { col + 23 } else { 0 },
+              if is_skip_parser { col + 13 } else { 0 },
+              if is_skip_parser { col + 22 } else { 0 },
               scope!(@opaque is_strict,0, true),
               ident!("a", pos!(col + 8, line)),
               exprs!(pos!(col + 10, line)),
@@ -2669,8 +2697,8 @@ mod parser_test {
             fnexpr!(
               pos!(col + 2, line),
               "Generator",
-              if is_skip_parser { col + 13 } else { 0 },
-              if is_skip_parser { col + 18 } else { 0 },
+              if is_skip_parser { col + 8 } else { 0 },
+              if is_skip_parser { col + 17 } else { 0 },
               scope!(@opaque is_strict,0, true),
               ident!("a", pos!(col + 3, line)),
               exprs!(pos!(col + 5, line)),
@@ -2714,8 +2742,8 @@ mod parser_test {
             afnexpr!(
               pos!(col + 2, line),
               "Generator",
-              if is_skip_parser { col + 19 } else { 0 },
-              if is_skip_parser { col + 36 } else { 0 },
+              if is_skip_parser { col + 14 } else { 0 },
+              if is_skip_parser { col + 35 } else { 0 },
               scope!(@opaque is_strict,0, true),
               ident!("a", pos!(col + 9, line)),
               exprs!(pos!(col + 11, line)),
@@ -2949,100 +2977,89 @@ mod parser_test {
 
   #[test]
   fn object_pattern_spread_is_not_last_element_early_error_test() {
-    syntax_error_test(
-      &BASIC_ENV,
-      "([...a, b] = x)",
-      &[&s_pos!(2, 6, 0, 0), &s_pos!(15, 19, 0, 0), &s_pos!(17, 21, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 6, "([...a, b] = x)");
   }
 
   #[test]
   fn array_pattern_spread_is_not_identifier_early_error_test() {
-    basic_env_expression_eary_error_test(2, 11, "([...{a: b}] = x)");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 11, "([...{a: b}] = x)");
   }
 
   #[test]
   fn object_pattern_spread_is_not_identifier_early_error_test() {
-    basic_env_expression_eary_error_test(2, 11, "({...{a: b}} = x)");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 11, "({...{a: b}} = x)");
   }
 
   #[test]
   fn function_has_duplicated_param_in_strict_mode_early_error_test() {
-    let env = [(None, ""), (Some("'use strict';"), ""), (None, "")];
-    syntax_error_test(
-      &env,
-      "((a, b, b) => {})",
-      &[&s_pos!(0, 0, 0, 0), &s_pos!(21, 22, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::STRICT_MODE, 8, 9, "((a, b, b) => {})");
   }
 
   #[test]
   fn method_has_direct_super_early_error_test() {
-    basic_env_expression_eary_error_test(10, 15, "({a(a, b, super) {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 10, 15, "({a(a, b, super) {}})");
 
-    basic_env_expression_eary_error_test(12, 17, "({a(a, b) { super() }})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 12, 17, "({a(a, b) { super() }})");
   }
 
   #[test]
   fn method_has_duplicated_parameters_error_test() {
-    basic_env_expression_eary_error_test(7, 8, "({a(a, a) {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 7, 8, "({a(a, a) {}})");
   }
 
   #[test]
   fn method_has_duplicated_parameters_with_simple_object_pattern_error_test() {
-    basic_env_expression_eary_error_test(8, 9, "({a(a, {a}) {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 8, 9, "({a(a, {a}) {}})");
   }
 
   #[test]
   fn method_has_duplicated_parameters_with_simple_object_pattern_error_test_2() {
-    basic_env_expression_eary_error_test(8, 9, "({a(a, {a, b}) {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 8, 9, "({a(a, {a, b}) {}})");
   }
 
   #[test]
   fn method_has_duplicated_parameters_with_nested_object_pattern_error_test() {
-    basic_env_expression_eary_error_test(16, 17, "({a(a, {b: {c: {a}}}) {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 16, 17, "({a(a, {b: {c: {a}}}) {}})");
   }
 
   #[test]
   fn method_has_duplicated_parameters_with_complex_pattern_error_test() {
-    basic_env_expression_eary_error_test(39, 40, "({a(a, {[((a, b) => {})()]: [{c: {o: [{a}]}}]}) {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 39, 40, "({a(a, {[((a, b) => {})()]: [{c: {o: [{a}]}}]}) {}})");
   }
 
   #[test]
   fn method_has_duplicated_parameters_skip_parser_error_test() {
-    basic_env_expression_eary_error_test(19, 20, "({a(a, b) { ({b(a, a) {}}) }})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 19, 20, "({a(a, b) { ({b(a, a) {}}) }})");
   }
 
   #[test]
   fn method_has_not_simple_parameter_but_declare_strict() {
-    basic_env_expression_eary_error_test(10, 22, "({a({a}) {'use strict'}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 10, 22, "({a({a}) {'use strict'}})");
   }
 
   #[test]
   fn setter_has_not_simple_parameter_but_declare_strict() {
-    basic_env_expression_eary_error_test(14, 26, "({set a({a}) {'use strict'}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 14, 26, "({set a({a}) {'use strict'}})");
   }
 
   #[test]
   fn object_literal_has_propery_name_initializer_early_error_test() {
-    basic_env_expression_eary_error_test(4, 5, "({a = 1, b})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 4, 5, "({a = 1, b})");
   }
 
   #[test]
   fn generator_method_not_allowed_to_use_yield_param_early_error_test() {
-    basic_env_expression_eary_error_test(5, 10, "({*a(yield) {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 5, 10, "({*a(yield) {}})");
   }
 
   #[test]
   fn in_param_array_pattern_spread_is_not_identifier_early_error_test() {
-    basic_env_expression_eary_error_test(5, 11, "({a([...{a}]) {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 5, 11, "({a([...{a}]) {}})");
   }
 
   #[test]
   fn in_param_object_pattern_spread_is_not_identifier_early_error_test() {
-    basic_env_expression_eary_error_test(5, 11, "({a([...[a]]) {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 5, 11, "({a([...[a]]) {}})");
   }
 
   #[test]
@@ -3305,29 +3322,29 @@ mod parser_test {
             class_field_with_value(ClassFieldFlag::PRIVATE | ClassFieldFlag::STATIC, "s_priv_field_v", "1", 2, 14),
           ],
           &[
-            normal_method(ClassFieldFlag::PUBLIC, col, is_strict, "fn", 2, 1, 20, 20),
-            generator_method(ClassFieldFlag::PUBLIC, col, is_strict, "gen", 2, 2, 32, 32),
-            async_method(ClassFieldFlag::PUBLIC, col, is_strict, "asy", 2, 3, 49, 49),
-            async_generator_method(ClassFieldFlag::PUBLIC, col, is_strict, "asyg", 2, 4, 68, 68),
-            normal_method(ClassFieldFlag::PRIVATE, col, is_strict, "priv_fn", 2, 8, 123, 123),
-            generator_method(ClassFieldFlag::PRIVATE, col, is_strict, "priv_gen", 2, 9, 141, 141),
-            async_generator_method(ClassFieldFlag::PRIVATE, col, is_strict, "priv_agen", 2, 10, 166, 166),
-            normal_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_fn", 2, 15, 277, 277),
-            generator_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_gen", 2, 16, 298, 298),
-            async_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_asy", 2, 17, 324, 324),
-            async_generator_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_asyg", 2, 18, 352, 352),
-            normal_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_fn", 2, 19, 374, 374),
-            generator_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_gen", 2, 20, 398, 398),
-            async_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_asy", 2, 21, 427, 427),
-            async_generator_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_asyg", 2, 22, 458, 458),
-            getset_method("get", cfa!(PUBLIC), col, is_strict, "get_fn", 2, 23, 476, 476),
-            getset_method("set", cfa!(PUBLIC), col, is_strict, "set_fn", 2, 24, 495, 495),
-            getset_method("get", cfa!(PRIVATE), col, is_strict, "p_get_fn", 2, 25, 516, 516),
-            getset_method("set", cfa!(PRIVATE), col, is_strict, "p_set_fn", 2, 26, 538, 538),
-            getset_method("get", cfa!(PUBLIC | STATIC), col, is_strict, "s_get_fn", 2, 27, 565, 565),
-            getset_method("set", cfa!(PUBLIC | STATIC), col, is_strict, "s_set_fn", 2, 28, 593, 593),
-            getset_method("get", cfa!(PRIVATE | STATIC), col, is_strict, "s_p_get_fn", 2, 29, 623, 623),
-            getset_method("set", cfa!(PRIVATE | STATIC), col, is_strict, "s_p_set_fn", 2, 30, 654, 654),
+            normal_method(ClassFieldFlag::PUBLIC, col, is_strict, "fn", 2, 1, 19, 19),
+            generator_method(ClassFieldFlag::PUBLIC, col, is_strict, "gen", 2, 2, 31, 31),
+            async_method(ClassFieldFlag::PUBLIC, col, is_strict, "asy", 2, 3, 48, 48),
+            async_generator_method(ClassFieldFlag::PUBLIC, col, is_strict, "asyg", 2, 4, 67, 67),
+            normal_method(ClassFieldFlag::PRIVATE, col, is_strict, "priv_fn", 2, 8, 122, 122),
+            generator_method(ClassFieldFlag::PRIVATE, col, is_strict, "priv_gen", 2, 9, 140, 140),
+            async_generator_method(ClassFieldFlag::PRIVATE, col, is_strict, "priv_agen", 2, 10, 165, 165),
+            normal_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_fn", 2, 15, 276, 276),
+            generator_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_gen", 2, 16, 297, 297),
+            async_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_asy", 2, 17, 323, 323),
+            async_generator_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_asyg", 2, 18, 351, 351),
+            normal_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_fn", 2, 19, 373, 373),
+            generator_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_gen", 2, 20, 397, 397),
+            async_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_asy", 2, 21, 426, 426),
+            async_generator_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_asyg", 2, 22, 457, 457),
+            getset_method("get", cfa!(PUBLIC), col, is_strict, "get_fn", 2, 23, 475, 475),
+            getset_method("set", cfa!(PUBLIC), col, is_strict, "set_fn", 2, 24, 494, 494),
+            getset_method("get", cfa!(PRIVATE), col, is_strict, "p_get_fn", 2, 25, 515, 515),
+            getset_method("set", cfa!(PRIVATE), col, is_strict, "p_set_fn", 2, 26, 537, 537),
+            getset_method("get", cfa!(PUBLIC | STATIC), col, is_strict, "s_get_fn", 2, 27, 564, 564),
+            getset_method("set", cfa!(PUBLIC | STATIC), col, is_strict, "s_set_fn", 2, 28, 592, 592),
+            getset_method("get", cfa!(PRIVATE | STATIC), col, is_strict, "s_p_get_fn", 2, 29, 622, 622),
+            getset_method("set", cfa!(PRIVATE | STATIC), col, is_strict, "s_p_set_fn", 2, 30, 653, 653),
           ],
         );
       },
@@ -3363,9 +3380,9 @@ mod parser_test {
   static get #s_p_get_fn() {}
   static set #s_p_set_fn(a) {}
 })",
-      ParserOption::new(),
+      ParserOption::default(),
       23,
-      false,
+      EnvFlag::all(),
       655,
     );
   }
@@ -3403,8 +3420,8 @@ mod parser_test {
               fnexpr!(
                 pos!(2, 1),
                 "Function",
-                col + 33,
-                col + 33,
+                col + 32,
+                col + 32,
                 if is_strict {
                   scope!(@opaque @strict 0, true)
                 } else {
@@ -3420,8 +3437,8 @@ mod parser_test {
               fnexpr!(
                 pos!(2, 2),
                 "Generator",
-                col + 45,
-                col + 45,
+                col + 44,
+                col + 44,
                 if is_strict {
                   scope!(@opaque @strict 0, true)
                 } else {
@@ -3437,8 +3454,8 @@ mod parser_test {
               afnexpr!(
                 pos!(2, 3),
                 "Function",
-                col + 62,
-                col + 62,
+                col + 61,
+                col + 61,
                 if is_strict {
                   scope!(@opaque @strict 0, true)
                 } else {
@@ -3454,8 +3471,8 @@ mod parser_test {
               afnexpr!(
                 pos!(2, 4),
                 "Generator",
-                col + 81,
-                col + 81,
+                col + 80,
+                col + 80,
                 if is_strict {
                   scope!(@opaque @strict 0, true)
                 } else {
@@ -3471,8 +3488,8 @@ mod parser_test {
               fnexpr!(
                 pos!(2, 8),
                 "Function",
-                col + 136,
-                col + 136,
+                col + 135,
+                col + 135,
                 if is_strict {
                   scope!(@opaque @strict 0, true)
                 } else {
@@ -3495,9 +3512,9 @@ mod parser_test {
   #priv_field = 1
   #priv_fn() {}
 })",
-      ParserOption::new(),
+      ParserOption::default(),
       5,
-      false,
+      EnvFlag::all(),
       137,
     );
   }
@@ -3511,13 +3528,13 @@ mod parser_test {
           Some(ident!("K", pos!(col + 7, line))),
           Some(ident!("A", pos!(col + 17, line))),
           &[],
-          &[normal_method(cfa!(PUBLIC), col, is_strict, "constructor", col + 20, line, 40, 43)],
+          &[normal_method(cfa!(PUBLIC), col, is_strict, "constructor", col + 20, line, 35, 42)],
         );
       },
       "(class K extends A {constructor() {super()}})",
-      ParserOption::new(),
+      ParserOption::default(),
       1,
-      false,
+      EnvFlag::all(),
       0,
     );
   }
@@ -3531,45 +3548,45 @@ mod parser_test {
           None,
           Some(ident!("A", pos!(col + 15, line))),
           &[],
-          &[normal_method(cfa!(PUBLIC), col, is_strict, "constructor", col + 18, line, 38, 41)],
+          &[normal_method(cfa!(PUBLIC), col, is_strict, "constructor", col + 18, line, 33, 40)],
         );
       },
       "(class extends A {constructor() {super()}})",
-      ParserOption::new(),
+      ParserOption::default(),
       1,
-      false,
+      EnvFlag::all(),
       0,
     );
   }
 
   #[test]
   fn class_constructor_has_direct_super_without_heritage_early_error_test() {
-    basic_env_expression_eary_error_test(23, 28, "(class {constructor() {super()}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 23, 28, "(class {constructor() {super()}})");
   }
 
   #[test]
   fn class_constructor_declared_twice_early_error_test() {
-    basic_env_expression_eary_error_test(25, 36, "(class {constructor() {} constructor() {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 25, 36, "(class {constructor() {} constructor() {}})");
   }
 
   #[test]
   fn class_constructor_is_special_method_early_error_test() {
-    basic_env_expression_eary_error_test(14, 25, "(class {async constructor() {}})");
-    basic_env_expression_eary_error_test(9, 20, "(class {*constructor() {}})");
-    basic_env_expression_eary_error_test(15, 26, "(class {async *constructor() {}})");
-    basic_env_expression_eary_error_test(12, 23, "(class {get constructor() {}})");
-    basic_env_expression_eary_error_test(12, 23, "(class {set constructor(a) {}})");
-    basic_env_expression_eary_error_test(8, 20, "(class {#constructor() {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 14, 25, "(class {async constructor() {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 9, 20, "(class {*constructor() {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 15, 26, "(class {async *constructor() {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 12, 23, "(class {get constructor() {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 12, 23, "(class {set constructor(a) {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 8, 20, "(class {#constructor() {}})");
   }
 
   #[test]
   fn class_method_has_direct_super_early_error_test() {
-    basic_env_expression_eary_error_test(14, 19, "(class {fn() {super()}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 14, 19, "(class {fn() {super()}})");
   }
 
   #[test]
   fn static_class_method_name_is_prototype_early_error_test() {
-    basic_env_expression_eary_error_test(15, 24, "(class {static prototype() {}})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 15, 24, "(class {static prototype() {}})");
   }
 
   #[test]
@@ -3762,77 +3779,43 @@ mod parser_test {
 
   #[test]
   fn function_strict_mode_unique_parameter_early_error_test() {
-    let env = [(Some("'use strict';"), ""), (None, ""), (None, "")];
-    syntax_error_test(
-      &env,
-      "(function(a, a, b) {})",
-      &[&s_pos!(26, 27, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::STRICT_MODE, 13, 14, "(function(a, a, b) {})");
 
-    syntax_error_test(
-      &env,
+    basic_env_expression_eary_error_test(
+      EnvFlag::STRICT_MODE,
+      54,
+      55,
       "(function(a, b = {a}, {[((a, b) => {})()]: [{c: {o: [{a}]}}]}) {})",
-      &[&s_pos!(67, 68, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
     );
   }
 
   #[test]
   fn function_indentifier_eval_or_arguments_early_error_test() {
-    let env = [(Some("'use strict';"), ""), (None, ""), (None, "")];
-    syntax_error_test(
-      &env,
-      "(function eval() {})",
-      &[&s_pos!(23, 27, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
-    );
-
-    syntax_error_test(
-      &env,
-      "(function arguments() {})",
-      &[&s_pos!(23, 32, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::STRICT_MODE, 10, 14, "(function eval() {})");
+    basic_env_expression_eary_error_test(EnvFlag::STRICT_MODE, 10, 19, "(function arguments() {})");
   }
 
   #[test]
   fn function_arguments_is_not_simple_but_strict_mode_declared_early_error_test() {
-    let env = [(Some(""), ""), (None, ""), (None, "")];
-    syntax_error_test(
-      &env,
-      "(function ({a}) {'use strict';})",
-      &[&s_pos!(17, 29, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
-    );
-    syntax_error_test(
-      &env,
-      "(function (a = 1) {'use strict';})",
-      &[&s_pos!(19, 31, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
-    );
-    syntax_error_test(
-      &env,
-      "(function (...a) {'use strict';})",
-      &[&s_pos!(18, 30, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::BASIC, 17, 29, "(function ({a}) {'use strict';})");
+    basic_env_expression_eary_error_test(EnvFlag::BASIC, 19, 31, "(function (a = 1) {'use strict';})");
+    basic_env_expression_eary_error_test(EnvFlag::BASIC, 18, 30, "(function (...a) {'use strict';})");
   }
 
   #[test]
   fn function_body_contains_lexical_binding_same_key_of_formal_params_early_error_test() {
-    basic_env_expression_eary_error_test(19, 20, "(function (a) {let a = 0;})");
-    basic_env_expression_eary_error_test(45, 46, "(function ({a: {b: {c}}}) {let a = 0, b = 0, c = 0})");
-    basic_env_expression_eary_error_test(26, 27, "(function ([a, b]) {const b = 1})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 19, 20, "(function (a) {let a = 0;})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 45, 46, "(function ({a: {b: {c}}}) {let a = 0, b = 0, c = 0})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 26, 27, "(function ([a, b]) {const b = 1})");
   }
 
   #[test]
   fn function_contains_super_property_or_call_early_error_test() {
-    basic_env_expression_eary_error_test(15, 20, "(function (a = super.a) {})");
-    basic_env_expression_eary_error_test(15, 20, "(function (a = super()) {})");
-    basic_env_expression_eary_error_test(15, 20, "(function (a) {super()})");
-    basic_env_expression_eary_error_test(15, 20, "(function (a) {super.a})");
-    basic_env_expression_eary_error_test(11, 16, "(function (super) {})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 15, 20, "(function (a = super.a) {})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 15, 20, "(function (a = super()) {})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 15, 20, "(function (a) {super()})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 15, 20, "(function (a) {super.a})");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 11, 16, "(function (super) {})");
   }
 
   #[test]
@@ -3965,21 +3948,21 @@ mod parser_test {
 
   #[test]
   fn const_requires_initializer_early_error_test() {
-    basic_env_expression_eary_error_test(0, 7, "const a");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 7, "const a");
   }
 
   #[test]
   fn lexical_binding_not_allowed_duplication_early_error_test() {
-    basic_env_expression_eary_error_test(14, 15, "let a = 1, b, a = 3");
-    basic_env_expression_eary_error_test(20, 21, "const a = 1, b = 2, a = 3");
-    basic_env_expression_eary_error_test(15, 16, "let a = 1; var a = 2;");
-    basic_env_expression_eary_error_test(17, 18, "const a = 1; var a = 2;");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 14, 15, "let a = 1, b, a = 3");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 20, 21, "const a = 1, b = 2, a = 3");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 15, 16, "let a = 1; var a = 2;");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 17, 18, "const a = 1; var a = 2;");
   }
 
   #[test]
   fn lexical_binding_not_allowed_let_as_identifier_early_error_test() {
-    basic_env_expression_eary_error_test(4, 7, "let let = 1");
-    basic_env_expression_eary_error_test(6, 9, "const let = 1");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 4, 7, "let let = 1");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 6, 9, "const let = 1");
   }
 
   #[test]
@@ -4048,10 +4031,10 @@ mod parser_test {
 
   #[test]
   fn lexical_scope_early_error_test() {
-    basic_env_expression_eary_error_test(15, 16, "{let a = 1, b, a = 3}");
-    basic_env_expression_eary_error_test(21, 22, "{const a = 1, b = 2, a = 3}");
-    basic_env_expression_eary_error_test(16, 17, "{let a = 1; var a = 2;}");
-    basic_env_expression_eary_error_test(18, 19, "{const a = 1; var a = 2;}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 15, 16, "{let a = 1, b, a = 3}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 21, 22, "{const a = 1, b = 2, a = 3}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 16, 17, "{let a = 1; var a = 2;}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 18, 19, "{const a = 1; var a = 2;}");
   }
 
   #[test]
@@ -4114,7 +4097,7 @@ mod parser_test {
 
   #[test]
   fn duplicated_label_early_error_test() {
-    basic_env_expression_eary_error_test(4, 5, "X: {X: {}}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 4, 5, "X: {X: {}}");
   }
 
   #[test]
@@ -4213,13 +4196,7 @@ else
 
   #[test]
   fn labelled_fn_contains_if_stmt_early_error_test() {
-    let env = [(Some(""), ""), (None, ""), (None, "")];
-    syntax_error_test(
-      &env,
-      "if (a) X:function K() {}",
-      &[&s_pos!(7, 24, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
-    )
+    basic_env_expression_eary_error_test(EnvFlag::BASIC, 7, 24, "if (a) X:function K() {}")
   }
 
   #[test]
@@ -4363,13 +4340,13 @@ else
 
   #[test]
   fn switch_stmt_block_duplicated_lexical_binding_early_error_test() {
-    basic_env_expression_eary_error_test(43, 44, "switch (a) {case 1: let a = 1; case 2: let a = 2}");
-    basic_env_expression_eary_error_test(43, 44, "switch (a) {case 1: var a = 1; case 2: let a = 2}");
-    basic_env_expression_eary_error_test(43, 44, "switch (a) {case 1: let a = 1; case 2: var a = 2}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 43, 44, "switch (a) {case 1: let a = 1; case 2: let a = 2}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 43, 44, "switch (a) {case 1: var a = 1; case 2: let a = 2}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 43, 44, "switch (a) {case 1: let a = 1; case 2: var a = 2}");
 
-    basic_env_expression_eary_error_test(47, 48, "switch (a) {case 1: const a = 1; case 2: const a = 2}");
-    basic_env_expression_eary_error_test(47, 48, "switch (a) {case 1: const a = 1; case 2: const a = 2}");
-    basic_env_expression_eary_error_test(47, 48, "switch (a) {case 1: const a = 1; case 2: const a = 2}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 47, 48, "switch (a) {case 1: const a = 1; case 2: const a = 2}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 47, 48, "switch (a) {case 1: const a = 1; case 2: const a = 2}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 47, 48, "switch (a) {case 1: const a = 1; case 2: const a = 2}");
   }
 
   #[test]
@@ -4739,49 +4716,34 @@ else
   #[test]
   fn labelled_fn_contains_for_stmt_early_error_test() {
     let env = [(Some(""), ""), (None, ""), (None, "")];
-    syntax_error_test(
-      &env,
-      "for (var i = 0; i < 10; i++) X:function K() {}",
-      &[&s_pos!(29, 46, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
-    );
-    syntax_error_test(
-      &env,
-      "for (const k in v) X:function K() {}",
-      &[&s_pos!(19, 36, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
-    );
-    syntax_error_test(
-      &env,
-      "for (const k of v) X:function K() {}",
-      &[&s_pos!(19, 36, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
-      false,
-    );
+    basic_env_expression_eary_error_test(EnvFlag::BASIC, 29, 46, "for (var i = 0; i < 10; i++) X:function K() {}");
+    basic_env_expression_eary_error_test(EnvFlag::BASIC, 19, 36, "for (const k in v) X:function K() {}");
+    basic_env_expression_eary_error_test(EnvFlag::BASIC, 19, 36, "for (const k of v) X:function K() {}");
   }
 
   #[test]
   fn lexical_duplicated_name_in_for_stmt_early_error_test() {
-    basic_env_expression_eary_error_test(33, 34, "for (let i = 0; i < 10; i++) var i = 0");
-    basic_env_expression_eary_error_test(21, 22, "for (let i in k) var i = 0");
-    basic_env_expression_eary_error_test(21, 22, "for (let i of k) var i = 0");
-    basic_env_expression_eary_error_test(9, 12, "for (let let in k) var i = 0");
-    basic_env_expression_eary_error_test(9, 12, "for (let let of k) var i = 0");
-    basic_env_expression_eary_error_test(13, 14, "for (let {i, i} in k) {}");
-    basic_env_expression_eary_error_test(13, 14, "for (let {i, i} of k) {}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 33, 34, "for (let i = 0; i < 10; i++) var i = 0");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 21, 22, "for (let i in k) var i = 0");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 21, 22, "for (let i of k) var i = 0");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 9, 12, "for (let let in k) var i = 0");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 9, 12, "for (let let of k) var i = 0");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 13, 14, "for (let {i, i} in k) {}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 13, 14, "for (let {i, i} of k) {}");
   }
 
   #[test]
   fn invalid_pattern_in_for_in_of_stmt_early_error_test() {
-    basic_env_expression_eary_error_test(13, 16, "for (let {a: x()} in k) {}");
-    basic_env_expression_eary_error_test(13, 16, "for (let {a: x()} of k) {}");
-    basic_env_expression_eary_error_test(19, 22, "for await (let {a: x()} of k) {}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 13, 16, "for (let {a: x()} in k) {}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 13, 16, "for (let {a: x()} of k) {}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 19, 22, "for await (let {a: x()} of k) {}");
   }
 
   #[test]
   fn invalid_assignment_target_type_in_for_in_of_stmt_early_error_test() {
-    basic_env_expression_eary_error_test(5, 8, "for (a++ in k) {}");
-    basic_env_expression_eary_error_test(5, 8, "for (a++ of k) {}");
-    basic_env_expression_eary_error_test(11, 14, "for await (a++ of k) {}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 5, 8, "for (a++ in k) {}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 5, 8, "for (a++ of k) {}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 11, 14, "for await (a++ of k) {}");
   }
 
   #[test]
@@ -5006,14 +4968,14 @@ else
 
   #[test]
   fn break_statement_undefined_label_early_error() {
-    basic_env_expression_eary_error_test(20, 21, "X: while (1) {break Y;}");
-    basic_env_expression_eary_error_test(48, 49, "X: while (1) {function m() {Y: while (1) {break X;}}}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 20, 21, "X: while (1) {break Y;}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 48, 49, "X: while (1) {function m() {Y: while (1) {break X;}}}");
   }
 
   #[test]
   fn break_statement_outside_iteration_or_switch_early_error() {
-    basic_env_expression_eary_error_test(0, 5, "break");
-    basic_env_expression_eary_error_test(26, 31, "while (1) {function m () {break;}}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 5, "break");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 26, 31, "while (1) {function m () {break;}}");
   }
 
   #[test]
@@ -5218,13 +5180,351 @@ else
 
   #[test]
   fn continue_statement_undefined_label_early_error() {
-    basic_env_expression_eary_error_test(23, 24, "X: while (1) {continue Y;}");
-    basic_env_expression_eary_error_test(51, 52, "X: while (1) {function m() {Y: while (1) {continue X;}}}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 23, 24, "X: while (1) {continue Y;}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 51, 52, "X: while (1) {function m() {Y: while (1) {continue X;}}}");
   }
 
   #[test]
   fn continue_statement_outside_iteration_or_switch_early_error() {
-    basic_env_expression_eary_error_test(0, 8, "continue");
-    basic_env_expression_eary_error_test(26, 34, "while (1) {function m () {continue;}}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 8, "continue");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 26, 34, "while (1) {function m () {continue;}}");
+  }
+
+  #[test]
+  fn parse_return_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return stmt!(
+          pos!(col, line),
+          unary!(
+            "OpNot",
+            "Pre",
+            pos!(col, line),
+            fnexpr!(
+              pos!(col + 1, line),
+              "Function",
+              0,
+              0,
+              scope!(@opaque is_strict, 0, true),
+              exprs!(pos!(col + 9, line)),
+              return_stmt!(pos!(col + 13, line), number!("1", pos!(col + 20, line)))
+            )
+          )
+        );
+      },
+      "!function() {return 1}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_return_statement_without_expr() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return stmt!(
+          pos!(col, line),
+          unary!(
+            "OpNot",
+            "Pre",
+            pos!(col, line),
+            fnexpr!(
+              pos!(col + 1, line),
+              "Function",
+              0,
+              0,
+              scope!(@opaque is_strict, 0, true),
+              exprs!(pos!(col + 9, line)),
+              return_stmt!(pos!(col + 13, line))
+            )
+          )
+        );
+      },
+      "!function() {return}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_arrow_return_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, is_skip)| {
+        return var!(
+          "Let",
+          pos!(col + 0, line),
+          ident!("a", pos!(col + 4, line)),
+          fnexpr!(
+            pos!(col + 8, line),
+            "ArrowFunction",
+            if is_skip { col + 21 } else { 0 },
+            if is_skip { col + 22 } else { 0 },
+            scope!(@transparent is_strict, 0, true),
+            exprs!(pos!(col + 8, line)),
+            if !is_skip { return_stmt!(pos!(col + 15, line)) } else { void!() }
+          )
+        );
+      },
+      "let a = () => {return}",
+      1,
+    )
+  }
+
+  #[test]
+  fn parse_method_return_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, is_skip)| {
+        return stmt!(
+          pos!(col, line),
+          objectlit!(
+            ObjectLitType::NONE,
+            pos!(col + 1, line),
+            object_props!(
+              pos!(col + 2, line),
+              ident!("a", pos!(col + 2, line)),
+              fnexpr!(
+                pos!(col + 2, line),
+                "Function",
+                if is_skip { col + 7 } else { 0 },
+                if is_skip { col + 13 } else { 0 },
+                scope!(@opaque is_strict, 0, true),
+                ident!("a", pos!(col + 2, line)),
+                exprs!(pos!(col + 4, line)),
+                if !is_skip { return_stmt!(pos!(col + 7, line)) } else { void!() }
+              )
+            )
+          )
+        );
+      },
+      "({a() {return}})",
+      1,
+    )
+  }
+
+  #[test]
+  fn return_statement_outside_function_early_error() {
+    const ENV: [(Option<&str>, &str); 3] = [(Some(""), ""), (None, ""), (None, "")];
+    basic_env_expression_eary_error_test(EnvFlag::BASIC, 0, 6, "return");
+  }
+
+  #[test]
+  fn parse_throw_statement() {
+    stmt_test(
+      |(col, line, is_strict, is_skip)| {
+        return throw_stmt!(pos!(col, line), number!("1", pos!(col + 6, line)));
+      },
+      "throw 1",
+    )
+  }
+
+  #[test]
+  fn throw_without_expr_parse_error() {
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 5, "throw");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 5, "throw;");
+    basic_env_expression_eary_error_test(
+      EnvFlag::all(),
+      0,
+      5,
+      "throw
+let a = 0",
+    );
+  }
+
+  #[test]
+  fn parse_try_catch_statement() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return try_catch_stmt!(
+          pos!(col, line),
+          block!(
+            pos!(col + 4, line),
+            scope!(@lexical is_strict, 0, true),
+            throw_stmt!(pos!(col + 5, line), ident!("a", pos!(col + 11, line)))
+          ),
+          catch_block!(
+            pos!(col + 14, line),
+            ident!("e", pos!(col + 20, line)),
+            block!(pos!(col + 23, line), scope!(@lexical is_strict, 0, true), empty!())
+          ),
+          block!(pos!(col + 34, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "try {throw a} catch(e) {} finally {}",
+      3,
+    )
+  }
+
+  #[test]
+  fn parse_try_catch_statement_without_finally() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return try_catch_stmt!(
+          pos!(col, line),
+          block!(
+            pos!(col + 4, line),
+            scope!(@lexical is_strict, 0, true),
+            throw_stmt!(pos!(col + 5, line), ident!("a", pos!(col + 11, line)))
+          ),
+          catch_block!(
+            pos!(col + 14, line),
+            ident!("e", pos!(col + 20, line)),
+            block!(pos!(col + 23, line), scope!(@lexical is_strict, 0, true), empty!())
+          )
+        );
+      },
+      "try {throw a} catch(e) {}",
+      2,
+    )
+  }
+
+  #[test]
+  fn parse_try_catch_statement_without_catch() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return try_catch_stmt!(
+          pos!(col, line),
+          block!(
+            pos!(col + 4, line),
+            scope!(@lexical is_strict, 0, true),
+            throw_stmt!(pos!(col + 5, line), ident!("a", pos!(col + 11, line)))
+          ),
+          block!(pos!(col + 22, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "try {throw a} finally {}",
+      2,
+    )
+  }
+
+  #[test]
+  fn parse_try_catch_statement_without_catch_param() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return try_catch_stmt!(
+          pos!(col, line),
+          block!(
+            pos!(col + 4, line),
+            scope!(@lexical is_strict, 0, true),
+            throw_stmt!(pos!(col + 5, line), ident!("a", pos!(col + 11, line)))
+          ),
+          catch_block!(
+            pos!(col + 14, line),
+            block!(pos!(col + 20, line), scope!(@lexical is_strict, 0, true), empty!())
+          )
+        );
+      },
+      "try {throw a} catch {}",
+      2,
+    )
+  }
+
+  #[test]
+  fn parse_try_catch_statement_with_duplicated_var_decl() {
+    stmt_test_with_scope(
+      |(col, line, is_strict, _)| {
+        return try_catch_stmt!(
+          pos!(col, line),
+          block!(
+            pos!(col + 4, line),
+            scope!(@lexical is_strict, 0, true),
+            throw_stmt!(pos!(col + 5, line), ident!("a", pos!(col + 11, line)))
+          ),
+          catch_block!(
+            pos!(col + 14, line),
+            ident!("e", pos!(col + 20, line)),
+            block!(
+              pos!(col + 23, line),
+              scope!(@lexical is_strict, 0, true),
+              var!(
+                "Var",
+                pos!(col + 24, line),
+                ident!("e", pos!(col + 28, line)),
+                number!("0", pos!(col + 32, line))
+              )
+            )
+          )
+        );
+      },
+      "try {throw a} catch(e) {var e = 0;}",
+      2,
+    )
+  }
+
+  #[test]
+  fn catch_param_has_duplicated_param_early_error_test() {
+    basic_env_expression_eary_error_test(EnvFlag::all(), 17, 18, "try {} catch([a, a]) {}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 25, 26, "try {} catch({a: {b: c}, c}) {}");
+  }
+
+  #[test]
+  fn catch_param_has_duplicated_lexical_decl_in_block_early_error_test() {
+    basic_env_expression_eary_error_test(EnvFlag::all(), 21, 22, "try {} catch(a) {let a = 0;}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 23, 24, "try {} catch([a]) {let a = 0;}");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 23, 24, "try {} catch([a]) {var a = 0;}");
+  }
+
+  #[test]
+  fn parse_debugger_statement() {
+    stmt_test(
+      |(col, line, _, _)| {
+        return debugger_stmt!(pos!(col, line));
+      },
+      "debugger",
+    );
+  }
+
+  #[test]
+  fn parse_with_statement() {
+    parser_ast_test_with_options(
+      |(col, line, is_strict, _)| {
+        return with_stmt!(
+          pos!(col, line),
+          ident!("a", pos!(col + 5, line)),
+          block!(pos!(col + 8, line), scope!(@lexical is_strict, 0, true), empty!())
+        );
+      },
+      "with(a) {}",
+      ParserOption::default(),
+      1,
+      EnvFlag::BASIC | EnvFlag::FUNCTION_WRAPPER,
+      0,
+      true,
+    );
+  }
+
+  #[test]
+  fn with_statement_in_strict_mode_early_error_test() {
+    basic_env_expression_eary_error_test(EnvFlag::STRICT_MODE, 0, 4, "with (a) {}");
+  }
+
+  #[test]
+  fn parse_script_direct_eval_super() {
+    single_expression_test_with_options(
+      |(col, line, _, _)| {
+        return callexpr!("Super", pos!(col, line), exprs!(pos!(col + 5, line)));
+      },
+      "super()",
+      ParserOption::default().with_allow_super(),
+      0,
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+      0,
+    );
+  }
+
+  #[test]
+  fn parse_script_direct_new_target() {
+    single_expression_test_with_options(
+      |(col, line, _, _)| {
+        return prop!(
+          "Dot",
+          pos!(col, line),
+          ident!("new", pos!(col, line)),
+          ident!("target", pos!(col + 4, line))
+        );
+      },
+      "new.target",
+      ParserOption::default().with_allow_new_target(),
+      0,
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+      0,
+    );
   }
 }

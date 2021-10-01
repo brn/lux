@@ -423,4 +423,34 @@ impl NodeOps for SkipTreeBuilder {
   fn new_continue_stmt(&mut self, identifier: Option<FixedU16CodePointArray>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
     return self.skip_stmt;
   }
+
+  fn new_return_stmt(&mut self, expr: Option<Expr>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_stmt;
+  }
+
+  fn new_throw_stmt(&mut self, expr: Expr, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_stmt;
+  }
+
+  fn new_catch_block(&mut self, param: Option<Expr>, block: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_stmt;
+  }
+
+  fn new_try_catch_stmt(
+    &mut self,
+    try_block: Stmt,
+    catch_block: Option<Stmt>,
+    finally_block: Option<Stmt>,
+    pos: Option<&RuntimeSourcePosition>,
+  ) -> Stmt {
+    return self.skip_stmt;
+  }
+
+  fn new_with_stmt(&mut self, expr: Expr, body: Stmt, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_stmt;
+  }
+
+  fn new_debugger_stmt(&mut self, pos: Option<&RuntimeSourcePosition>) -> Stmt {
+    return self.skip_stmt;
+  }
 }

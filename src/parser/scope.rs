@@ -108,6 +108,10 @@ impl Scope {
     return self.scope_flag.contains(ScopeFlag::HAS_SUPER_CALL);
   }
 
+  pub fn is_root_scope(&self) -> bool {
+    return self.scope_flag.contains(ScopeFlag::ROOT_SCOPE);
+  }
+
   pub fn is_simple_parameter(&self) -> bool {
     return self.scope_flag.intersects(ScopeFlag::SIMPLE_PARAMETER | ScopeFlag::ROOT_SCOPE);
   }
