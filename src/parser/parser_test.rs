@@ -6221,4 +6221,15 @@ let a = 0",
       EnvFlag::BASIC | EnvFlag::STRICT_MODE,
     );
   }
+
+  #[test]
+  fn named_export_reserved_keyword_eary_error_test() {
+    basic_env_expression_eary_error_test_with_parser_type(
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+      14,
+      24,
+      "export {a, b, implements}",
+      ParserType::Module,
+    );
+  }
 }

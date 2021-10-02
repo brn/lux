@@ -4027,7 +4027,7 @@ impl Parser {
 
   #[inline]
   fn parse_named_import<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
-    return next_parse!(self, self.parse_named_list(builder));
+    return next_parse!(self, self.parse_named_list(builder, true));
   }
 
   fn parse_export_declaration<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
@@ -4124,25 +4124,30 @@ impl Parser {
   }
 
   fn parse_export_clause<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
-    return next_parse!(self, self.parse_named_list(builder));
+    return next_parse!(self, self.parse_named_list(builder, false));
   }
 
   #[inline]
-  fn parse_named_list<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
+  fn parse_named_list<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>, allow_reserved_keyword: bool) -> ParseResult<Expr> {
     let start = self.source_position().clone();
     expect!(self, self.cur(), Token::LeftBrace);
     let mut list = Vec::<Expr>::new();
+    let constraints = if allow_reserved_keyword {
+      ParserConstraints::KeywordIdentifier
+    } else {
+      ParserConstraints::None
+    };
 
     while self.has_more() && self.cur() != Token::RightBrace {
       let specifier_start_pos = self.source_position().clone();
       let name_value = self.value().clone();
-      let identifier = next_parse!(self, self.parse_identifier_reference(builder, ParserConstraints::KeywordIdentifier))?;
+      let identifier = next_parse!(self, self.parse_identifier_reference(builder, constraints))?;
       let node = if self.cur() == Token::Identifier && self.contextual_keyword() == Token::As {
         self.advance()?;
         let pos = self.source_position().clone();
         let val = self.value().clone();
         self.declare_module_header_var((val, pos))?;
-        let value_ref = next_parse!(self, self.parse_identifier(builder, ParserConstraints::KeywordIdentifier))?;
+        let value_ref = next_parse!(self, self.parse_identifier_reference(builder, constraints))?;
         self.advance()?;
         build!(@pos, builder, import_specifier, specifier_start_pos, false, Some(identifier), Some(value_ref))
       } else {
