@@ -103,7 +103,7 @@ impl ParserDebugger {
     });
     #[cfg(feature = "print_ast_when_called")]
     {
-      self.print_enter(self.debug_info_list.last().as_ref().unwrap(), self.indent);
+      self.print_enter(self.debug_info_list.last().as_ref().unwrap(), &self.indent);
       self.indent = format!("  {}", self.indent);
     }
   }
@@ -121,7 +121,7 @@ impl ParserDebugger {
     #[cfg(feature = "print_ast_when_called")]
     {
       self.indent = self.indent.chars().take(self.indent.len() - 2).collect::<String>();
-      self.print_leave(self.debug_info_list.last().as_ref().unwrap(), self.indent);
+      self.print_leave(self.debug_info_list.last().as_ref().unwrap(), &self.indent);
     }
   }
 
@@ -254,6 +254,9 @@ pub struct ParserOption {
   disable_skip_parser: bool,
 
   #[property(get(type = "copy"), set(disable))]
+  should_parse_with_skip_parser: bool,
+
+  #[property(get(type = "copy"), set(disable))]
   is_root_super_allowed: bool,
 
   #[property(get(type = "copy"), set(disable))]
@@ -262,6 +265,11 @@ pub struct ParserOption {
 impl ParserOption {
   pub fn with_disable_skip_parser(mut self) -> Self {
     self.disable_skip_parser = true;
+    return self;
+  }
+
+  pub fn with_skip_parser(mut self) -> Self {
+    self.should_parse_with_skip_parser = true;
     return self;
   }
 
@@ -279,13 +287,14 @@ impl Default for ParserOption {
   fn default() -> Self {
     ParserOption {
       disable_skip_parser: false,
+      should_parse_with_skip_parser: false,
       is_root_new_target_allowed: false,
       is_root_super_allowed: false,
     }
   }
 }
 
-#[derive(PartialEq)]
+#[derive(PartialEq, Clone, Copy)]
 pub enum ParserType {
   Script,
   Module,
@@ -403,7 +412,21 @@ impl Parser {
       empty,
       use_strict_str: FixedU16CodePointArray::from_utf8(context, "use strict"),
       constructor_str: FixedU16CodePointArray::from_utf8(context, "constructor"),
-      root_scope: Scope::new(region.clone(), ScopeFlag::OPAQUE | ScopeFlag::ROOT_SCOPE),
+      root_scope: Scope::new(
+        region.clone(),
+        ScopeFlag::OPAQUE
+          | ScopeFlag::ROOT_SCOPE
+          | if parser_option.is_root_super_allowed() {
+            ScopeFlag::ALLOW_SUPER_CALL | ScopeFlag::ALLOW_SUPER_PROPERTY
+          } else {
+            ScopeFlag::NONE
+          }
+          | if parser_option.is_root_new_target_allowed() {
+            ScopeFlag::ALLOW_NEW_TARGET
+          } else {
+            ScopeFlag::NONE
+          },
+      ),
       current_scope: Exotic::new(std::ptr::null_mut()),
       expression_context: ExprCtx::Expr(ExpressionContext::new()),
       ast_builder: region.alloc(AstBuilder::new(region.clone())),
@@ -766,11 +789,19 @@ impl Parser {
   }
 
   fn parse_script(&mut self) -> ParseResult<Ast> {
-    return next_parse!(self, self.parse_statement_list(self.ast_builder, |_| true)).map(|a| Into::<Ast>::into(a));
+    if !self.parser_option.should_parse_with_skip_parser() {
+      return next_parse!(self, self.parse_statement_list(self.ast_builder, |_| true)).map(|a| Into::<Ast>::into(a));
+    } else {
+      return next_parse!(self, self.parse_statement_list(self.skip_tree_builder, |_| true)).map(|a| Into::<Ast>::into(a));
+    }
   }
 
   fn parse_module(&mut self) -> ParseResult<Ast> {
-    return next_parse!(self, self.parse_module_body(self.ast_builder)).map(|a| Into::<Ast>::into(a));
+    if !self.parser_option.should_parse_with_skip_parser() {
+      return next_parse!(self, self.parse_module_body(self.ast_builder)).map(|a| Into::<Ast>::into(a));
+    } else {
+      return next_parse!(self, self.parse_module_body(self.skip_tree_builder)).map(|a| Into::<Ast>::into(a));
+    }
   }
 
   fn parse_module_body<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
@@ -778,6 +809,9 @@ impl Parser {
     let mut items = Vec::<Stmt>::new();
     while self.has_more() {
       let item = next_parse!(self, self.parse_module_item(builder))?;
+      if Node::<Empty>::is(item) {
+        continue;
+      }
       builder.push_stmt(&mut items, item);
     }
     return Ok(build!(@pos, builder, statements, start, items).into());
@@ -883,7 +917,6 @@ impl Parser {
       }
       Token::Identifier | Token::Await | Token::Yield => {
         if self.contextual_keyword() == Token::Async && !self.has_line_break_after() && self.peek()? == Token::Function {
-          self.advance()?;
           return next_parse!(self, self.parse_function_expression(builder, FunctionAttribute::ASYNC));
         }
         return next_parse!(self, self.parse_identifier_reference(builder, ParserConstraints::None));
@@ -1348,21 +1381,21 @@ impl Parser {
     }
 
     if self.cur() == Token::New {
+      let new_start_pos = self.source_position().clone();
       self.advance()?;
       if self.cur() == Token::Dot {
         self.advance()?;
         if self.cur() == Token::Identifier {
           if self.contextual_keyword() == Token::Target {
-            if self.current_scope.is_transparent()
-              || (self.current_scope.is_root_scope() && self.parser_option.is_root_new_target_allowed())
-            {
+            if !self.current_scope.is_new_target_allowed() {
               return parse_error!(self.region, "new.target is not allowed here", self.source_position());
             }
             self.advance()?;
             return Ok(build!(
-              self,
+              @pos,
               builder,
               property_access_expression,
+              new_start_pos,
               PropertyAccessType::Dot,
               CallReceiverType::New,
               None,
@@ -2194,21 +2227,27 @@ impl Parser {
     match self.cur() {
       Token::Identifier | Token::Const => {
         if self.contextual_keyword() != Token::Async || self.peek()? != Token::Function {
-          return self.parse_lexical_or_variable_declaration(
-            builder,
-            if self.contextual_keyword() == Token::Let {
-              VariableDeclarationType::Let
-            } else {
-              VariableDeclarationType::Const
-            },
-            false,
-            true,
+          return next_parse!(
+            self,
+            self.parse_lexical_or_variable_declaration(
+              builder,
+              if self.contextual_keyword() == Token::Let {
+                VariableDeclarationType::Let
+              } else {
+                VariableDeclarationType::Const
+              },
+              false,
+              true,
+            )
           );
         }
-        return next_parse!(self, self.parse_function_declaration(builder, FunctionAttribute::ASYNC));
+        return next_parse!(self, self.parse_function_declaration(builder, FunctionAttribute::ASYNC, false));
+      }
+      Token::Class => {
+        return next_parse!(self, self.parse_class_declaration(builder, false));
       }
       Token::Function => {
-        return next_parse!(self, self.parse_function_declaration(builder, FunctionAttribute::NONE));
+        return next_parse!(self, self.parse_function_declaration(builder, FunctionAttribute::NONE, false));
       }
       _ => unreachable!(),
     };
@@ -2254,6 +2293,9 @@ impl Parser {
       let stmt = next_parse!(self, self.parse_statement_list_item(builder))?;
       if self.cur() == Token::Terminate {
         self.advance()?;
+      }
+      if Node::<Empty>::is(stmt) {
+        continue;
       }
       builder.push_stmt(&mut items, stmt);
     }
@@ -3010,7 +3052,7 @@ impl Parser {
           self.source_position()
         );
       }
-      next_parse!(self, self.parse_function_declaration(builder, FunctionAttribute::NONE))
+      next_parse!(self, self.parse_function_declaration(builder, FunctionAttribute::NONE, false))
     } else {
       next_parse!(self, self.parse_statement(builder))
     }?;
@@ -3140,8 +3182,13 @@ impl Parser {
     return Ok(Expr::try_from(node).expect("Function failed to cast to expression"));
   }
 
-  fn parse_function_declaration<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>, attr: FunctionAttribute) -> ParseResult<Stmt> {
-    let node = next_parse!(self, self.parse_function(builder, attr, true))?;
+  fn parse_function_declaration<Builder: NodeOps>(
+    &mut self,
+    mut builder: Exotic<Builder>,
+    attr: FunctionAttribute,
+    is_default_export: bool,
+  ) -> ParseResult<Stmt> {
+    let node = next_parse!(self, self.parse_function(builder, attr, is_default_export))?;
     return Ok(Stmt::try_from(node).expect("Function failed to cast to declaration"));
   }
 
@@ -3156,6 +3203,9 @@ impl Parser {
     self.statement_block.set_is_continuable(false);
     self.statement_block.set_is_returnable(true);
     let start = self.source_position().clone();
+    if attr.contains(FunctionAttribute::ASYNC) {
+      self.advance()?;
+    }
     expect!(self, self.cur(), Token::Function);
     let mut identifier: Option<Expr> = None;
     let mut var_list = Vec::<(Vec<u16>, SourcePosition)>::new();
@@ -3199,6 +3249,7 @@ impl Parser {
 
     let scope = self.declare_child_scope(
       ScopeFlag::OPAQUE
+        | ScopeFlag::ALLOW_NEW_TARGET
         | if attr.contains(FunctionAttribute::ASYNC) {
           ScopeFlag::ASYNC_CONTEXT
         } else {
@@ -3235,15 +3286,14 @@ impl Parser {
       function_body_end = (self.scanner.source_index() - 1) as u32;
       None
     };
-    if !self.parser_option.is_root_super_allowed() {
-      if self.current_scope.first_super_call_position().is_some() {
-        let pos = self.current_scope.first_super_call_position().unwrap().clone();
-        return parse_error!(self.region, "Super not allowed here", &pos);
-      }
-      if self.current_scope.first_super_property_position().is_some() && !self.parser_option.is_root_super_allowed() {
-        let pos = self.current_scope.first_super_property_position().unwrap().clone();
-        return parse_error!(self.region, "Super not allowed here", &pos);
-      }
+
+    if !self.current_scope.is_super_call_allowed() && self.current_scope.first_super_call_position().is_some() {
+      let pos = self.current_scope.first_super_call_position().unwrap().clone();
+      return parse_error!(self.region, "Super not allowed here", &pos);
+    }
+    if !self.current_scope.is_super_property_allowed() && self.current_scope.first_super_property_position().is_some() {
+      let pos = self.current_scope.first_super_property_position().unwrap().clone();
+      return parse_error!(self.region, "Super not allowed here", &pos);
     }
     self.set_expression_context(parent_ctx);
     self.escape_scope(scope);
@@ -3321,10 +3371,12 @@ impl Parser {
         if let Some(e) = value_ctx.first_value_error() {
           return Err(e);
         }
-        if !self.parser_option.is_root_super_allowed() {
+        if !self.current_scope.is_super_property_allowed() {
           if let Some(pos) = self.current_scope.first_super_property_position() {
             return parse_error!(self.region, "Super not allowed here", pos);
           }
+        }
+        if !self.current_scope.is_super_call_allowed() {
           if let Some(pos) = self.current_scope.first_super_call_position() {
             return parse_error!(self.region, "Super not allowed here", pos);
           }
@@ -3554,6 +3606,18 @@ impl Parser {
     };
     expect!(self, self.cur(), Token::LeftBrace);
     let scope_flag = ScopeFlag::OPAQUE
+      | if attr.contains(FunctionAttribute::CONSTRUCTOR) {
+        ScopeFlag::ALLOW_NEW_TARGET
+          | if is_allow_direct_super {
+            ScopeFlag::ALLOW_SUPER_CALL
+          } else {
+            ScopeFlag::NONE
+          }
+      } else if is_allow_direct_super {
+        ScopeFlag::ALLOW_SUPER_PROPERTY
+      } else {
+        ScopeFlag::NONE
+      }
       | if attr.contains(FunctionAttribute::ASYNC) {
         ScopeFlag::ASYNC_CONTEXT
       } else {
@@ -3586,9 +3650,7 @@ impl Parser {
       next_skip_parse!(this, this.parse_function_body(skip_tree_builder))?;
       None
     };
-    if this.current_scope.first_super_call_position().is_some()
-      && (!this.current_scope.is_root_scope() || !this.parser_option.is_root_super_allowed())
-    {
+    if this.current_scope.first_super_call_position().is_some() && !this.current_scope.is_super_call_allowed() {
       if !attr.contains(FunctionAttribute::CONSTRUCTOR) || !is_allow_direct_super {
         let pos = this.current_scope.first_super_call_position().unwrap().clone();
         return parse_error!(this.region, "Super not allowed here", &pos);
@@ -3734,15 +3796,15 @@ impl Parser {
     ));
   }
 
-  fn parse_class_declaration<Builder: NodeOps>(&mut self, builder: Exotic<Builder>) -> ParseResult<Stmt> {
-    return Ok(Stmt::try_from(next_parse!(self, self.parse_class(builder))?).expect("Failed to convert Class to Stmt"));
+  fn parse_class_declaration<Builder: NodeOps>(&mut self, builder: Exotic<Builder>, is_default_export: bool) -> ParseResult<Stmt> {
+    return Ok(Stmt::try_from(next_parse!(self, self.parse_class(builder, is_default_export))?).expect("Failed to convert Class to Stmt"));
   }
 
   fn parse_class_expression<Builder: NodeOps>(&mut self, builder: Exotic<Builder>) -> ParseResult<Expr> {
-    return Ok(Expr::try_from(next_parse!(self, self.parse_class(builder))?).expect("Failed to convert Class to Expr"));
+    return Ok(Expr::try_from(next_parse!(self, self.parse_class(builder, true))?).expect("Failed to convert Class to Expr"));
   }
 
-  fn parse_class<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Ast> {
+  fn parse_class<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>, is_name_omittable: bool) -> ParseResult<Ast> {
     let start_pos = self.source_position().clone();
     expect!(self, self.cur(), Token::Class);
     let mut name = None;
@@ -3751,6 +3813,8 @@ impl Parser {
         self,
         self.parse_identifier_reference(builder, ParserConstraints::None)
       )?);
+    } else if !is_name_omittable {
+      return parse_error!(self.region, "Class name required", &start_pos);
     }
     let mut heritage = None;
     if self.cur() == Token::Extends {
@@ -3881,7 +3945,7 @@ impl Parser {
 
   fn parse_import_declaration<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
     debug_assert!(self.cur() == Token::Import);
-    let mut start = self.source_position().clone();
+    let start = self.source_position().clone();
     self.advance()?;
     if self.cur() == Token::StringLiteral {
       let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()), Token::Invalid);
@@ -3890,73 +3954,108 @@ impl Parser {
       return Ok(build!(@pos, builder, import_decl, start, None, str));
     }
 
-    let mut default_binding_node = None;
-    start = self.source_position().clone();
-    if self.cur() == Token::Identifier {
-      let default_binding = next_parse!(self, self.parse_identifier(builder, ParserConstraints::None))?;
-      self.advance()?;
-      default_binding_node = Some(default_binding);
-    }
-
-    let mut namespace_import = None;
-    let mut named_import_list = None;
-    match self.cur() {
-      Token::LeftBrace => {
-        named_import_list = Some(next_parse!(self, self.parse_named_import(builder))?);
-      }
-      Token::OpMul => {
-        namespace_import = Some(next_parse!(self, self.parse_name_space_import(builder))?);
-      }
-      _ => return parse_error!(self.region, "Unexpected token", self.source_position()),
-    }
-    let ib = build!(@pos, builder, import_binding, start, default_binding_node, namespace_import, named_import_list);
+    let ib = next_parse!(self, self.parse_import_binding(builder, true))?;
 
     if self.cur() == Token::Identifier && self.contextual_keyword() == Token::From {
       self.advance()?;
+      let literal_pos = self.source_position().clone();
       if self.cur() == Token::StringLiteral {
         let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()), Token::Invalid);
         let t = self.cur();
-        let str = build!(self, builder, literal, t, val);
-        if self.cur() == Token::Terminate {
-          self.advance()?;
-        } else if !self.has_line_break_before() {
-          return parse_error!(self.region, "';' expected", self.source_position());
-        }
-        return Ok(build!(self, builder, import_decl, Some(ib.into()), str));
+        self.advance()?;
+        let str = build!(@pos, builder, literal, literal_pos, t, val);
+        let node = build!(@pos, builder, import_decl, start, Some(ib.into()), str);
+        return next_parse!(self, self.parse_terminator(node));
       }
     }
 
     return parse_error!(self.region, "Module specifier expected", self.source_position());
   }
 
-  fn parse_name_space_import<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
-    expect!(self, self.cur(), Token::Export);
-    if self.cur() == Token::Identifier && self.contextual_keyword() == Token::As {
-      return Ok(build!(self, builder, import_specifier, true, None, None));
-    }
-    return parse_error!(self.region, "'as' expected", self.source_position());
+  fn parse_import_binding<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>, is_default_allowed: bool) -> ParseResult<Expr> {
+    let binding_start = self.source_position().clone();
+    match self.cur() {
+      Token::LeftBrace => {
+        let node = next_parse!(self, self.parse_named_import(builder))?;
+        if !is_default_allowed {
+          return Ok(node);
+        }
+        return Ok(build!(@pos, builder, import_binding, binding_start, None, Some(node)));
+      }
+      Token::OpMul => {
+        let node = next_parse!(self, self.parse_namespace_import(builder, true))?;
+        if !is_default_allowed {
+          return Ok(node);
+        }
+        return Ok(build!(@pos, builder, import_binding, binding_start, None, Some(node)));
+      }
+      Token::Identifier => {
+        if !is_default_allowed {
+          return parse_error!(self.region, "default import only allowed once", self.source_position());
+        }
+        let args = (self.value().clone(), self.source_position().clone());
+        self.declare_module_header_var(args)?;
+        let default_binding = next_parse!(self, self.parse_identifier(builder, ParserConstraints::None))?;
+        self.advance()?;
+        let other_binding = if self.cur() == Token::Comma {
+          self.advance()?;
+          Some(next_parse!(self, self.parse_import_binding(builder, false))?)
+        } else {
+          None
+        };
+        return Ok(build!(@pos, builder, import_binding, binding_start, Some(default_binding), other_binding));
+      }
+      _ => return parse_error!(self.region, "Import specifier expected", &binding_start),
+    };
   }
 
+  fn parse_namespace_import<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>, is_as_required: bool) -> ParseResult<Expr> {
+    let start = self.source_position().clone();
+    expect!(self, self.cur(), Token::OpMul);
+    if self.cur() == Token::Identifier && self.contextual_keyword() == Token::As {
+      self.advance()?;
+      let args = (self.value().clone(), self.source_position().clone());
+      self.declare_module_header_var(args)?;
+      let expr = next_parse!(self, self.parse_single_name_binding(builder, ParserConstraints::None))?;
+      return Ok(build!(@pos, builder, import_specifier, start, true, None, Some(expr)));
+    }
+    if is_as_required {
+      return parse_error!(self.region, "'as' expected", self.source_position());
+    }
+    return Ok(build!(@pos, builder, import_specifier, start, true, None, None));
+  }
+
+  #[inline]
   fn parse_named_import<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
     return next_parse!(self, self.parse_named_list(builder));
   }
 
   fn parse_export_declaration<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
+    let start_pos = self.source_position().clone();
     expect!(self, self.cur(), Token::Export);
-    let mut export_type = ExportDeclarationType::NamespaceExport;
+    let mut export_type = ExportDeclarationType::NAMESPACE;
     let mut export_clause: Option<Ast> = None;
+    let mut should_check_terminator = true;
+
     if self.cur() == Token::Default {
-      export_type = ExportDeclarationType::DefaultExport;
+      export_type = ExportDeclarationType::DEFAULT;
       self.advance()?;
       match self.cur() {
         Token::Class => {
-          export_clause = Some(next_parse!(self, self.parse_class_declaration(builder))?.into());
+          should_check_terminator = false;
+          export_clause = Some(next_parse!(self, self.parse_class_declaration(builder, true))?.into());
         }
         Token::Function => {
-          export_clause = Some(next_parse!(self, self.parse_function_expression(builder, FunctionAttribute::NONE))?.into());
+          should_check_terminator = false;
+          export_clause = Some(next_parse!(self, self.parse_function_declaration(builder, FunctionAttribute::NONE, true))?.into());
         }
         Token::Identifier => {
-          export_clause = Some(next_parse!(self, self.parse_assignment_expression(builder))?.into());
+          if self.contextual_keyword() == Token::Async && self.peek()? == Token::Function {
+            should_check_terminator = false;
+            export_clause = Some(next_parse!(self, self.parse_function_declaration(builder, FunctionAttribute::ASYNC, true))?.into());
+          } else {
+            export_clause = Some(next_parse!(self, self.parse_assignment_expression(builder))?.into());
+          }
         }
         _ => {
           export_clause = Some(next_parse!(self, self.parse_assignment_expression(builder))?.into());
@@ -3966,11 +4065,18 @@ impl Parser {
         }
       }
 
-      return Ok(build!(self, builder, export_decl, export_type, export_clause, None));
+      let node = build!(@pos, builder, export_decl, start_pos, export_type, export_clause, None);
+      if should_check_terminator {
+        return next_parse!(self, self.parse_terminator(node));
+      } else {
+        return Ok(node);
+      }
     }
 
+    let mut from_clause = None;
     match self.cur() {
       Token::Var => {
+        should_check_terminator = false;
         export_clause = Some(
           next_parse!(
             self,
@@ -3980,56 +4086,68 @@ impl Parser {
         );
       }
       Token::Const | Token::Function | Token::Class => {
+        should_check_terminator = false;
         export_clause = Some(next_parse!(self, self.parse_declaration(builder))?.into());
       }
       Token::Identifier => {
-        if self.contextual_keyword() == Token::Let {
+        if self.contextual_keyword().one_of(&[Token::Let, Token::Async]) {
+          should_check_terminator = false;
           export_clause = Some(next_parse!(self, self.parse_declaration(builder))?.into());
+        } else {
+          return parse_error!(self.region, "Unexpected token found", self.source_position());
         }
-        return parse_error!(self.region, "Unexpected token found", self.source_position());
       }
       _ => {
-        export_clause = Some(next_parse!(self, self.parse_export_clause(builder))?.into());
+        if self.cur() == Token::OpMul {
+          export_clause = Some(next_parse!(self, self.parse_namespace_import(builder, false))?.into());
+        } else {
+          export_clause = Some(next_parse!(self, self.parse_export_clause(builder))?.into());
+        }
+        if self.cur() == Token::Identifier && self.contextual_keyword() == Token::From {
+          self.advance()?;
+          if self.cur() == Token::StringLiteral {
+            let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()), Token::Invalid);
+            from_clause = Some(build!(self, builder, literal, Token::StringLiteral, val).into());
+            self.advance()?;
+          } else {
+            return parse_error!(self.region, "Module specifier expected", self.source_position());
+          }
+        }
       }
     }
 
-    let mut from_clause: Option<Ast> = None;
-    if self.cur() == Token::Identifier && self.contextual_keyword() == Token::From {
-      self.advance()?;
-      if self.cur() == Token::StringLiteral {
-        let val = LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, self.value()), Token::Invalid);
-        from_clause = Some(build!(self, builder, literal, Token::StringLiteral, val).into());
-      } else {
-        return parse_error!(self.region, "Module specifier expected", self.source_position());
-      }
+    let export_decl = build!(@pos, builder, export_decl, start_pos, export_type, export_clause, from_clause);
+    if should_check_terminator {
+      return next_parse!(self, self.parse_terminator(export_decl));
     }
-
-    if self.cur() == Token::Terminate {
-      self.advance()?;
-    } else if self.has_line_break_after() {
-      return parse_error!(self.region, "';' expected", self.source_position());
-    }
-
-    return Ok(build!(self, builder, export_decl, export_type, export_clause, from_clause));
+    return Ok(export_decl);
   }
 
   fn parse_export_clause<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
     return next_parse!(self, self.parse_named_list(builder));
   }
 
+  #[inline]
   fn parse_named_list<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
     let start = self.source_position().clone();
     expect!(self, self.cur(), Token::LeftBrace);
     let mut list = Vec::<Expr>::new();
 
     while self.has_more() && self.cur() != Token::RightBrace {
+      let specifier_start_pos = self.source_position().clone();
+      let name_value = self.value().clone();
       let identifier = next_parse!(self, self.parse_identifier_reference(builder, ParserConstraints::KeywordIdentifier))?;
       let node = if self.cur() == Token::Identifier && self.contextual_keyword() == Token::As {
         self.advance()?;
+        let pos = self.source_position().clone();
+        let val = self.value().clone();
+        self.declare_module_header_var((val, pos))?;
         let value_ref = next_parse!(self, self.parse_identifier(builder, ParserConstraints::KeywordIdentifier))?;
-        build!(self, builder, import_specifier, false, Some(identifier), Some(value_ref))
+        self.advance()?;
+        build!(@pos, builder, import_specifier, specifier_start_pos, false, Some(identifier), Some(value_ref))
       } else {
-        build!(self, builder, import_specifier, false, Some(identifier), None)
+        self.declare_module_header_var((name_value, specifier_start_pos.clone()))?;
+        build!(@pos, builder, import_specifier, specifier_start_pos, false, Some(identifier), None)
       };
       builder.push_expr(&mut list, node);
 
@@ -4040,6 +4158,21 @@ impl Parser {
       }
     }
 
+    expect!(self, self.cur(), Token::RightBrace);
     return Ok(build!(@pos, builder, named_import_list, start, list).into());
+  }
+
+  fn declare_module_header_var(&mut self, var: (Vec<u16>, SourcePosition)) -> ParseResult<()> {
+    if let Some((cur, first)) = self.current_scope.declare_var(VariableType::Lexical, var) {
+      return parse_error!(
+        self.region,
+        &format!(
+          "Lexical declaration may not contains any duplicated identifiers\n\n{}\nBut found",
+          format_error(&self.source.filename(), self.source.source_code(), "First defined", &first, false)
+        ),
+        &cur
+      );
+    }
+    return Ok(());
   }
 }

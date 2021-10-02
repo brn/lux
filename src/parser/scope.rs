@@ -17,6 +17,9 @@ bitflags! {
     const SIMPLE_PARAMETER = 0x40;
     const ASYNC_CONTEXT = 0x80;
     const GENERATOR_CONTEXT = 0x100;
+    const ALLOW_SUPER_CALL = 0x200;
+    const ALLOW_SUPER_PROPERTY = 0x400;
+    const ALLOW_NEW_TARGET = 0x800;
   }
 }
 
@@ -140,6 +143,18 @@ impl Scope {
     return self.scope_flag.contains(ScopeFlag::TRANSPARENT);
   }
 
+  pub fn is_super_call_allowed(&self) -> bool {
+    return self.scope_flag.contains(ScopeFlag::ALLOW_SUPER_CALL);
+  }
+
+  pub fn is_super_property_allowed(&self) -> bool {
+    return self.scope_flag.contains(ScopeFlag::ALLOW_SUPER_PROPERTY);
+  }
+
+  pub fn is_new_target_allowed(&self) -> bool {
+    return self.scope_flag.contains(ScopeFlag::ALLOW_NEW_TARGET);
+  }
+
   pub fn add_child_scope(&mut self, mut scope: Exotic<Scope>) {
     if self.is_strict_mode() {
       scope.mark_as_strict_mode();
@@ -171,7 +186,10 @@ impl Scope {
     return None;
   }
 
-  pub fn declare_var(&mut self, var_type: VariableType, var: (Vec<u16>, SourcePosition)) {
+  pub fn declare_var(&mut self, var_type: VariableType, var: (Vec<u16>, SourcePosition)) -> Option<(SourcePosition, SourcePosition)> {
+    if let Some(pos) = self.get_already_declared_var_position(&var.0, var_type == VariableType::LegacyVar) {
+      return Some((var.1.clone(), pos.clone()));
+    }
     if self.is_opaque() || (self.is_lexical() && var_type == VariableType::Lexical) {
       self.var_list.push((var.0.clone(), var.1.clone(), var_type));
       self.var_map.insert(var.0, (var.1, var_type));
@@ -182,7 +200,7 @@ impl Scope {
       }
       if let Some(mut scope) = self.nearest_opaque_scope {
         scope.declare_var(var_type, var);
-        return;
+        return None;
       }
       let mut parent = self.parent_scope;
       while parent.is_some() && parent.unwrap().is_transparent() {
@@ -191,6 +209,7 @@ impl Scope {
       self.nearest_opaque_scope = parent;
       parent.unwrap().declare_var(var_type, var);
     }
+    return None;
   }
 
   pub fn get_already_declared_var_position(&self, var: &Vec<u16>, should_search_only_lexical_decl: bool) -> Option<&SourcePosition> {

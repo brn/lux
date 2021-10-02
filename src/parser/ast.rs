@@ -1199,18 +1199,21 @@ impl_expr!(
   PropertyAccessExpression,
   fn to_string(&self, indent: &mut String, result: &mut String, source_position: &RuntimeSourcePosition) {
     let str = format!(
-      "{}[PropertyAccessExpression property_access = {} {}]\n",
+      "{}[PropertyAccessExpression property_access = {} receiver = {} {}]\n",
       indent,
       if self.is_dot_access() {
-        "dot"
+        "Dot"
       } else if self.is_element_access() {
-        "element"
-      } else if self.is_meta_property() {
-        "meta"
-      } else if self.is_op_chaining_access() {
-        "op_chaining"
+        "Element"
       } else {
-        "super"
+        "OpChaining"
+      },
+      if self.is_super_property() {
+        "Super"
+      } else if self.is_new_target_property() {
+        "NewTarget"
+      } else {
+        "Expr"
       },
       source_position.to_string()
     );
@@ -1263,13 +1266,13 @@ impl PropertyAccessExpression {
   }
 
   #[inline(always)]
-  pub fn is_meta_property(&self) -> bool {
-    return (self.flags.bits() & CallReceiverType::New.bits()) > 0;
+  pub fn is_super_property(&self) -> bool {
+    return (self.flags.bits() & CallReceiverType::Super.bits()) > 0;
   }
 
   #[inline(always)]
-  pub fn is_super_property(&self) -> bool {
-    return (self.flags.bits() & CallReceiverType::Super.bits()) > 0;
+  pub fn is_new_target_property(&self) -> bool {
+    return (self.flags.bits() & CallReceiverType::New.bits()) > 0;
   }
 }
 
@@ -1840,10 +1843,7 @@ pub struct ImportBinding {
   default_binding: Option<Expr>,
 
   #[property(get(type = "copy"), set(type = "ref"))]
-  namespace_import: Option<Expr>,
-
-  #[property(get(type = "copy"), set(type = "ref"))]
-  named_import_list: Option<Expr>,
+  namesapce_or_named_import_specifier: Option<Expr>,
 }
 impl_expr!(
   ImportBinding,
@@ -1857,27 +1857,18 @@ impl_expr!(
     if let Some(ref default_binding) = self.default_binding {
       default_binding.to_string_tree_internal(&mut ni, result);
     }
-    if let Some(ref namespace_import) = self.namespace_import {
-      namespace_import.to_string_tree_internal(&mut ni, result);
-    }
-    if let Some(ref named_import_list) = self.named_import_list {
-      named_import_list.to_string_tree_internal(&mut ni, result);
+    if let Some(namesapce_or_named_import_specifier) = self.namesapce_or_named_import_specifier {
+      namesapce_or_named_import_specifier.to_string_tree_internal(&mut ni, result);
     }
   }
 );
 impl ImportBinding {
-  pub fn new(
-    region: &mut Region,
-    default_binding: Option<Expr>,
-    namespace_import: Option<Expr>,
-    named_import_list: Option<Expr>,
-  ) -> Node<ImportBinding> {
+  pub fn new(region: &mut Region, default_binding: Option<Expr>, namesapce_or_named_import_specifier: Option<Expr>) -> Node<ImportBinding> {
     return Node::new(
       region,
       ImportBinding {
         default_binding,
-        namespace_import,
-        named_import_list,
+        namesapce_or_named_import_specifier,
       },
     );
   }
@@ -1923,12 +1914,16 @@ impl ImportDeclaration {
   }
 }
 
-pub enum ExportDeclarationType {
-  NamespaceExport,
-  DefaultExport,
+bitflags! {
+  pub struct ExportDeclarationType: u8 {
+    const NONE = 0;
+    const NAMESPACE = 1;
+    const DEFAULT = 2;
+  }
 }
+
 pub struct ExportDeclaration {
-  flags: Bitset<u8>,
+  export_type: ExportDeclarationType,
   export_clause: Option<Ast>,
   from_clause: Option<Ast>,
 }
@@ -1966,7 +1961,7 @@ impl ExportDeclaration {
     return Node::<ExportDeclaration>::new(
       region,
       ExportDeclaration {
-        flags: Bitset::<u8>::with(export_type as u8),
+        export_type,
         export_clause,
         from_clause,
       },
@@ -1975,22 +1970,12 @@ impl ExportDeclaration {
 
   #[inline(always)]
   pub fn is_namespace_export(&self) -> bool {
-    return self.flags.get(ExportDeclarationType::NamespaceExport as usize);
-  }
-
-  #[inline(always)]
-  pub fn set_namespace_export(&mut self) {
-    self.flags.set(ExportDeclarationType::NamespaceExport as usize);
+    return self.export_type.contains(ExportDeclarationType::NAMESPACE);
   }
 
   #[inline(always)]
   pub fn is_default_export(&self) -> bool {
-    return self.flags.get(ExportDeclarationType::DefaultExport as usize);
-  }
-
-  #[inline(always)]
-  pub fn set_default_export(&mut self) {
-    self.flags.set(ExportDeclarationType::DefaultExport as usize);
+    return self.export_type.contains(ExportDeclarationType::DEFAULT);
   }
 }
 
@@ -2615,6 +2600,7 @@ bitflags! {
     const IMPORT_META = 0x1000;
     const CLASS = 0x2000;
     const INITIALIZER = 0x4000;
+    const STRUCTURAL_LITERAL = 0x8000;
   }
 }
 pub struct SkipExpr(SkipExprType);
@@ -2641,6 +2627,10 @@ impl SkipExpr {
 
   pub fn is_string_literal(&self) -> bool {
     return self.0.contains(SkipExprType::STRING_LITERAL);
+  }
+
+  pub fn is_structural_literal(&self) -> bool {
+    return self.0.intersects(SkipExprType::ARRAY | SkipExprType::OBJECT);
   }
 
   pub fn is_object(&self) -> bool {

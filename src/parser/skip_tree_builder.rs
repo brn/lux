@@ -188,8 +188,7 @@ impl NodeOps for SkipTreeBuilder {
   fn new_import_binding(
     &mut self,
     default_binding: Option<Expr>,
-    namespace_import: Option<Expr>,
-    named_import_list: Option<Expr>,
+    namesapce_or_named_import_specifier: Option<Expr>,
     pos: Option<&RuntimeSourcePosition>,
   ) -> Expr {
     return self.skip_expr;
@@ -223,7 +222,7 @@ impl NodeOps for SkipTreeBuilder {
 
   fn is_structural_literal(&self, expr: Expr) -> bool {
     return match expr {
-      Expr::StructuralLiteral(_) => true,
+      Expr::SkipExpr(e) => e.is_structural_literal(),
       _ => false,
     };
   }

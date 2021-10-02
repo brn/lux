@@ -215,9 +215,13 @@ mod parser_test {
   }
 
   macro_rules! prop {
-    ($type:expr, $pos:expr, $callee:expr, $prop:expr) => {{
-      let attr = format!("property_access = {}", $type);
+    ($type:expr, $receiver:expr, $pos:expr, $callee:expr, $prop:expr) => {{
+      let attr = format!("property_access = {} receiver = {}", $type, $receiver);
       ast_with_children!("PropertyAccessExpression", &attr, $pos, $callee, $prop)
+    }};
+    ($type:expr, $receiver:expr, $pos:expr) => {{
+      let attr = format!("property_access = {} receiver = {}", $type, $receiver);
+      ast!("PropertyAccessExpression", &attr, $pos)
     }};
   }
 
@@ -241,6 +245,56 @@ mod parser_test {
   macro_rules! class_field {
     ($attr:expr, $pos:expr, $value:expr) => {{
       ast_with_children!("ClassField", $attr, $pos, $value)
+    }};
+  }
+
+  macro_rules! import_specifier {
+    ($pos:expr, $is_ns:expr, $name:expr, $as_expr:expr) => {{
+      let attr = format!("is_namespace = {}", $is_ns);
+      ast_with_children!("ImportSpecifier", &attr, $pos, $name, $as_expr)
+    }};
+    ($pos:expr, $is_ns:expr, $name:expr) => {{
+      let attr = format!("is_namespace = {}", $is_ns);
+      ast_with_children!("ImportSpecifier", &attr, $pos, $name)
+    }};
+    ($pos:expr, $is_ns:expr) => {{
+      let attr = format!("is_namespace = {}", $is_ns);
+      ast!("ImportSpecifier", &attr, $pos)
+    }};
+  }
+
+  macro_rules! named_import_list {
+    ($pos:expr, $($asts:expr),*$(,)*) => {{
+      ast_with_children!("NamedImportList", "", $pos, $($asts),*)
+    }};
+  }
+
+  macro_rules! import_binding {
+    ($pos:expr, $default_binding:expr, $namespace_import:expr) => {{
+      ast_with_children!("ImportBinding", "", $pos, $default_binding, $namespace_import)
+    }};
+    ($pos:expr, $binding:expr) => {{
+      ast_with_children!("ImportBinding", "", $pos, $binding)
+    }};
+  }
+
+  macro_rules! import_stmt {
+    ($pos:expr, $binding:expr, $specifier:expr) => {{
+      ast_with_children!("ImportDeclaration", "", $pos, $binding, $specifier)
+    }};
+    ($pos:expr, $specifier:expr) => {{
+      ast_with_children!("ImportDeclaration", "", $pos, $binding, $specifier)
+    }};
+  }
+
+  macro_rules! export_stmt {
+    ($type:expr, $pos:expr, $export_clause:expr, $from_clause:expr) => {{
+      let attr = format!("type = {}", $type);
+      ast_with_children!("ExportDeclaration", &attr, $pos, $export_clause, $from_clause)
+    }};
+    ($type:expr, $pos:expr, $export_clause:expr) => {{
+      let attr = format!("type = {}", $type);
+      ast_with_children!("ExportDeclaration", &attr, $pos, $export_clause)
     }};
   }
 
@@ -511,7 +565,14 @@ mod parser_test {
 
   type Expectations<'a> = [&'a str; 3];
 
-  fn parse_test<'a>(env_list: &EnvList, code: &str, expectations: &'a Expectations, parser_option: ParserOption) {
+  fn parse_test<'a>(
+    env_list: &EnvList,
+    code: &str,
+    expectations: &'a Expectations,
+    parser_option: ParserOption,
+    parser_type: ParserType,
+    should_skip_node_comparison: bool,
+  ) {
     for i in 0..3 {
       let maybe_env = env_list[i];
       if let Some(env) = maybe_env {
@@ -519,16 +580,18 @@ mod parser_test {
         let context = LuxContext::new_until_internal_object_records();
         let source = Source::new(context, "anonymouse", &str);
         let mut parser = Parser::new(context, source.clone(), parser_option.clone());
-        match parser.parse(ParserType::Script) {
+        match parser.parse(parser_type) {
           Ok(ast) => {
-            let tree = ast.to_string_tree();
-            match compare_node(&str, &tree, expectations[i]) {
-              Err(em) => {
-                println!("{}", em);
-                parser.print_stack_trace();
-                panic!("Parser test failed");
+            if !should_skip_node_comparison {
+              let tree = ast.to_string_tree();
+              match compare_node(&str, &tree, expectations[i]) {
+                Err(em) => {
+                  println!("{}", em);
+                  parser.print_stack_trace();
+                  panic!("Parser test failed");
+                }
+                _ => {}
               }
-              _ => {}
             }
           }
           Err(err) => {
@@ -539,10 +602,34 @@ mod parser_test {
         }
       }
     }
+    if !should_skip_node_comparison {
+      parse_test(
+        env_list,
+        code,
+        expectations,
+        parser_option.clone().with_skip_parser(),
+        parser_type,
+        true,
+      );
+    }
   }
 
   fn syntax_error_test<'a>(env_list: &EnvList, code: &str, source_positions: &[&SourcePosition], show_error: bool) {
-    let parser_options = [ParserOption::default(), ParserOption::default().with_disable_skip_parser()];
+    syntax_error_test_with_parser_type(env_list, code, source_positions, show_error, ParserType::Script);
+  }
+
+  fn syntax_error_test_with_parser_type<'a>(
+    env_list: &EnvList,
+    code: &str,
+    source_positions: &[&SourcePosition],
+    show_error: bool,
+    parser_type: ParserType,
+  ) {
+    let parser_options = [
+      ParserOption::default(),
+      ParserOption::default().with_disable_skip_parser(),
+      ParserOption::default().with_skip_parser(),
+    ];
     for opt in (&parser_options).iter() {
       for i in 0..3 {
         let maybe_env = env_list[i];
@@ -551,7 +638,7 @@ mod parser_test {
           let context = LuxContext::new_until_internal_object_records();
           let source = Source::new(context, "anonymouse", &str);
           let mut parser = Parser::new(context, source.clone(), opt.clone());
-          let ast = parser.parse(ParserType::Script);
+          let ast = parser.parse(parser_type);
           let m = format!("Code {} not generate error", code);
           if !ast.is_err() {
             parser.print_stack_trace();
@@ -640,7 +727,16 @@ mod parser_test {
   }
 
   fn single_expression_test<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str) {
-    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::default(), 0, EnvFlag::all(), 0, false);
+    let ast_b = parser_ast_test_with_options(
+      ast_builder,
+      value,
+      ParserOption::default(),
+      0,
+      EnvFlag::all(),
+      0,
+      ParserType::Script,
+      false,
+    );
     parser_ast_test_with_options(
       ast_b,
       value,
@@ -648,12 +744,22 @@ mod parser_test {
       0,
       EnvFlag::all(),
       0,
+      ParserType::Script,
       false,
     );
   }
 
   fn single_expression_test_with_scope<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str, scope_count: u32) {
-    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::default(), scope_count, EnvFlag::all(), 0, false);
+    let ast_b = parser_ast_test_with_options(
+      ast_builder,
+      value,
+      ParserOption::default(),
+      scope_count,
+      EnvFlag::all(),
+      0,
+      ParserType::Script,
+      false,
+    );
     parser_ast_test_with_options(
       ast_b,
       value,
@@ -661,6 +767,7 @@ mod parser_test {
       scope_count,
       EnvFlag::all(),
       0,
+      ParserType::Script,
       false,
     );
   }
@@ -680,6 +787,7 @@ mod parser_test {
       scope_count,
       env_flag,
       before_line_break_count,
+      ParserType::Script,
       false,
     );
     parser_ast_test_with_options(
@@ -689,12 +797,22 @@ mod parser_test {
       scope_count,
       env_flag,
       before_line_break_count,
+      ParserType::Script,
       false,
     );
   }
 
   fn stmt_test<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str) {
-    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::default(), 0, EnvFlag::all(), 0, true);
+    let ast_b = parser_ast_test_with_options(
+      ast_builder,
+      value,
+      ParserOption::default(),
+      0,
+      EnvFlag::all(),
+      0,
+      ParserType::Script,
+      true,
+    );
     parser_ast_test_with_options(
       ast_b,
       value,
@@ -702,12 +820,45 @@ mod parser_test {
       0,
       EnvFlag::all(),
       0,
+      ParserType::Script,
+      true,
+    );
+  }
+
+  fn module_stmt_test<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str, env_flag: EnvFlag) {
+    let ast_b = parser_ast_test_with_options(
+      ast_builder,
+      value,
+      ParserOption::default(),
+      0,
+      env_flag,
+      0,
+      ParserType::Module,
+      true,
+    );
+    parser_ast_test_with_options(
+      ast_b,
+      value,
+      ParserOption::default().with_disable_skip_parser(),
+      0,
+      env_flag,
+      0,
+      ParserType::Module,
       true,
     );
   }
 
   fn stmt_test_with_scope<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str, scope_count: u32) {
-    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::default(), scope_count, EnvFlag::all(), 0, true);
+    let ast_b = parser_ast_test_with_options(
+      ast_builder,
+      value,
+      ParserOption::default(),
+      scope_count,
+      EnvFlag::all(),
+      0,
+      ParserType::Script,
+      true,
+    );
     parser_ast_test_with_options(
       ast_b,
       value,
@@ -715,6 +866,7 @@ mod parser_test {
       scope_count,
       EnvFlag::all(),
       0,
+      ParserType::Script,
       true,
     );
   }
@@ -732,6 +884,7 @@ mod parser_test {
       scope_count,
       EnvFlag::all(),
       before_line_break_count,
+      ParserType::Script,
       true,
     );
     parser_ast_test_with_options(
@@ -741,6 +894,7 @@ mod parser_test {
       scope_count,
       EnvFlag::all(),
       before_line_break_count,
+      ParserType::Script,
       true,
     );
   }
@@ -752,6 +906,7 @@ mod parser_test {
     scope_count: u32,
     env_flag: EnvFlag,
     before_line_break_count: u64,
+    parser_type: ParserType,
     is_stmt: bool,
   ) -> F {
     let env: EnvList = [
@@ -807,12 +962,16 @@ mod parser_test {
     .to_string();
 
     let expected: Expectations = [&normal, &strict, &f];
-    parse_test(&env, value, &expected, parser_option);
+    parse_test(&env, value, &expected, parser_option, parser_type, false);
     return ast_b;
   }
 
-  #[inline(always)]
+  #[inline]
   fn basic_env_expression_eary_error_test(env_flag: EnvFlag, start: u64, end: u64, code: &str) {
+    basic_env_expression_eary_error_test_with_parser_type(env_flag, start, end, code, ParserType::Script);
+  }
+
+  fn basic_env_expression_eary_error_test_with_parser_type(env_flag: EnvFlag, start: u64, end: u64, code: &str, parser_type: ParserType) {
     let env: EnvList = [
       if env_flag.contains(EnvFlag::BASIC) { Some(("", "")) } else { None },
       if env_flag.contains(EnvFlag::STRICT_MODE) {
@@ -826,7 +985,7 @@ mod parser_test {
         None
       },
     ];
-    syntax_error_test(
+    syntax_error_test_with_parser_type(
       &env,
       code,
       &[
@@ -835,6 +994,7 @@ mod parser_test {
         &s_pos!(start + 15, end + 15, 0, 0),
       ],
       false,
+      parser_type,
     );
   }
 
@@ -1576,7 +1736,13 @@ mod parser_test {
     basic_env_expression_eary_error_test(EnvFlag::all(), 2, 9, "++new x()");
     basic_env_expression_eary_error_test(EnvFlag::all(), 2, 13, "++new new x()");
     basic_env_expression_eary_error_test(EnvFlag::all(), 2, 7, "++a`aa`");
-    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 12, "++new.target");
+    let env_list = [Some(("!function X() {", "")), None, None];
+    syntax_error_test(
+      &env_list,
+      "++new.target",
+      &[&s_pos!(17, 27, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
     basic_env_expression_eary_error_test(EnvFlag::all(), 2, 13, "++import.meta");
     basic_env_expression_eary_error_test(EnvFlag::all(), 2, 8, "++a.b?.c");
     basic_env_expression_eary_error_test(EnvFlag::all(), 2, 12, "++a.b?.['c']");
@@ -1623,7 +1789,13 @@ mod parser_test {
     basic_env_expression_eary_error_test(EnvFlag::all(), 0, 7, "new x()++");
     basic_env_expression_eary_error_test(EnvFlag::all(), 0, 11, "new new x()++");
     basic_env_expression_eary_error_test(EnvFlag::all(), 0, 5, "a`aa`++");
-    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 10, "new.target++");
+    let env_list = [Some(("!function X() {", "")), None, None];
+    syntax_error_test(
+      &env_list,
+      "new.target++",
+      &[&s_pos!(15, 25, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)],
+      false,
+    );
     basic_env_expression_eary_error_test(EnvFlag::all(), 0, 11, "import.meta++");
     basic_env_expression_eary_error_test(EnvFlag::all(), 0, 6, "a.b?.c++");
     basic_env_expression_eary_error_test(EnvFlag::all(), 0, 10, "a.b?.['c']++");
@@ -1741,7 +1913,8 @@ mod parser_test {
             "Expr",
             pos!(col + 4, line),
             prop!(
-              "dot",
+              "Dot",
+              "Expr",
               pos!(col + 4, line),
               ident!("X", pos!(col + 4, line)),
               ident!("a", pos!(col + 6, line))
@@ -1764,7 +1937,8 @@ mod parser_test {
             "Expr",
             pos!(col + 4, line),
             prop!(
-              "element",
+              "Element",
+              "Expr",
               pos!(col + 4, line),
               ident!("X", pos!(col + 4, line)),
               str!("a", pos!(col + 6, line))
@@ -1787,10 +1961,12 @@ mod parser_test {
             "Expr",
             pos!(col + 4, line),
             prop!(
-              "dot",
+              "Dot",
+              "Expr",
               pos!(col + 4, line),
               prop!(
-                "dot",
+                "Dot",
+                "Expr",
                 pos!(col + 4, line),
                 ident!("a", pos!(col + 4, line)),
                 ident!("b", pos!(col + 6, line))
@@ -1825,10 +2001,12 @@ mod parser_test {
             "Expr",
             pos!(col + 4, line),
             prop!(
-              "dot",
+              "Dot",
+              "Expr",
               pos!(col + 4, line),
               prop!(
-                "element",
+                "Element",
+                "Expr",
                 pos!(col + 4, line),
                 ident!("a", pos!(col + 4, line)),
                 str!("b", pos!(col + 6, line))
@@ -1851,7 +2029,8 @@ mod parser_test {
           "Template",
           pos!(col, line),
           prop!(
-            "dot",
+            "Dot",
+            "Expr",
             pos!(col, line),
             newexpr!(
               pos!(col, line),
@@ -1879,7 +2058,8 @@ mod parser_test {
           "Expr",
           pos!(col, line),
           prop!(
-            "op_chaining",
+            "OpChaining",
+            "Expr",
             pos!(col, line),
             newexpr!(
               pos!(col, line),
@@ -2175,7 +2355,8 @@ mod parser_test {
           basic_env_expression_eary_error_test(EnvFlag::all(), 0, 7, &format!("new x() {} 1", $token.symbol()));
           basic_env_expression_eary_error_test(EnvFlag::all(), 0, 11, &format!("new new x() {} 1", $token.symbol()));
           basic_env_expression_eary_error_test(EnvFlag::all(), 0, 5, &format!("a`aa` {} 1", $token.symbol()));
-          basic_env_expression_eary_error_test(EnvFlag::all(), 0, 10, &format!("new.target {} 1", $token.symbol()));
+          let env_list = [Some(("!function X() {", "")), None, None];
+          syntax_error_test(&env_list, &format!("new.target {} 1", $token.symbol()), &[&s_pos!(15, 25, 0, 0), &s_pos!(0, 0, 0, 0), &s_pos!(0, 0, 0, 0)], false);
           basic_env_expression_eary_error_test(EnvFlag::all(), 0, 11, &format!("import.meta {} 1", $token.symbol()));
           basic_env_expression_eary_error_test(EnvFlag::all(), 0, 6, &format!("a.b?.c {} 1", $token.symbol()));
           basic_env_expression_eary_error_test(EnvFlag::all(), 0, 10, &format!("a.b?.['c'] {} 1", $token.symbol()));
@@ -3640,7 +3821,7 @@ mod parser_test {
     single_expression_test_with_scope(
       |(col, line, is_strict, _)| {
         return afnexpr!(
-          pos!(col + 7, line),
+          pos!(col + 1, line),
           "Function",
           0,
           0,
@@ -3663,7 +3844,7 @@ mod parser_test {
     single_expression_test_with_scope(
       |(col, line, is_strict, _)| {
         return afnexpr!(
-          pos!(col + 7, line),
+          pos!(col + 1, line),
           "Generator",
           0,
           0,
@@ -5486,6 +5667,7 @@ let a = 0",
       1,
       EnvFlag::BASIC | EnvFlag::FUNCTION_WRAPPER,
       0,
+      ParserType::Script,
       true,
     );
   }
@@ -5513,18 +5695,530 @@ let a = 0",
   fn parse_script_direct_new_target() {
     single_expression_test_with_options(
       |(col, line, _, _)| {
-        return prop!(
-          "Dot",
-          pos!(col, line),
-          ident!("new", pos!(col, line)),
-          ident!("target", pos!(col + 4, line))
-        );
+        return prop!("Dot", "NewTarget", pos!(col, line));
       },
       "new.target",
       ParserOption::default().with_allow_new_target(),
       0,
       EnvFlag::BASIC | EnvFlag::STRICT_MODE,
       0,
+    );
+  }
+
+  #[test]
+  fn parse_import_stmt() {
+    module_stmt_test(
+      |(col, line, _, _)| {
+        return import_stmt!(
+          pos!(col, line),
+          import_binding!(pos!(col + 7, line), ident!("foo", pos!(col + 7, line))),
+          str!("bar", pos!(col + 16, line))
+        );
+      },
+      "import foo from 'bar'",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_namespace_import_stmt() {
+    module_stmt_test(
+      |(col, line, _, _)| {
+        return import_stmt!(
+          pos!(col, line),
+          import_binding!(
+            pos!(col + 7, line),
+            import_specifier!(pos!(col + 7, line), true, ident!("foo", pos!(col + 12, line)))
+          ),
+          str!("bar", pos!(col + 21, line))
+        );
+      },
+      "import * as foo from 'bar'",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_named_import_stmt() {
+    module_stmt_test(
+      |(col, line, _, _)| {
+        return import_stmt!(
+          pos!(col, line),
+          import_binding!(
+            pos!(col + 7, line),
+            named_import_list!(
+              pos!(col + 7, line),
+              import_specifier!(pos!(col + 8, line), false, ident!("a", pos!(col + 8, line))),
+              import_specifier!(pos!(col + 11, line), false, ident!("b", pos!(col + 11, line))),
+              import_specifier!(pos!(col + 14, line), false, ident!("c", pos!(col + 14, line)))
+            )
+          ),
+          str!("bar", pos!(col + 22, line))
+        );
+      },
+      "import {a, b, c} from 'bar'",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_import_stmt_and_namespace_import() {
+    module_stmt_test(
+      |(col, line, _, _)| {
+        return import_stmt!(
+          pos!(col, line),
+          import_binding!(
+            pos!(col + 7, line),
+            ident!("foo", pos!(col + 7, line)),
+            import_specifier!(pos!(col + 12, line), true, ident!("bar", pos!(col + 17, line)))
+          ),
+          str!("qux", pos!(col + 26, line))
+        );
+      },
+      "import foo, * as bar from 'qux'",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_import_stmt_and_named_import() {
+    module_stmt_test(
+      |(col, line, _, _)| {
+        return import_stmt!(
+          pos!(col, line),
+          import_binding!(
+            pos!(col + 7, line),
+            ident!("foo", pos!(col + 7, line)),
+            named_import_list!(
+              pos!(col + 12, line),
+              import_specifier!(pos!(col + 13, line), false, ident!("a", pos!(col + 13, line))),
+              import_specifier!(pos!(col + 16, line), false, ident!("b", pos!(col + 16, line))),
+              import_specifier!(pos!(col + 19, line), false, ident!("c", pos!(col + 19, line)))
+            )
+          ),
+          str!("qux", pos!(col + 27, line))
+        );
+      },
+      "import foo, {a, b, c} from 'qux'",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn import_stmt_has_duplicate_name() {
+    basic_env_expression_eary_error_test_with_parser_type(
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+      14,
+      15,
+      "import {a, b, a} from 'bar'",
+      ParserType::Module,
+    );
+
+    basic_env_expression_eary_error_test_with_parser_type(
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+      15,
+      16,
+      "import a, * as a from 'bar'",
+      ParserType::Module,
+    );
+
+    basic_env_expression_eary_error_test_with_parser_type(
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+      18,
+      21,
+      "import foo, {bar, foo} from 'bar'",
+      ParserType::Module,
+    );
+  }
+
+  #[test]
+  fn parse_asterisk_export_stmt() {
+    module_stmt_test(
+      |(col, line, _, _)| {
+        return export_stmt!("namespace", pos!(col, line), import_specifier!(pos!(col + 7, line), true));
+      },
+      "export *",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_asterisk_from_export_stmt() {
+    module_stmt_test(
+      |(col, line, _, _)| {
+        return export_stmt!(
+          "namespace",
+          pos!(col, line),
+          import_specifier!(pos!(col + 7, line), true),
+          str!("bar", pos!(col + 14, line))
+        );
+      },
+      "export * from 'bar'",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_asterisk_as_from_export_stmt() {
+    module_stmt_test(
+      |(col, line, _, _)| {
+        return export_stmt!(
+          "namespace",
+          pos!(col, line),
+          import_specifier!(pos!(col + 7, line), true, ident!("foo", pos!(col + 12, line))),
+          str!("bar", pos!(col + 21, line))
+        );
+      },
+      "export * as foo from 'bar'",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_named_export_list_stmt() {
+    module_stmt_test(
+      |(col, line, _, _)| {
+        return export_stmt!(
+          "namespace",
+          pos!(col, line),
+          named_import_list!(
+            pos!(col + 7, line),
+            import_specifier!(pos!(col + 8, line), false, ident!("a", pos!(col + 8, line))),
+            import_specifier!(pos!(col + 11, line), false, ident!("b", pos!(col + 11, line))),
+            import_specifier!(pos!(col + 14, line), false, ident!("c", pos!(col + 14, line))),
+          )
+        );
+      },
+      "export {a, b, c}",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_alias_named_export_list_stmt() {
+    module_stmt_test(
+      |(col, line, _, _)| {
+        return export_stmt!(
+          "namespace",
+          pos!(col, line),
+          named_import_list!(
+            pos!(col + 7, line),
+            import_specifier!(
+              pos!(col + 8, line),
+              false,
+              ident!("foo", pos!(col + 8, line)),
+              ident!("a", pos!(col + 15, line))
+            ),
+            import_specifier!(
+              pos!(col + 18, line),
+              false,
+              ident!("bar", pos!(col + 18, line)),
+              ident!("b", pos!(col + 25, line))
+            ),
+            import_specifier!(
+              pos!(col + 28, line),
+              false,
+              ident!("qux", pos!(col + 28, line)),
+              ident!("c", pos!(col + 35, line))
+            ),
+          )
+        );
+      },
+      "export {foo as a, bar as b, qux as c}",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_var_export_stmt() {
+    module_stmt_test(
+      |(col, line, _, _)| {
+        return export_stmt!(
+          "namespace",
+          pos!(col, line),
+          var!(
+            "Var",
+            pos!(col + 7, line),
+            ident!("a", pos!(col + 11, line)),
+            number!("1", pos!(col + 15, line))
+          )
+        );
+      },
+      "export var a = 1",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_let_export_stmt() {
+    module_stmt_test(
+      |(col, line, _, _)| {
+        return export_stmt!(
+          "namespace",
+          pos!(col, line),
+          var!(
+            "Let",
+            pos!(col + 7, line),
+            ident!("a", pos!(col + 11, line)),
+            number!("1", pos!(col + 15, line))
+          )
+        );
+      },
+      "export let a = 1",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_const_export_stmt() {
+    module_stmt_test(
+      |(col, line, _, _)| {
+        return export_stmt!(
+          "namespace",
+          pos!(col, line),
+          var!(
+            "Const",
+            pos!(col + 7, line),
+            ident!("a", pos!(col + 13, line)),
+            number!("1", pos!(col + 17, line))
+          )
+        );
+      },
+      "export const a = 1",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_function_export_stmt() {
+    module_stmt_test(
+      |(col, line, is_strict, is_skip)| {
+        return export_stmt!(
+          "namespace",
+          pos!(col, line),
+          fnexpr!(
+            pos!(col + 7, line),
+            "Function",
+            if !is_skip { 0 } else { col + 21 },
+            if !is_skip { 0 } else { col + 21 },
+            scope!(@opaque is_strict, 0, true),
+            ident!("a", pos!(col + 16, line)),
+            exprs!(pos!(col + 17, line)),
+            if !is_skip { empty!() } else { void!() }
+          )
+        );
+      },
+      "export function a() {}",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_async_function_export_stmt() {
+    module_stmt_test(
+      |(col, line, is_strict, is_skip)| {
+        return export_stmt!(
+          "namespace",
+          pos!(col, line),
+          afnexpr!(
+            pos!(col + 7, line),
+            "Function",
+            if !is_skip { 0 } else { col + 27 },
+            if !is_skip { 0 } else { col + 27 },
+            scope!(@opaque is_strict, 0, true),
+            ident!("a", pos!(col + 22, line)),
+            exprs!(pos!(col + 23, line)),
+            if !is_skip { empty!() } else { void!() }
+          )
+        );
+      },
+      "export async function a() {}",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_async_generator_function_export_stmt() {
+    module_stmt_test(
+      |(col, line, is_strict, is_skip)| {
+        return export_stmt!(
+          "namespace",
+          pos!(col, line),
+          afnexpr!(
+            pos!(col + 7, line),
+            "Generator",
+            if !is_skip { 0 } else { col + 28 },
+            if !is_skip { 0 } else { col + 28 },
+            scope!(@opaque is_strict, 0, true),
+            ident!("a", pos!(col + 23, line)),
+            exprs!(pos!(col + 24, line)),
+            if !is_skip { empty!() } else { void!() }
+          )
+        );
+      },
+      "export async function *a() {}",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_generator_function_export_stmt() {
+    module_stmt_test(
+      |(col, line, is_strict, is_skip)| {
+        return export_stmt!(
+          "namespace",
+          pos!(col, line),
+          fnexpr!(
+            pos!(col + 7, line),
+            "Generator",
+            if !is_skip { 0 } else { col + 22 },
+            if !is_skip { 0 } else { col + 22 },
+            scope!(@opaque is_strict, 0, true),
+            ident!("a", pos!(col + 17, line)),
+            exprs!(pos!(col + 18, line)),
+            if !is_skip { empty!() } else { void!() }
+          )
+        );
+      },
+      "export function *a() {}",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_function_default_export_stmt() {
+    module_stmt_test(
+      |(col, line, is_strict, is_skip)| {
+        return export_stmt!(
+          "default",
+          pos!(col, line),
+          fnexpr!(
+            pos!(col + 15, line),
+            "Function",
+            if !is_skip { 0 } else { col + 27 },
+            if !is_skip { 0 } else { col + 27 },
+            scope!(@opaque is_strict, 0, true),
+            exprs!(pos!(col + 23, line)),
+            if !is_skip { empty!() } else { void!() }
+          )
+        );
+      },
+      "export default function() {}",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_async_function_default_export_stmt() {
+    module_stmt_test(
+      |(col, line, is_strict, is_skip)| {
+        return export_stmt!(
+          "default",
+          pos!(col, line),
+          afnexpr!(
+            pos!(col + 15, line),
+            "Function",
+            if !is_skip { 0 } else { col + 33 },
+            if !is_skip { 0 } else { col + 33 },
+            scope!(@opaque is_strict, 0, true),
+            exprs!(pos!(col + 29, line)),
+            if !is_skip { empty!() } else { void!() }
+          )
+        );
+      },
+      "export default async function() {}",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_async_generator_function_default_export_stmt() {
+    module_stmt_test(
+      |(col, line, is_strict, is_skip)| {
+        return export_stmt!(
+          "default",
+          pos!(col, line),
+          afnexpr!(
+            pos!(col + 15, line),
+            "Generator",
+            if !is_skip { 0 } else { col + 34 },
+            if !is_skip { 0 } else { col + 34 },
+            scope!(@opaque is_strict, 0, true),
+            exprs!(pos!(col + 30, line)),
+            if !is_skip { empty!() } else { void!() }
+          )
+        );
+      },
+      "export default async function*() {}",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_generator_function_default_export_stmt() {
+    module_stmt_test(
+      |(col, line, is_strict, is_skip)| {
+        return export_stmt!(
+          "default",
+          pos!(col, line),
+          fnexpr!(
+            pos!(col + 15, line),
+            "Generator",
+            if !is_skip { 0 } else { col + 28 },
+            if !is_skip { 0 } else { col + 28 },
+            scope!(@opaque is_strict, 0, true),
+            exprs!(pos!(col + 24, line)),
+            if !is_skip { empty!() } else { void!() }
+          )
+        );
+      },
+      "export default function*() {}",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_class_default_export_stmt() {
+    module_stmt_test(
+      |(col, line, is_strict, is_skip)| {
+        return export_stmt!("default", pos!(col, line), class(pos!(col + 15, line), None, None, &[], &[]));
+      },
+      "export default class {}",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_arrow_default_export_stmt() {
+    module_stmt_test(
+      |(col, line, is_strict, is_skip)| {
+        return export_stmt!(
+          "default",
+          pos!(col, line),
+          fnexpr!(
+            pos!(col + 15, line),
+            "ArrowFunction",
+            if !is_skip { 0 } else { col + 23 },
+            if !is_skip { 0 } else { col + 23 },
+            scope!(@transparent is_strict, 0, true),
+            exprs!(pos!(col + 15, line)),
+            if !is_skip { empty!() } else { void!() }
+          )
+        );
+      },
+      "export default () => {}",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
+    );
+  }
+
+  #[test]
+  fn parse_literal_default_export_stmt() {
+    module_stmt_test(
+      |(col, line, is_strict, is_skip)| {
+        return export_stmt!("default", pos!(col, line), number!("1", pos!(col + 15, line)));
+      },
+      "export default 1",
+      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
     );
   }
 }

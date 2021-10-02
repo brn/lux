@@ -144,8 +144,7 @@ pub trait NodeOps {
   fn new_import_binding(
     &mut self,
     default_binding: Option<Expr>,
-    namespace_import: Option<Expr>,
-    named_import_list: Option<Expr>,
+    namesapce_or_named_import_specifier: Option<Expr>,
     pos: Option<&RuntimeSourcePosition>,
   ) -> Expr {
     return new_node!(
@@ -153,8 +152,7 @@ pub trait NodeOps {
       self.region(),
       pos,
       default_binding,
-      namespace_import,
-      named_import_list
+      namesapce_or_named_import_specifier
     )
     .into();
   }
