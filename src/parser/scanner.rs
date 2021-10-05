@@ -398,6 +398,9 @@ impl Scanner {
       } else {
         self.advance();
       }
+      if ret == 0 {
+        return Err(());
+      }
     } else {
       for _ in 0..len {
         if let Ok(hex) = chars::to_hex(*self.iter) {

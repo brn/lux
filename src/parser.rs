@@ -14,6 +14,8 @@ mod scanner_test;
 mod scope;
 mod source;
 mod source_position;
+#[cfg(test)]
+mod tc39_parser_test;
 mod token;
 #[macro_use]
 mod node_ops;

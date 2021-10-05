@@ -421,4 +421,11 @@ pub trait NodeOps {
   fn new_debugger_stmt(&mut self, pos: Option<&RuntimeSourcePosition>) -> Stmt {
     return new_node!(DebuggerStatement, self.region(), pos).into();
   }
+
+  fn is_yield_expr(&self, e: Expr) -> bool {
+    return match e {
+      Expr::UnaryExpression(n) => n.op().one_of(&[Token::Yield, Token::YieldAggregator]),
+      _ => false,
+    };
+  }
 }

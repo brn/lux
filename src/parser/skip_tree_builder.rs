@@ -20,6 +20,8 @@ pub struct SkipTreeBuilder {
   skip_initializer: Expr,
   skip_exprs: Expr,
   skip_expr: Expr,
+  skip_yield_expr: Expr,
+  skip_yield_aggregator_expr: Expr,
   skip_template: Expr,
   skip_import_meta: Expr,
   skip_stmt: Stmt,
@@ -48,6 +50,8 @@ impl SkipTreeBuilder {
       skip_binary_expr: SkipExpr::new(&mut region, SkipExprType::BINARY_EXPR).into(),
       skip_initializer: SkipExpr::new(&mut region, SkipExprType::BINARY_EXPR | SkipExprType::INITIALIZER).into(),
       skip_expr: SkipExpr::new(&mut region, SkipExprType::EXPR).into(),
+      skip_yield_expr: SkipExpr::new(&mut region, SkipExprType::YIELD_EXPR).into(),
+      skip_yield_aggregator_expr: SkipExpr::new(&mut region, SkipExprType::YIELD_AGGREGATOR_EXPR).into(),
       skip_template: SkipExpr::new(&mut region, SkipExprType::TEMPLATE).into(),
       skip_import_meta: SkipExpr::new(&mut region, SkipExprType::IMPORT_META).into(),
       skip_stmt: SkipStmt::new(&mut region, SkipStmtType::STMT).into(),
@@ -172,6 +176,12 @@ impl NodeOps for SkipTreeBuilder {
     target: Expr,
     pos: Option<&RuntimeSourcePosition>,
   ) -> Expr {
+    if op == Token::Yield {
+      return self.skip_yield_expr;
+    }
+    if op == Token::YieldAggregator {
+      return self.skip_yield_aggregator_expr;
+    }
     return self.skip_expr;
   }
 
@@ -451,5 +461,12 @@ impl NodeOps for SkipTreeBuilder {
 
   fn new_debugger_stmt(&mut self, pos: Option<&RuntimeSourcePosition>) -> Stmt {
     return self.skip_stmt;
+  }
+
+  fn is_yield_expr(&self, e: Expr) -> bool {
+    return match e {
+      Expr::SkipExpr(n) => n.is_yield(),
+      _ => false,
+    };
   }
 }

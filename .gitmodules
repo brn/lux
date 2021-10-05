@@ -7,3 +7,6 @@
 [submodule "tcmalloc"]
 	path = tcmalloc
 	url = git@github.com:google/tcmalloc.git
+[submodule "tools/test262-parser-tests"]
+	path = tools/test262-parser-tests
+	url = git@github.com:tc39/test262-parser-tests

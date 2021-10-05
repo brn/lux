@@ -20,6 +20,7 @@ bitflags! {
     const ALLOW_SUPER_CALL = 0x200;
     const ALLOW_SUPER_PROPERTY = 0x400;
     const ALLOW_NEW_TARGET = 0x800;
+    const DEFAULT_EXPORTED = 0x1000;
   }
 }
 
@@ -27,7 +28,11 @@ bitflags! {
 pub enum VariableType {
   FormalParameter,
   Lexical,
+  ExportLexical,
   LegacyVar,
+  ExportLegacyVar,
+  WillExportVar,
+  CatchParameterLegacyVar,
 }
 
 #[derive(Property)]
@@ -80,23 +85,35 @@ impl Scope {
   }
 
   pub fn set_first_super_call_position(&mut self, pos: &SourcePosition) {
-    if self.first_super_call_position.is_none() {
-      self.first_super_call_position = Some(pos.clone());
+    let mut scope = self.get_nearest_non_lexical_scope();
+    if scope.first_super_call_position.is_none() {
+      scope.first_super_call_position = Some(pos.clone());
     }
   }
 
-  pub fn first_super_call_position(&mut self) -> Option<&SourcePosition> {
-    return self.first_super_call_position.as_ref();
+  pub fn first_super_call_position(&mut self) -> Option<SourcePosition> {
+    let scope = self.get_nearest_non_lexical_scope();
+    return scope.first_super_call_position.clone();
   }
 
   pub fn set_first_super_property_position(&mut self, pos: &SourcePosition) {
-    if self.first_super_property_position.is_none() {
-      self.first_super_property_position = Some(pos.clone());
+    let mut scope = self.get_nearest_non_lexical_scope();
+    if scope.first_super_property_position.is_none() {
+      scope.first_super_property_position = Some(pos.clone());
     }
   }
 
-  pub fn first_super_property_position(&mut self) -> Option<&SourcePosition> {
-    return self.first_super_property_position.as_ref();
+  pub fn first_super_property_position(&mut self) -> Option<SourcePosition> {
+    let scope = self.get_nearest_non_lexical_scope();
+    return scope.first_super_property_position.clone();
+  }
+
+  pub fn mark_as_default_exported(&mut self) {
+    self.scope_flag |= ScopeFlag::DEFAULT_EXPORTED;
+  }
+
+  pub fn is_default_exported(&self) -> bool {
+    return self.scope_flag.contains(ScopeFlag::DEFAULT_EXPORTED);
   }
 
   pub fn mark_as_strict_mode(&mut self) {
@@ -117,6 +134,10 @@ impl Scope {
 
   pub fn is_simple_parameter(&self) -> bool {
     return self.scope_flag.intersects(ScopeFlag::SIMPLE_PARAMETER | ScopeFlag::ROOT_SCOPE);
+  }
+
+  pub fn mark_as_simple_parameter(&mut self) {
+    return self.scope_flag |= ScopeFlag::SIMPLE_PARAMETER;
   }
 
   pub fn is_async_context(&self) -> bool {
@@ -166,60 +187,83 @@ impl Scope {
     return self.children.iter();
   }
 
-  pub fn declare_vars(&mut self, var_type: VariableType, vars: &Vec<(Vec<u16>, SourcePosition)>) {
-    for var in vars.iter() {
-      self.declare_var(var_type, var.clone());
+  pub fn get_unfilled_will_be_exported_var(&self) -> Option<SourcePosition> {
+    for (_, (pos, var_type)) in self.var_map.iter() {
+      if *var_type == VariableType::WillExportVar {
+        return Some(pos.clone());
+      }
     }
+    return None;
   }
 
-  pub fn declare_vars_without_lexical_duplication(
+  pub fn declare_vars(
     &mut self,
     var_type: VariableType,
     vars: &Vec<(Vec<u16>, SourcePosition)>,
   ) -> Option<(SourcePosition, SourcePosition)> {
     for var in vars.iter() {
-      if let Some(pos) = self.get_already_declared_var_position(&var.0, var_type == VariableType::LegacyVar) {
-        return Some((var.1.clone(), pos.clone()));
+      if let Some(ref dup_info) = self.declare_var(var_type, var.clone()) {
+        return Some(dup_info.clone());
       }
-      self.declare_var(var_type, var.clone());
     }
     return None;
   }
 
   pub fn declare_var(&mut self, var_type: VariableType, var: (Vec<u16>, SourcePosition)) -> Option<(SourcePosition, SourcePosition)> {
-    if let Some(pos) = self.get_already_declared_var_position(&var.0, var_type == VariableType::LegacyVar) {
+    #[cfg(debug_assertions)]
+    {
+      if var_type == VariableType::ExportLegacyVar {
+        debug_assert!(self.is_root_scope());
+      }
+    }
+
+    if let Some(pos) = self.get_already_declared_var_position(&var.0, var_type) {
       return Some((var.1.clone(), pos.clone()));
     }
-    if self.is_opaque() || (self.is_lexical() && var_type == VariableType::Lexical) {
+
+    if var_type != VariableType::WillExportVar {
       self.var_list.push((var.0.clone(), var.1.clone(), var_type));
-      self.var_map.insert(var.0, (var.1, var_type));
-    } else {
-      if self.is_lexical() && var_type == VariableType::LegacyVar {
-        self.var_list.push((var.0.clone(), var.1.clone(), var_type));
-        self.var_map.insert(var.0.clone(), (var.1.clone(), var_type));
+    }
+    self.var_map.insert(var.0.clone(), (var.1.clone(), var_type));
+
+    if match var_type {
+      VariableType::LegacyVar | VariableType::ExportLegacyVar => true,
+      _ => false,
+    } {
+      if self.is_lexical() {
+        let mut scope = self.get_nearest_non_lexical_scope();
+        return scope.declare_var(var_type, var);
       }
-      if let Some(mut scope) = self.nearest_opaque_scope {
-        scope.declare_var(var_type, var);
-        return None;
-      }
-      let mut parent = self.parent_scope;
-      while parent.is_some() && parent.unwrap().is_transparent() {
-        parent = parent.unwrap().parent_scope;
-      }
-      self.nearest_opaque_scope = parent;
-      parent.unwrap().declare_var(var_type, var);
     }
     return None;
   }
 
-  pub fn get_already_declared_var_position(&self, var: &Vec<u16>, should_search_only_lexical_decl: bool) -> Option<&SourcePosition> {
+  pub fn get_already_declared_var_position(&self, var: &Vec<u16>, variable_type: VariableType) -> Option<&SourcePosition> {
     if let Some(ref val) = self.var_map.get(var) {
-      if should_search_only_lexical_decl {
-        if val.1 == VariableType::Lexical {
+      use VariableType::*;
+      match val.1 {
+        Lexical | FormalParameter | ExportLexical => {
           return Some(&val.0);
         }
-      } else {
-        return Some(&val.0);
+        LegacyVar | CatchParameterLegacyVar => {
+          return match variable_type {
+            Lexical | ExportLexical => Some(&val.0),
+            _ => None,
+          };
+        }
+        ExportLegacyVar => {
+          return match variable_type {
+            Lexical | ExportLexical | ExportLegacyVar => Some(&val.0),
+            _ => None,
+          };
+        }
+        WillExportVar => {
+          return match variable_type {
+            ExportLexical | ExportLegacyVar => Some(&val.0),
+            _ => None,
+          }
+        }
+        _ => return None,
       }
     }
     return None;

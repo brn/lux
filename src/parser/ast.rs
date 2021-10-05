@@ -2601,6 +2601,8 @@ bitflags! {
     const CLASS = 0x2000;
     const INITIALIZER = 0x4000;
     const STRUCTURAL_LITERAL = 0x8000;
+    const YIELD_EXPR = 0x10000;
+    const YIELD_AGGREGATOR_EXPR = 0x20000;
   }
 }
 pub struct SkipExpr(SkipExprType);
@@ -2663,6 +2665,18 @@ impl SkipExpr {
 
   pub fn is_initializer(&self) -> bool {
     return self.0.contains(SkipExprType::INITIALIZER);
+  }
+
+  pub fn is_yield_expr(&self) -> bool {
+    return self.0.contains(SkipExprType::YIELD_EXPR);
+  }
+
+  pub fn is_yield_aggregator_expr(&self) -> bool {
+    return self.0.contains(SkipExprType::YIELD_AGGREGATOR_EXPR);
+  }
+
+  pub fn is_yield(&self) -> bool {
+    return self.0.intersects(SkipExprType::YIELD_EXPR | SkipExprType::YIELD_AGGREGATOR_EXPR);
   }
 }
 impl_expr!(

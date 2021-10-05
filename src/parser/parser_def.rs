@@ -392,6 +392,12 @@ pub struct StatementBlock {
   is_breakable: bool,
   #[property(get(type = "copy"), set(type = "ref"))]
   is_returnable: bool,
+  #[property(get(type = "copy"), set(type = "ref"))]
+  first_const_initializer_error: Option<Exotic<ErrorDescriptor>>,
+  #[property(get(type = "copy"), set(type = "ref"))]
+  first_labelled_function_error: Option<Exotic<ErrorDescriptor>>,
+  #[property(get(type = "copy"), set(type = "ref"))]
+  is_export: bool,
 }
 impl StatementBlock {
   pub fn new() -> Self {
@@ -399,19 +405,23 @@ impl StatementBlock {
       is_continuable: false,
       is_breakable: false,
       is_returnable: false,
+      is_export: false,
+      first_const_initializer_error: None,
+      first_labelled_function_error: None,
     };
   }
 
-  pub fn with(is_continuable: bool, is_breakable: bool, is_returnable: bool) -> Self {
+  pub fn with(is_continuable: bool, is_breakable: bool, is_returnable: bool, is_export: bool) -> Self {
     let mut i = Self::new();
     i.set_is_continuable(is_continuable);
     i.set_is_breakable(is_breakable);
     i.set_is_returnable(is_returnable);
+    i.set_is_export(is_export);
     return i;
   }
 
   pub fn next_block(&self) -> Self {
-    return Self::with(self.is_continuable, self.is_breakable, self.is_returnable);
+    return Self::with(self.is_continuable, self.is_breakable, self.is_returnable, self.is_export);
   }
 }
 

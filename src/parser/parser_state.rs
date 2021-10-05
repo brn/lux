@@ -10,6 +10,7 @@ pub enum ParserState {
   InSkipParsing,
   AllowIn,
   DisallowIn,
+  InClassScope,
   _None,
   _Sentinel,
 }

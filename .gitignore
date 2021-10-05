@@ -5,7 +5,6 @@ build.ninja
 cmake_install.cmake
 i6
 rules.ninja
-/tools
 .DS_Store
 CTestTestfile.cmake
 /build
