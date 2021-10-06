@@ -42,7 +42,24 @@ fn get_test_files<F: Fn(&fs::DirEntry)>(dir: &str, cb: F) -> io::Result<()> {
   Ok(())
 }
 
-const SHOULD_RUN_UNDER_STRICT_MODE_CASES: [&'static str; 2] = ["1aff49273f3e3a98.js", "12a74c60f52a60de.js"];
+const SHOULD_RUN_UNDER_STRICT_MODE_CASES: [&'static str; 4] = [
+  "1aff49273f3e3a98.js",
+  "12a74c60f52a60de.js",
+  "be7329119eaa3d47.js",
+  "e262ea7682c36f92.js",
+];
+const EARLY_EXCLUDES_CASES: [&'static str; 1] = ["0f5f47108da5c34e.js"];
+
+#[test]
+fn extract_test() {
+  parse(
+    "inline",
+    "let x\\u{E01D5},x;",
+    ParserOptionBuilder::default().build(),
+    ParserType::Script,
+    true,
+  );
+}
 
 #[test]
 fn tc39_parser_test_early() {
@@ -52,6 +69,12 @@ fn tc39_parser_test_early() {
     let path_str = path.to_str().unwrap();
     let is_module = path_str.ends_with("module.js");
     let mut should_run_under_strict_mode = false;
+    for file in EARLY_EXCLUDES_CASES.iter() {
+      if path_str.ends_with(file) {
+        println!("Skip tc39_parer_test {}", path_str);
+        return;
+      }
+    }
     for file in SHOULD_RUN_UNDER_STRICT_MODE_CASES.iter() {
       if path_str.ends_with(file) {
         should_run_under_strict_mode = true;

@@ -1,4 +1,4 @@
-use super::data::{ID_CONTINUE_DIFF, ID_CONTINUE_HASH_MOD, ID_START, ID_START_HASH_MOD};
+use super::data::*;
 use std::iter::{Iterator, Peekable};
 
 pub const LF: u16 = 0x00A;
@@ -158,6 +158,17 @@ pub fn is_whitespace(c: u16) -> bool {
     || c == 0x00A0
     || c == 0x2007
     || c == 0x202F;
+}
+
+#[inline(always)]
+pub fn is_variation_selector(value: u32) -> bool {
+  let index = (value % VARIATION_SELECTOR_HASH_MOD) as usize;
+  for ch in VARIATION_SELECTOR[index].iter() {
+    if *ch == value {
+      return true;
+    }
+  }
+  return false;
 }
 
 #[inline(always)]

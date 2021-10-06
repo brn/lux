@@ -6,6 +6,7 @@ pub enum ParserState {
   InTemplateLiteral,
   InTaggedTemplateLiteral,
   InTemplateInterpolation,
+  InFunction,
   RegexpExpected,
   InSkipParsing,
   AllowIn,

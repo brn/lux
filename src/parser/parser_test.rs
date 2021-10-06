@@ -1772,6 +1772,7 @@ mod parser_test {
     basic_env_expression_eary_error_test(EnvFlag::all(), 0, 4, "this++");
     basic_env_expression_eary_error_test(EnvFlag::all(), 0, 3, "'a'++");
     basic_env_expression_eary_error_test(EnvFlag::all(), 0, 1, "1++");
+    basic_env_expression_eary_error_test(EnvFlag::all(), 0, 1, "1--");
     basic_env_expression_eary_error_test(EnvFlag::all(), 0, 15, "(function() {})++");
     basic_env_expression_eary_error_test(EnvFlag::all(), 0, 16, "(function*() {})++");
     basic_env_expression_eary_error_test(EnvFlag::all(), 0, 21, "(async function() {})++");

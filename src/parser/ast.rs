@@ -1717,6 +1717,10 @@ impl Literal {
   pub fn is_identifier(&self) -> bool {
     return self.literal_type == Token::Identifier;
   }
+
+  pub fn is_regexp(&self) -> bool {
+    return self.literal_type == Token::RegExp;
+  }
 }
 
 pub struct TemplateLiteral {

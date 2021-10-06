@@ -323,17 +323,6 @@ impl Scanner {
 
   pub fn next(&mut self) -> Token {
     self.mode = Mode::Current;
-    if !self.has_more() {
-      self.position[Mode::Lookahead as usize] = self.position[Mode::Current as usize].clone();
-      let end_col = self.current_position().end_col();
-      let end_line = self.current_position().end_line_number();
-      self.current_position_mut().set_start_col(end_col);
-      self.current_position_mut().set_start_line_number(end_line);
-      self.token = Token::End;
-      self.lookahead_token = Token::End;
-      return self.lookahead_token;
-    }
-
     self.previous_position = self.position[Mode::Current as usize].clone();
     if self.lookahead_token != Token::Invalid {
       self.contextual_keywords[self.mode as usize] = self.peek_contextual_keyword();
@@ -344,6 +333,17 @@ impl Scanner {
       self.numeric_value[Mode::Current as usize] = self.numeric_value[Mode::Lookahead as usize];
       self.scanner_state[Mode::Current as usize] = self.scanner_state[Mode::Lookahead as usize];
       return self.token;
+    }
+
+    if !self.has_more() {
+      self.position[Mode::Lookahead as usize] = self.position[Mode::Current as usize].clone();
+      let end_col = self.current_position().end_col();
+      let end_line = self.current_position().end_line_number();
+      self.current_position_mut().set_start_col(end_col);
+      self.current_position_mut().set_start_line_number(end_line);
+      self.token = Token::End;
+      self.lookahead_token = Token::End;
+      return self.lookahead_token;
     }
 
     self.prologue();
@@ -943,27 +943,29 @@ impl Scanner {
           let before_decode_pos = self.record_position();
           self.advance();
           if let Ok(u) = self.decode_hex_escape(4) {
-            if !chars::is_identifier_continue(u, false) {
-              self.current_literal_buffer_mut().clear();
-              report_error!(
-                self,
-                "Invalid unicode escape sequence",
-                &pos_range!(before_decode_pos, self.current_position()),
-                Token::Invalid
-              );
-            }
-            if let Ok((hi, low)) = chars::uc32_to_uc16(u) {
-              self.current_literal_buffer_mut().push(hi);
-              if low != 0 {
-                self.current_literal_buffer_mut().push(low);
+            if !chars::is_variation_selector(u) {
+              if !chars::is_identifier_continue(u, false) {
+                self.current_literal_buffer_mut().clear();
+                report_error!(
+                  self,
+                  "Invalid unicode escape sequence",
+                  &pos_range!(before_decode_pos, self.current_position()),
+                  Token::Invalid
+                );
               }
-            } else {
-              report_error!(
-                self,
-                "Invalid unicode escape sequence",
-                &pos_range!(before_decode_pos, self.current_position()),
-                Token::Invalid
-              );
+              if let Ok((hi, low)) = chars::uc32_to_uc16(u) {
+                self.current_literal_buffer_mut().push(hi);
+                if low != 0 {
+                  self.current_literal_buffer_mut().push(low);
+                }
+              } else {
+                report_error!(
+                  self,
+                  "Invalid unicode escape sequence",
+                  &pos_range!(before_decode_pos, self.current_position()),
+                  Token::Invalid
+                );
+              }
             }
           } else {
             self.current_literal_buffer_mut().clear();
@@ -978,7 +980,11 @@ impl Scanner {
           self.advance_and_push_buffer();
         }
       } else {
-        self.advance_and_push_buffer();
+        if chars::is_variation_selector(value.code()) {
+          self.advance();
+        } else {
+          self.advance_and_push_buffer();
+        }
       }
       value = self.iter.uc32();
     }
@@ -1134,6 +1140,7 @@ impl Scanner {
     };
     self.current_position_mut().add_end_col(next_pos);
     self.advance();
+
     if let Ok((value, kind)) = result {
       self.set_current_numeric_value(value);
       if kind == chars::NumericValueKind::ImplicitOctal {
