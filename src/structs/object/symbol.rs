@@ -30,7 +30,6 @@ pub struct SymbolRegistryLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct SymbolRegistry(HeapLayout<SymbolRegistryLayout>);
 impl_object!(SymbolRegistry, HeapLayout<SymbolRegistryLayout>);
 
@@ -115,7 +114,6 @@ pub struct JsSymbolLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct JsSymbol(HeapLayout<JsSymbolLayout>);
 impl_object!(JsSymbol, HeapLayout<JsSymbolLayout>);
 
@@ -254,7 +252,6 @@ impl PredefinedHash for JsSymbol {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct PrimitiveSymbol(HeapLayout<JsSymbolLayout>);
 impl_object!(PrimitiveSymbol, HeapLayout<JsSymbolLayout>);
 

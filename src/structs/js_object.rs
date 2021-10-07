@@ -13,7 +13,6 @@ pub struct BuiltinsLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct Builtins(HeapLayout<BuiltinsLayout>);
 impl_object!(Builtins, HeapLayout<BuiltinsLayout>);
 

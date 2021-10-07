@@ -573,11 +573,11 @@ mod parser_test {
     parser_type: ParserType,
     should_skip_node_comparison: bool,
   ) {
+    let context = LuxContext::new();
     for i in 0..3 {
       let maybe_env = env_list[i];
       if let Some(env) = maybe_env {
         let str = format!("{}{}{};PARSER_SENTINEL", env.0, code, env.1);
-        let context = LuxContext::new_until_internal_object_records();
         let source = Source::new(context, "anonymouse", &str);
         let mut parser = Parser::new(context, source.clone(), parser_option.clone());
         match parser.parse(parser_type) {
@@ -630,12 +630,12 @@ mod parser_test {
       ParserOption::default().with_disable_skip_parser(),
       ParserOption::default().with_skip_parser(),
     ];
+    let context = LuxContext::new();
     for opt in (&parser_options).iter() {
       for i in 0..3 {
         let maybe_env = env_list[i];
         if let Some(env) = maybe_env {
           let str = format!("{}{}{};PARSER_SENTINEL", env.0, code, env.1);
-          let context = LuxContext::new_until_internal_object_records();
           let source = Source::new(context, "anonymouse", &str);
           let mut parser = Parser::new(context, source.clone(), opt.clone());
           let ast = parser.parse(parser_type);
@@ -6249,9 +6249,9 @@ let a = 0",
 
     basic_env_expression_eary_error_test_with_parser_type(
       EnvFlag::BASIC | EnvFlag::STRICT_MODE,
-      16,
-      19,
-      "export {a, b as let}; let a, b",
+      11,
+      12,
+      "export {a, b as c}; let a, d",
       ParserType::Module,
     );
   }

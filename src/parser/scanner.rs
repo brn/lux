@@ -44,6 +44,10 @@ impl Uc32 {
       is_surrogate_pair: true,
     };
   }
+
+  fn to_u16(&self) -> Result<(u16, u16), ()> {
+    return chars::uc32_to_uc16(self.code);
+  }
 }
 
 #[derive(Clone)]
@@ -114,6 +118,19 @@ impl SourceCursor {
   }
 
   #[inline]
+  fn is_char(&self, ch: char) -> bool {
+    if let Ok(c) = self.as_char_safe() {
+      return c == ch;
+    }
+    return false;
+  }
+
+  #[inline]
+  fn as_char_safe(&self) -> Result<char, u16> {
+    return chars::char_safe(self.val());
+  }
+
+  #[inline]
   fn peek(&self) -> Option<u16> {
     return self.get_val(self.index + 1).cloned();
   }
@@ -122,6 +139,14 @@ impl SourceCursor {
   fn peek_as_char(&self) -> Option<char> {
     return match self.get_val(self.index + 1).cloned() {
       Some(uc) => Some(chars::ch(uc)),
+      _ => None,
+    };
+  }
+
+  #[inline]
+  fn peek_as_char_safe(&self) -> Option<Result<char, u16>> {
+    return match self.get_val(self.index + 1).cloned() {
+      Some(uc) => Some(chars::char_safe(uc)),
       _ => None,
     };
   }
@@ -346,8 +371,9 @@ impl Scanner {
       return self.lookahead_token;
     }
 
+    let is_html_comment_allowed = self.current_position().start_col() == 0 || self.token == Token::Comment;
     self.prologue();
-    let token = self.tokenize();
+    let token = self.tokenize(is_html_comment_allowed);
     self.token = token;
     self.epilogue();
     return self.token;
@@ -367,8 +393,9 @@ impl Scanner {
       return this.lookahead_token;
     }
     this.position[Mode::Lookahead as usize] = this.position[Mode::Current as usize].clone();
+    let is_html_comment_allowed = this.current_position().start_col() == 0 || this.token == Token::Comment;
     this.prologue();
-    this.lookahead_token = this.tokenize();
+    this.lookahead_token = this.tokenize(is_html_comment_allowed);
     this.epilogue();
     return this.lookahead_token;
   }
@@ -381,38 +408,46 @@ impl Scanner {
   }
 
   fn decode_hex_escape(&mut self, len: u32) -> Result<u32, ()> {
-    let unicode_hex_start = self.iter.as_char();
-    let mut ret: u32 = 0;
-    if unicode_hex_start == '{' {
-      self.advance();
-      while self.iter.as_char() != '}' && *self.iter != INVALID {
-        if let Ok(hex) = chars::to_hex(*self.iter) {
-          ret = ret * 16 + hex;
-        } else {
-          return Err(());
+    if let Ok(unicode_hex_start) = self.iter.as_char_safe() {
+      let mut ret: u32 = 0;
+      if unicode_hex_start == '{' {
+        self.advance();
+        while *self.iter != INVALID && !self.iter.is_char('}') {
+          match self.iter.as_char_safe() {
+            Ok(ch) => {
+              if let Ok(hex) = chars::to_hex(*self.iter) {
+                ret = ret * 16 + hex;
+              } else {
+                return Err(());
+              }
+              self.advance();
+            }
+            _ => return Err(()),
+          }
         }
-        self.advance();
-      }
-      if self.iter.as_char() != '}' {
-        return Err(());
+        if !self.iter.is_char('}') {
+          return Err(());
+        } else {
+          self.advance();
+        }
       } else {
-        self.advance();
+        for _ in 0..len {
+          if let Ok(hex) = chars::to_hex(*self.iter) {
+            ret = ret * 16 + hex;
+          } else {
+            return Err(());
+          }
+          self.advance();
+        }
       }
+
       if ret == 0 {
         return Err(());
       }
-    } else {
-      for _ in 0..len {
-        if let Ok(hex) = chars::to_hex(*self.iter) {
-          ret = ret * 16 + hex;
-        } else {
-          return Err(());
-        }
-        self.advance();
-      }
-    }
 
-    return Ok(ret);
+      return Ok(ret);
+    }
+    return Err(());
   }
 
   fn decode_ascii_escape(&mut self) -> Result<u16, ()> {
@@ -536,7 +571,7 @@ impl Scanner {
     }
   }
 
-  fn tokenize(&mut self) -> Token {
+  fn tokenize(&mut self, is_html_comment_allowed: bool) -> Token {
     self.current_literal_buffer_mut().clear();
     if self
       .parser_state_stack
@@ -548,287 +583,313 @@ impl Scanner {
     }
 
     use Token::*;
-    match self.iter.as_char() {
-      '(' => {
-        self.advance();
-        return LeftParen;
-      }
-      ')' => {
-        self.advance();
-        return RightParen;
-      }
-      '{' => {
-        self.advance();
-        return LeftBrace;
-      }
-      '}' => {
-        self.advance();
-        return RightBrace;
-      }
-      '[' => {
-        self.advance();
-        return LeftBracket;
-      }
-      ']' => {
-        self.advance();
-        return RightBracket;
-      }
-      ',' => {
-        self.advance();
-        return Comma;
-      }
-      '*' => {
-        self.advance();
-        if self.iter.as_char() == '*' {
+    match self.iter.as_char_safe() {
+      Ok(ch) => match ch {
+        '(' => {
           self.advance();
-          if self.iter.as_char() == '=' {
+          return LeftParen;
+        }
+        ')' => {
+          self.advance();
+          return RightParen;
+        }
+        '{' => {
+          self.advance();
+          return LeftBrace;
+        }
+        '}' => {
+          self.advance();
+          return RightBrace;
+        }
+        '[' => {
+          self.advance();
+          return LeftBracket;
+        }
+        ']' => {
+          self.advance();
+          return RightBracket;
+        }
+        ',' => {
+          self.advance();
+          return Comma;
+        }
+        '*' => {
+          self.advance();
+          if self.iter.is_char('*') {
             self.advance();
-            return OpPowAssign;
-          }
-          return OpPow;
-        }
-        if self.iter.as_char() == '=' {
-          self.advance();
-          return OpMulAssign;
-        }
-        return OpMul;
-      }
-      '/' => {
-        self.advance();
-        if self.iter.as_char() == '/' {
-          self.advance();
-          self.skip_signleline_comment();
-          return self.tokenize();
-        }
-        if self.iter.as_char() == '*' {
-          self.advance();
-          self.skip_multiline_comment();
-          return self.tokenize();
-        }
-
-        if self.iter.as_char() == '=' {
-          self.advance();
-          return OpDivAssign;
-        }
-
-        return OpDiv;
-      }
-      '-' => {
-        self.advance();
-        if self.iter.as_char() == '=' {
-          self.advance();
-          return OpMinusAssign;
-        }
-        if self.iter.as_char() == '-' {
-          self.advance();
-          return OpDecrement;
-        }
-        return OpMinus;
-      }
-      '+' => {
-        self.advance();
-        if self.iter.as_char() == '=' {
-          self.advance();
-          return OpPlusAssign;
-        }
-        if self.iter.as_char() == '+' {
-          self.advance();
-          return OpIncrement;
-        }
-        return OpPlus;
-      }
-      '%' => {
-        self.advance();
-        if self.iter.as_char() == '=' {
-          self.advance();
-          return OpModAssign;
-        }
-        return OpMod;
-      }
-      '<' => {
-        self.advance();
-        if self.iter.as_char() == '<' {
-          self.advance();
-          if self.iter.as_char() == '=' {
-            self.advance();
-            return OpShlAssign;
-          }
-          return OpShl;
-        }
-        if self.iter.as_char() == '=' {
-          self.advance();
-          return OpLessThanOrEq;
-        }
-        return OpLessThan;
-      }
-      '>' => {
-        self.advance();
-        if self.iter.as_char() == '>' {
-          self.advance();
-          if self.iter.as_char() == '=' {
-            self.advance();
-            return OpShrAssign;
-          }
-          if self.iter.as_char() == '>' {
-            self.advance();
-            if self.iter.as_char() == '=' {
+            if self.iter.is_char('=') {
               self.advance();
-              return OpUShrAssign;
+              return OpPowAssign;
             }
-            return OpUShr;
+            return OpPow;
           }
-          return OpShr;
-        }
-        if self.iter.as_char() == '=' {
-          self.advance();
-          return OpGreaterThanOrEq;
-        }
-        return OpGreaterThan;
-      }
-      '=' => {
-        self.advance();
-        if self.iter.as_char() == '=' {
-          self.advance();
-          if self.iter.as_char() == '=' {
+          if self.iter.is_char('=') {
             self.advance();
-            return OpStrictEq;
+            return OpMulAssign;
           }
-          return OpEq;
+          return OpMul;
         }
-        if self.iter.as_char() == '>' {
+        '/' => {
           self.advance();
-          return ArrowFunctionGlyph;
-        }
-        return OpAssign;
-      }
-      '|' => {
-        self.advance();
-        if self.iter.as_char() == '=' {
-          self.advance();
-          return OpOrAssign;
-        }
-        if self.iter.as_char() == '|' {
-          self.advance();
-          if self.iter.as_char() == '=' {
+          if self.iter.is_char('/') {
             self.advance();
-            return OpLogicalOrAssign;
+            self.skip_signleline_comment();
+            if self.mode == Mode::Current {
+              self.token = Token::Comment;
+            } else {
+              self.lookahead_token = Token::Comment
+            }
+            return self.next();
           }
-          return OpLogicalOr;
-        }
-        return OpOr;
-      }
-      '&' => {
-        self.advance();
-        if self.iter.as_char() == '=' {
-          self.advance();
-          return OpAndAssign;
-        }
-        if self.iter.as_char() == '&' {
-          self.advance();
-          if self.iter.as_char() == '=' {
+          if self.iter.is_char('*') {
             self.advance();
-            return OpLogicalAndAssign;
+            self.skip_multiline_comment();
+            if self.mode == Mode::Current {
+              self.token = Token::Comment;
+            } else {
+              self.lookahead_token = Token::Comment
+            }
+            return self.next();
           }
-          return OpLogicalAnd;
-        }
-        return OpAnd;
-      }
-      '~' => {
-        self.advance();
-        return OpTilde;
-      }
-      '^' => {
-        self.advance();
-        if self.iter.as_char() == '=' {
-          self.advance();
-          return OpXorAssign;
-        }
-        return OpXor;
-      }
-      '.' => {
-        if let Some(p) = self.iter.peek() {
-          if chars::is_decimal_digits(p) {
-            return self.tokenize_numeric_literal(true);
-          }
-        }
-        self.advance();
-        if self.iter.as_char() == '.' {
-          self.advance();
-          if self.iter.as_char() == '.' {
+
+          if self.iter.is_char('=') {
             self.advance();
-            return Spread;
+            return OpDivAssign;
           }
-          return Invalid;
+
+          return OpDiv;
         }
-        return Dot;
-      }
-      '!' => {
-        self.advance();
-        if self.iter.as_char() == '=' {
+        '-' => {
           self.advance();
-          if self.iter.as_char() == '=' {
+          if self.iter.is_char('=') {
             self.advance();
-            return OpStrictNotEq;
+            return OpMinusAssign;
           }
-          return OpNotEq;
+          if self.iter.is_char('-') {
+            self.advance();
+            if is_html_comment_allowed && self.iter.is_char('>') {
+              self.skip_signleline_comment();
+              return self.next();
+            }
+            return OpDecrement;
+          }
+          return OpMinus;
         }
-        return OpNot;
-      }
-      '#' => {
-        self.advance();
-        self.tokenize_identifier();
-        self.contextual_keywords[self.mode as usize] = Token::PrivateIdentifier;
-        return Token::Identifier;
-      }
-      chars::LT_CHAR | chars::PS_CHAR | ';' => {
-        self.advance();
-        return Terminate;
-      }
-      ':' => {
-        self.advance();
-        return Colon;
-      }
-      '?' => {
-        self.advance();
-        if self.iter.as_char() == '.' && !chars::is_decimal_digits(self.iter.peek().unwrap_or(INVALID)) {
+        '+' => {
           self.advance();
-          return OpOptionalChaining;
+          if self.iter.is_char('=') {
+            self.advance();
+            return OpPlusAssign;
+          }
+          if self.iter.is_char('+') {
+            self.advance();
+            return OpIncrement;
+          }
+          return OpPlus;
         }
-        if self.iter.as_char() == '?' {
+        '%' => {
           self.advance();
-          return OpNullCoalescing;
+          if self.iter.is_char('=') {
+            self.advance();
+            return OpModAssign;
+          }
+          return OpMod;
         }
-        return Question;
-      }
-      '`' => {
-        self.advance();
-        self.parser_state_stack.push_state(ParserState::InTemplateLiteral);
-        return BackQuote;
-      }
-      '\'' | '"' => {
-        return self.tokenize_string_literal();
-      }
-      '$' => {
-        if self.parser_state_stack.is_in_state(ParserState::InTemplateLiteral) {
-          if let Some(peek) = self.iter.peek() {
-            if chars::ch(peek) == '{' {
+        '<' => {
+          self.advance();
+          if self.iter.is_char('<') {
+            self.advance();
+            if self.iter.is_char('=') {
               self.advance();
-              return TemplateSubstitution;
+              return OpShlAssign;
+            }
+            return OpShl;
+          }
+          if self.iter.is_char('=') {
+            self.advance();
+            return OpLessThanOrEq;
+          }
+          return OpLessThan;
+        }
+        '>' => {
+          self.advance();
+          if self.iter.is_char('>') {
+            self.advance();
+            if self.iter.is_char('=') {
+              self.advance();
+              return OpShrAssign;
+            }
+            if self.iter.is_char('>') {
+              self.advance();
+              if self.iter.is_char('=') {
+                self.advance();
+                return OpUShrAssign;
+              }
+              return OpUShr;
+            }
+            return OpShr;
+          }
+          if self.iter.is_char('=') {
+            self.advance();
+            return OpGreaterThanOrEq;
+          }
+          return OpGreaterThan;
+        }
+        '=' => {
+          self.advance();
+          if self.iter.is_char('=') {
+            self.advance();
+            if self.iter.is_char('=') {
+              self.advance();
+              return OpStrictEq;
+            }
+            return OpEq;
+          }
+          if self.iter.is_char('>') {
+            self.advance();
+            return ArrowFunctionGlyph;
+          }
+          return OpAssign;
+        }
+        '|' => {
+          self.advance();
+          if self.iter.is_char('=') {
+            self.advance();
+            return OpOrAssign;
+          }
+          if self.iter.is_char('|') {
+            self.advance();
+            if self.iter.is_char('=') {
+              self.advance();
+              return OpLogicalOrAssign;
+            }
+            return OpLogicalOr;
+          }
+          return OpOr;
+        }
+        '&' => {
+          self.advance();
+          if self.iter.is_char('=') {
+            self.advance();
+            return OpAndAssign;
+          }
+          if self.iter.is_char('&') {
+            self.advance();
+            if self.iter.is_char('=') {
+              self.advance();
+              return OpLogicalAndAssign;
+            }
+            return OpLogicalAnd;
+          }
+          return OpAnd;
+        }
+        '~' => {
+          self.advance();
+          return OpTilde;
+        }
+        '^' => {
+          self.advance();
+          if self.iter.is_char('=') {
+            self.advance();
+            return OpXorAssign;
+          }
+          return OpXor;
+        }
+        '.' => {
+          if let Some(p) = self.iter.peek() {
+            if chars::is_decimal_digits(p) {
+              return self.tokenize_numeric_literal(true);
             }
           }
+          self.advance();
+          if self.iter.is_char('.') {
+            self.advance();
+            if self.iter.is_char('.') {
+              self.advance();
+              return Spread;
+            }
+            return Invalid;
+          }
+          return Dot;
         }
-        return self.tokenize_identifier();
-      }
-      _ => {
-        if chars::is_decimal_digits(*self.iter) {
-          return self.tokenize_numeric_literal(false);
+        '!' => {
+          self.advance();
+          if self.iter.is_char('=') {
+            self.advance();
+            if self.iter.is_char('=') {
+              self.advance();
+              return OpStrictNotEq;
+            }
+            return OpNotEq;
+          }
+          return OpNot;
         }
-        if chars::is_identifier_start(self.iter.uc32().code()) {
+        '#' => {
+          self.advance();
+          self.tokenize_identifier();
+          self.contextual_keywords[self.mode as usize] = Token::PrivateIdentifier;
+          return Token::Identifier;
+        }
+        chars::LT_CHAR | chars::PS_CHAR | ';' => {
+          self.advance();
+          return Terminate;
+        }
+        ':' => {
+          self.advance();
+          return Colon;
+        }
+        '?' => {
+          self.advance();
+          if self.iter.is_char('.') && !chars::is_decimal_digits(self.iter.peek().unwrap_or(INVALID)) {
+            self.advance();
+            return OpOptionalChaining;
+          }
+          if self.iter.is_char('?') {
+            self.advance();
+            return OpNullCoalescing;
+          }
+          return Question;
+        }
+        '`' => {
+          self.advance();
+          self.parser_state_stack.push_state(ParserState::InTemplateLiteral);
+          return BackQuote;
+        }
+        '\'' | '"' => {
+          return self.tokenize_string_literal();
+        }
+        '$' => {
+          if self.parser_state_stack.is_in_state(ParserState::InTemplateLiteral) {
+            if let Some(peek) = self.iter.peek() {
+              if chars::ch(peek) == '{' {
+                self.advance();
+                return TemplateSubstitution;
+              }
+            }
+          }
           return self.tokenize_identifier();
         }
-        return if self.has_more() { Invalid } else { End };
+        _ => {
+          if chars::is_decimal_digits(*self.iter) {
+            return self.tokenize_numeric_literal(false);
+          }
+          return self.tokenize_identifier();
+        }
+      },
+      _ => {
+        return self.tokenize_identifier();
       }
     }
+  }
+
+  fn advance_and_push_surrogate_pair_safe(&mut self) {
+    if let Ok((hi, low)) = self.iter.uc32().to_u16() {
+      self.current_literal_buffer_mut().push(hi);
+      if low > 0 {
+        self.current_literal_buffer_mut().push(low);
+      }
+    }
+    self.advance();
   }
 
   fn tokenize_string_literal(&mut self) -> Token {
@@ -840,17 +901,26 @@ impl Scanner {
     let mut is_escaped = false;
     while self.has_more() {
       value = *self.iter;
-      match self.iter.as_char() {
-        '\\' => {
-          if !is_escaped {
-            if let Some(lookahead) = self.iter.peek() {
-              if chars::is_start_escape_sequence(lookahead) {
-                let escape_sequence_start_pos = self.record_position();
-                if let Ok(ret) = self.decode_escape_sequence() {
-                  if let Ok((hi, low)) = chars::uc32_to_uc16(ret) {
-                    self.current_literal_buffer_mut().push(hi);
-                    if low != 0 {
-                      self.current_literal_buffer_mut().push(low);
+      match self.iter.as_char_safe() {
+        Ok(ch) => match ch {
+          '\\' => {
+            if !is_escaped {
+              if let Some(lookahead) = self.iter.peek() {
+                if chars::is_start_escape_sequence(lookahead) {
+                  let escape_sequence_start_pos = self.record_position();
+                  if let Ok(ret) = self.decode_escape_sequence() {
+                    if let Ok((hi, low)) = chars::uc32_to_uc16(ret) {
+                      self.current_literal_buffer_mut().push(hi);
+                      if low != 0 {
+                        self.current_literal_buffer_mut().push(low);
+                      }
+                    } else {
+                      report_error!(
+                        self,
+                        "Invalid escape sequence",
+                        &pos_range!(escape_sequence_start_pos, self.current_position()),
+                        Token::Invalid
+                      );
                     }
                   } else {
                     report_error!(
@@ -860,70 +930,66 @@ impl Scanner {
                       Token::Invalid
                     );
                   }
-                } else {
-                  report_error!(
-                    self,
-                    "Invalid escape sequence",
-                    &pos_range!(escape_sequence_start_pos, self.current_position()),
-                    Token::Invalid
-                  );
-                }
-              } else if chars::is_octal_digits(lookahead) {
-                self.advance();
-                if chars::ch(lookahead) == '0' {
-                  if !chars::is_octal_digits(*self.iter) {
-                    self.current_literal_buffer_mut().push(0_u16);
+                } else if chars::is_octal_digits(lookahead) {
+                  self.advance();
+                  if chars::ch(lookahead) == '0' {
+                    if !chars::is_octal_digits(*self.iter) {
+                      self.current_literal_buffer_mut().push(0_u16);
+                    }
+                  } else {
+                    if self.parser_state_stack.is_in_state(ParserState::InStrictMode) {
+                      report_error!(
+                        self,
+                        "In strict mode code, octal escape is not allowed",
+                        self.current_position(),
+                        Token::Invalid
+                      );
+                    }
+                    let octal_value = self.decode_octal_escape();
+                    self.current_literal_buffer_mut().push(octal_value);
                   }
                 } else {
-                  if self.parser_state_stack.is_in_state(ParserState::InStrictMode) {
-                    report_error!(
-                      self,
-                      "In strict mode code, octal escape is not allowed",
-                      self.current_position(),
-                      Token::Invalid
-                    );
-                  }
-                  let octal_value = self.decode_octal_escape();
-                  self.current_literal_buffer_mut().push(octal_value);
+                  is_escaped = true;
+                  self.advance();
                 }
               } else {
-                is_escaped = true;
+                let start = self.record_position();
                 self.advance();
+                report_error!(self, "Unterminated string literal", &pos_range!(start, start), Token::Invalid);
               }
             } else {
-              let start = self.record_position();
-              self.advance();
-              report_error!(self, "Unterminated string literal", &pos_range!(start, start), Token::Invalid);
+              self.advance_and_push_buffer();
+              is_escaped = false;
             }
-          } else {
-            self.advance_and_push_buffer();
-            is_escaped = false;
           }
-        }
-        INVALID_CHAR => {
-          report_error!(self, "Unexpected token found", self.source_position(), Token::Invalid);
-        }
+          INVALID_CHAR => {
+            report_error!(self, "Unexpected token found", self.source_position(), Token::Invalid);
+          }
+          _ => {
+            if chars::is_cr_or_lf(*self.iter) {
+              if !is_escaped {
+                let start = self.record_position();
+                self.advance();
+                report_error!(self, "Unterminated string literal", &pos_range!(start, start), Token::Invalid);
+              }
+              self.collect_line_break();
+              continue;
+            }
+            if value == start {
+              if !is_escaped {
+                self.advance();
+                return Token::StringLiteral;
+              }
+            }
+            if is_escaped {
+              is_escaped = false;
+            }
+            self.current_literal_buffer_mut().push(value);
+            self.advance();
+          }
+        },
         _ => {
-          if chars::is_cr_or_lf(*self.iter) {
-            if !is_escaped {
-              let start = self.record_position();
-              self.advance();
-              report_error!(self, "Unterminated string literal", &pos_range!(start, start), Token::Invalid);
-            }
-            self.collect_line_break();
-            continue;
-          }
-          if value == start {
-            if !is_escaped {
-              self.advance();
-              return Token::StringLiteral;
-            }
-          }
-          if is_escaped {
-            is_escaped = false;
-          }
-          self.current_literal_buffer_mut().push(value);
-          self.advance();
+          self.advance_and_push_surrogate_pair_safe();
         }
       }
     }
@@ -933,8 +999,9 @@ impl Scanner {
   fn tokenize_identifier(&mut self) -> Token {
     let mut value = self.iter.uc32();
     self.current_literal_buffer_mut().clear();
-    debug_assert!(chars::is_identifier_start(value.code()));
-
+    if !chars::is_identifier_start(value.code()) {
+      return if self.has_more() { Token::Invalid } else { Token::End };
+    }
     while self.has_more() && chars::is_identifier_continue(value.code(), false) {
       if !value.is_surrogate_pair() && chars::ch(value.code() as u16) == '\\' {
         self.advance();
@@ -983,12 +1050,17 @@ impl Scanner {
         if chars::is_variation_selector(value.code()) {
           self.advance();
         } else {
-          self.advance_and_push_buffer();
+          if let Ok((hi, low)) = value.to_u16() {
+            self.current_literal_buffer_mut().push(hi);
+            if low > 0 {
+              self.current_literal_buffer_mut().push(low);
+            }
+          }
+          self.advance();
         }
       }
       value = self.iter.uc32();
     }
-
     let token = self.get_identifier_type();
     if token.is_contextual_keyword() {
       self.contextual_keywords[self.mode as usize] = token;
@@ -1164,26 +1236,30 @@ impl Scanner {
   }
 
   fn tokenize_regexp_characters(&mut self) -> Token {
-    let value = *self.iter;
     let mut is_escaped = false;
-    loop {
-      if let Some(lookahead) = self.iter.peek() {
-        match chars::ch(lookahead) {
+    while self.has_more() {
+      match self.iter.as_char_safe() {
+        Ok(ch) => match ch {
           '\\' => is_escaped = !is_escaped,
           '/' => {
             if !is_escaped {
+              self.advance();
               return Token::RegExp;
             }
           }
           _ => {
-            unreachable!();
+            is_escaped = false;
+            self.advance_and_push_buffer();
           }
+        },
+        _ => {
+          is_escaped = false;
+          self.advance_and_push_surrogate_pair_safe();
         }
-        self.advance();
-      } else {
-        report_error!(self, "Unexpected end of input", self.source_position(), Token::Invalid);
       }
+      self.advance_and_push_buffer();
     }
+    report_error!(self, "Unexpected end of input", self.source_position(), Token::Invalid);
   }
 
   fn decode_template_literal_escape_sequence(&mut self, escape_sequence_start_pos: &SourcePosition, start_index: u32, count: u32) -> bool {
@@ -1229,7 +1305,7 @@ impl Scanner {
   fn tokenize_template_literal_characters(&mut self) -> Token {
     self.current_literal_buffer_mut().clear();
     let mut is_escaped = false;
-    if self.iter.as_char() == '{' {
+    if self.iter.is_char('{') {
       self.advance();
     }
     let tmpl_start_pos = self.record_position();
@@ -1244,94 +1320,99 @@ impl Scanner {
           Token::Invalid
         );
       }
-      match self.iter.as_char() {
-        '\\' => {
-          if !is_escaped {
-            if let Some(lookahead) = self.iter.peek() {
-              let escape_sequence_start_pos = self.record_position();
-              if chars::is_start_escape_sequence(lookahead) {
-                self.advance();
-                if !self.decode_template_literal_escape_sequence(
-                  &escape_sequence_start_pos,
-                  start_index as u32,
-                  if chars::is_start_unicode_escape_sequence(lookahead) { 4 } else { 2 },
-                ) {
-                  return Token::Invalid;
-                }
-              } else if chars::is_octal_digits(lookahead) {
-                self.advance();
-                if chars::ch(lookahead) == '0' && !chars::is_decimal_digits(self.iter.peek().unwrap_or('a' as u16)) {
+      match self.iter.as_char_safe() {
+        Ok(ch) => match ch {
+          '\\' => {
+            if !is_escaped {
+              if let Some(lookahead) = self.iter.peek() {
+                let escape_sequence_start_pos = self.record_position();
+                if chars::is_start_escape_sequence(lookahead) {
                   self.advance();
-                  self.current_literal_buffer_mut().push(0_u16);
+                  if !self.decode_template_literal_escape_sequence(
+                    &escape_sequence_start_pos,
+                    start_index as u32,
+                    if chars::is_start_unicode_escape_sequence(lookahead) { 4 } else { 2 },
+                  ) {
+                    return Token::Invalid;
+                  }
+                } else if chars::is_octal_digits(lookahead) {
+                  self.advance();
+                  if chars::ch(lookahead) == '0' && !chars::is_decimal_digits(self.iter.peek().unwrap_or('a' as u16)) {
+                    self.advance();
+                    self.current_literal_buffer_mut().push(0_u16);
+                  } else {
+                    self.advances(2);
+                    report_error!(
+                      self,
+                      "In template literal, octal escape is not allowed",
+                      self.current_position(),
+                      Token::Invalid
+                    );
+                  }
                 } else {
-                  self.advances(2);
-                  report_error!(
-                    self,
-                    "In template literal, octal escape is not allowed",
-                    self.current_position(),
-                    Token::Invalid
-                  );
+                  is_escaped = true;
+                  self.advance();
                 }
               } else {
-                is_escaped = true;
-                self.advance();
+                report_error!(self, "Unexpected end of input.", self.current_position(), Token::Invalid);
               }
             } else {
-              report_error!(self, "Unexpected end of input.", self.current_position(), Token::Invalid);
+              is_escaped = !is_escaped;
             }
-          } else {
-            is_escaped = !is_escaped;
           }
-        }
-        '$' => {
-          if !is_escaped {
-            if let Some(lookahead) = self.iter.peek() {
-              if chars::ch(lookahead) == '{' {
-                if self.current_literal_buffer().len() > 0 {
-                  return Token::StringLiteral;
+          '$' => {
+            if !is_escaped {
+              if let Some(lookahead) = self.iter.peek() {
+                if chars::ch(lookahead) == '{' {
+                  if self.current_literal_buffer().len() > 0 {
+                    return Token::StringLiteral;
+                  }
+                  self.advance();
+                  self.advance();
+                  parts_len += 1;
+                  return Token::TemplateSubstitution;
                 }
-                self.advance();
-                self.advance();
-                parts_len += 1;
-                return Token::TemplateSubstitution;
+              } else {
+                report_error!(self, "Unexpected end of input.", self.current_position(), Token::Invalid);
               }
             } else {
-              report_error!(self, "Unexpected end of input.", self.current_position(), Token::Invalid);
-            }
-          } else {
-            is_escaped = false;
-            self.advance_and_push_buffer();
-          }
-        }
-        '`' => {
-          if !is_escaped {
-            if self.current_literal_buffer().len() > 0 {
-              return Token::StringLiteral;
-            }
-            self.advance();
-            return Token::Template;
-          } else {
-            is_escaped = false;
-            self.advance_and_push_buffer();
-          }
-        }
-        chars::CR_CHAR => {
-          if let Some(next) = self.iter.peek() {
-            if chars::is_lf(next) {
+              is_escaped = false;
               self.advance_and_push_buffer();
             }
+          }
+          '`' => {
+            if !is_escaped {
+              if self.current_literal_buffer().len() > 0 {
+                return Token::StringLiteral;
+              }
+              self.advance();
+              return Token::Template;
+            } else {
+              is_escaped = false;
+              self.advance_and_push_buffer();
+            }
+          }
+          chars::CR_CHAR => {
+            if let Some(next) = self.iter.peek() {
+              if chars::is_lf(next) {
+                self.advance_and_push_buffer();
+              }
+              self.advance_and_push_buffer();
+              self.current_position_mut().set_end_col(0_u32);
+              self.current_position_mut().inc_end_line_number();
+            }
+          }
+          chars::LF_CHAR => {
             self.advance_and_push_buffer();
             self.current_position_mut().set_end_col(0_u32);
             self.current_position_mut().inc_end_line_number();
           }
-        }
-        chars::LF_CHAR => {
-          self.advance_and_push_buffer();
-          self.current_position_mut().set_end_col(0_u32);
-          self.current_position_mut().inc_end_line_number();
-        }
+          _ => {
+            self.advance_and_push_buffer();
+          }
+        },
         _ => {
-          self.advance_and_push_buffer();
+          self.advance_and_push_surrogate_pair_safe();
         }
       }
     }

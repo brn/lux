@@ -5,13 +5,12 @@ use crate::context::Context;
 use std::mem::size_of;
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct JsErrorLayout {
   message: BareHeapLayout<JsString>,
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct JsError(HeapLayout<JsErrorLayout>);
 impl_object!(JsError, HeapLayout<JsErrorLayout>);
 
@@ -25,13 +24,12 @@ impl JsError {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Default)]
 pub struct JsTypeErrorLayout {
   message: BareHeapLayout<JsString>,
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct JsTypeError(HeapLayout<JsTypeErrorLayout>);
 impl_object!(JsTypeError, HeapLayout<JsTypeErrorLayout>);
 

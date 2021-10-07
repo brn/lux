@@ -16,7 +16,6 @@ pub struct SmallStringLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct SmallString(HeapLayout<SmallStringLayout>);
 impl_object!(SmallString, HeapLayout<SmallStringLayout>);
 
@@ -114,7 +113,6 @@ pub struct OneByteCharLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct OneByteChar(HeapLayout<OneByteCharLayout>);
 impl_object!(OneByteChar, HeapLayout<OneByteCharLayout>);
 

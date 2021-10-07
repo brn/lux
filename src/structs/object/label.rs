@@ -7,6 +7,5 @@ pub struct JsLabelLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct JsLabel(HeapLayout<JsLabelLayout>);
 impl_object!(JsLabel, HeapLayout<JsLabelLayout>);

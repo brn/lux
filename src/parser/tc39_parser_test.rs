@@ -6,24 +6,35 @@ use std::io;
 use std::path::PathBuf;
 
 fn parse(filename: &str, content: &str, parser_option: ParserOption, parser_type: ParserType, should_fail: bool) {
-  let context = LuxContext::new_until_internal_object_records();
+  let context = LuxContext::new();
   let source = Source::new(context, filename, content);
   let mut parser = Parser::new(context, source.clone(), parser_option.clone());
-  match parser.parse(parser_type) {
-    Ok(ast) => {
-      if should_fail {
-        parser.print_stack_trace();
-        panic!(format!(
-          "Parsing {} succeeded, but failure expected\ncode is\n{}",
-          filename, content
-        ));
+  match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parser.parse(parser_type))) {
+    Ok(r) => match r {
+      Ok(ast) => {
+        if should_fail {
+          println!(" ... failed");
+          parser.print_stack_trace();
+          panic!(
+            "{}",
+            format!("Parsing {} succeeded, but failure expected\ncode is\n{}", filename, content)
+          );
+        }
+        println!(" ... ok");
       }
-    }
+      Err(err) => {
+        if !should_fail {
+          println!(" ... failed");
+          parser.print_stack_trace();
+          panic!("{}", err.error_message());
+        }
+        println!(" ... ok");
+      }
+    },
     Err(err) => {
-      if !should_fail {
-        parser.print_stack_trace();
-        panic!(err.error_message());
-      }
+      println!(" ... failed");
+      parser.print_stack_trace();
+      panic!("{:?}", err);
     }
   }
 }
@@ -42,36 +53,26 @@ fn get_test_files<F: Fn(&fs::DirEntry)>(dir: &str, cb: F) -> io::Result<()> {
   Ok(())
 }
 
-const SHOULD_RUN_UNDER_STRICT_MODE_CASES: [&'static str; 4] = [
-  "1aff49273f3e3a98.js",
-  "12a74c60f52a60de.js",
-  "be7329119eaa3d47.js",
-  "e262ea7682c36f92.js",
+const SHOULD_RUN_UNDER_STRICT_MODE_CASES: [&'static str; 6] = [
+  "early/1aff49273f3e3a98.js",
+  "early/12a74c60f52a60de.js",
+  "early/be7329119eaa3d47.js",
+  "early/e262ea7682c36f92.js",
+  "early/ec31fa5e521c5df4.js",
+  "early/a610a46980d6cc37.js",
 ];
-const EARLY_EXCLUDES_CASES: [&'static str; 1] = ["0f5f47108da5c34e.js"];
+const EXCLUDES_CASES: [&'static str; 1] = ["early/0f5f47108da5c34e.js"];
 
-#[test]
-fn extract_test() {
-  parse(
-    "inline",
-    "let x\\u{E01D5},x;",
-    ParserOptionBuilder::default().build(),
-    ParserType::Script,
-    true,
-  );
-}
-
-#[test]
-fn tc39_parser_test_early() {
-  if let Err(e) = get_test_files("early", |entry| {
+fn run_tc39_parser_test(dir: &str, should_fail: bool) {
+  if let Err(e) = get_test_files(dir, |entry| {
     let path = entry.path();
     let content = fs::read_to_string(entry.path()).unwrap();
     let path_str = path.to_str().unwrap();
     let is_module = path_str.ends_with("module.js");
     let mut should_run_under_strict_mode = false;
-    for file in EARLY_EXCLUDES_CASES.iter() {
+    for file in EXCLUDES_CASES.iter() {
       if path_str.ends_with(file) {
-        println!("Skip tc39_parer_test {}", path_str);
+        println!("skip tc39_parer_test {}", path_str);
         return;
       }
     }
@@ -81,6 +82,7 @@ fn tc39_parser_test_early() {
         break;
       }
     }
+    print!("test parser::tc39_parer_tests::{}", path_str);
     parse(
       path_str,
       &content,
@@ -99,9 +101,30 @@ fn tc39_parser_test_early() {
         .build()
       },
       if is_module { ParserType::Module } else { ParserType::Script },
-      true,
+      should_fail,
     );
   }) {
     panic!("{:?}", e);
   }
+}
+
+#[test]
+fn extract_test() {
+  parse(
+    "anonymout",
+    "([let]) => {'use strict'}",
+    ParserOptionBuilder::default().build(),
+    ParserType::Script,
+    true,
+  );
+}
+
+#[test]
+fn tc39_parser_test_early() {
+  run_tc39_parser_test("early", true);
+}
+
+#[test]
+fn tc39_parser_test_pass() {
+  run_tc39_parser_test("pass", false);
 }

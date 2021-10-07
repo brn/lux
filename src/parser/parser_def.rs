@@ -13,6 +13,7 @@ bitflags! {
     const BindingPattern = 4;
     const Initializer = 8;
     const KeywordIdentifier = 16;
+    const Let = 32;
   }
 }
 
@@ -69,6 +70,10 @@ impl ParserConstraints {
 
   pub fn is_keyword_identifier_allowed(&self) -> bool {
     return self.contains(ParserConstraints::KeywordIdentifier);
+  }
+
+  pub fn is_let_allowed(&self) -> bool {
+    return self.contains(ParserConstraints::Let);
   }
 }
 
@@ -409,6 +414,11 @@ impl StatementBlock {
       first_const_initializer_error: None,
       first_labelled_function_error: None,
     };
+  }
+
+  pub fn propagate(&self, b: &mut StatementBlock) {
+    b.set_first_const_initializer_error(self.first_const_initializer_error);
+    b.set_first_labelled_function_error(self.first_labelled_function_error);
   }
 
   pub fn with(is_continuable: bool, is_breakable: bool, is_returnable: bool, is_export: bool) -> Self {

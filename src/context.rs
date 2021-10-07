@@ -1,8 +1,8 @@
 use super::heap::*;
 use crate::def::*;
 use crate::structs::{
-  BareHeapLayout, Builtins, FlatString, HeapLayout, HeapObject, InternalArray, ObjectRecord, ObjectRecords, PropertyName, Repr, Shape,
-  SymbolRegistry,
+  BareHeapLayout, Builtins, FixedU16CodePointArray, FlatString, HeapLayout, HeapObject, InternalArray, ObjectRecord, ObjectRecords,
+  PropertyName, Repr, Shape, SymbolRegistry,
 };
 use once_cell::sync::Lazy as SyncLazy;
 use property::Property;
@@ -89,7 +89,6 @@ pub struct GlobalObjectsLayout {
   symbol_to_string_str: FlatString,
 }
 
-#[derive(Copy, Clone)]
 pub struct GlobalObjects(HeapLayout<GlobalObjectsLayout>);
 impl_object!(GlobalObjects, HeapLayout<GlobalObjectsLayout>);
 
@@ -135,12 +134,24 @@ impl GlobalObjects {
   }
 }
 
-#[derive(Copy, Clone, Default)]
+#[derive(Copy, Clone, Default, Property)]
 pub struct StaticNamesLayout {
+  #[property(get(type = "copy"), set(disable))]
+  set_str: FixedU16CodePointArray,
+  #[property(get(type = "copy"), set(disable))]
+  get_str: FixedU16CodePointArray,
+  #[property(get(type = "copy"), set(disable))]
+  async_str: FixedU16CodePointArray,
+  #[property(get(type = "copy"), set(disable))]
+  use_strict_str: FixedU16CodePointArray,
+  #[property(get(type = "copy"), set(disable))]
+  constructor_str: FixedU16CodePointArray,
+  #[property(get(type = "copy"), set(disable))]
+  prototype_str: FixedU16CodePointArray,
+  #[property(get(type = "copy"), set(disable))]
   description: PropertyName,
 }
 
-#[derive(Copy, Clone)]
 pub struct StaticNames(HeapLayout<StaticNamesLayout>);
 impl_object!(StaticNames, HeapLayout<StaticNamesLayout>);
 
@@ -150,6 +161,12 @@ impl StaticNames {
     let static_names_record = ObjectRecord::new(context, StaticNames::SIZE as u32, Shape::static_names());
     let mut layout = HeapLayout::<StaticNamesLayout>::persist(context, static_names_record);
     layout.description = PropertyName::from_utf8_string(context, "description");
+    layout.set_str = FixedU16CodePointArray::from_utf8(context, "set");
+    layout.get_str = FixedU16CodePointArray::from_utf8(context, "get");
+    layout.async_str = FixedU16CodePointArray::from_utf8(context, "async");
+    layout.use_strict_str = FixedU16CodePointArray::from_utf8(context, "use strict");
+    layout.constructor_str = FixedU16CodePointArray::from_utf8(context, "constructor");
+    layout.prototype_str = FixedU16CodePointArray::from_utf8(context, "prototype");
     return StaticNames(layout);
   }
 
@@ -173,7 +190,6 @@ pub struct LuxContextLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct LuxContext(BareHeapLayout<LuxContextLayout>);
 impl_object!(LuxContext, BareHeapLayout<LuxContextLayout>);
 
@@ -184,10 +200,10 @@ impl LuxContext {
     let c = LuxContext::new_until_js_object_records();
     let mut layout = c.0;
     layout.static_names = StaticNames::new(c);
-    layout.globals = GlobalObjects::new(c);
-    layout.builtins = Builtins::new(c);
-    layout.symbol_registry = SymbolRegistry::persist(c);
-    layout.symbol_registry.init_well_known_symbols(c);
+    // layout.globals = GlobalObjects::new(c);
+    // layout.symbol_registry = SymbolRegistry::persist(c);
+    // layout.symbol_registry.init_well_known_symbols(c);
+    // layout.builtins = Builtins::new(c);
     return c;
   }
 
@@ -208,7 +224,7 @@ impl LuxContext {
   }
 
   pub fn new_until_js_object_records() -> LuxContext {
-    let c = LuxContext::new_until_internal_object_records();
+    let mut c = LuxContext::new_until_internal_object_records();
     let mut records = c.object_records;
     records.initialize_js_objects(c);
     return c;
@@ -280,5 +296,18 @@ impl Context for LuxContext {
 
   fn symbol_registry(&self) -> SymbolRegistry {
     return self.symbol_registry;
+  }
+}
+
+#[cfg(test)]
+mod context_test {
+  use super::*;
+
+  fn x(c: impl Context) {
+    let str = c.static_names().use_strict_str();
+    let u8 = std::char::decode_utf16(str.iter().cloned())
+      .map(|r| r.unwrap_or('#'))
+      .collect::<String>();
+    assert_eq!(&u8, "use strict");
   }
 }

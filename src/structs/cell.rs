@@ -8,12 +8,22 @@ use std::marker::PhantomData;
 use std::mem::size_of;
 use std::ops::{Deref, DerefMut};
 
-pub trait HeapBody: Copy + Default {}
-impl<T: Copy + Default> HeapBody for T {}
+pub trait HeapBody: Default {}
+impl<T: Default> HeapBody for T {}
 
-#[derive(Copy, Clone)]
 #[repr(C)]
 pub struct HeapLayout<T: HeapBody>(usize, PhantomData<T>);
+impl<T: HeapBody> Default for HeapLayout<T> {
+  fn default() -> Self {
+    return HeapLayout(0, PhantomData);
+  }
+}
+impl<T: HeapBody> Clone for HeapLayout<T> {
+  fn clone(&self) -> Self {
+    return Self(self.0, PhantomData);
+  }
+}
+impl<T: HeapBody> Copy for HeapLayout<T> {}
 pub const HEAP_LAYOUT_SIZE: u32 = size_of::<usize>() as u32;
 
 #[derive(Copy, Clone, Default)]
@@ -129,7 +139,7 @@ impl<T: HeapBody> HeapLayout<T> {
   #[inline(always)]
   pub fn set(this: &HeapLayout<T>, value: &T) {
     unsafe {
-      *(this.addr().offset(Cell::SIZE as isize) as *mut T) = *value;
+      *(this.addr().offset(Cell::SIZE as isize) as *mut T) = std::mem::transmute_copy(value);
     };
   }
 
@@ -303,6 +313,25 @@ macro_rules! _priv_impl_heap_object_body {
   };
 }
 
+macro_rules! impl_copy {
+  ($name:ident) => {
+    impl Clone for $name {
+      fn clone(&self) -> Self {
+        return *self;
+      }
+    }
+    impl Copy for $name {}
+  };
+  ($name:ident<$($type:tt : $bound:ident),+$(,)?>) => {
+    impl<$($type : $bound),*> Clone for $name<$($type,)*> {
+      fn clone(&self) -> Self {
+        return *self;
+      }
+    }
+    impl<$($type : $bound),*> Copy for $name<$($type,)*> {}
+  };
+}
+
 macro_rules! impl_heap_object {
   ($name:ident) => {
     impl crate::structs::HeapObject for $name {
@@ -388,9 +417,19 @@ macro_rules! impl_deref_heap {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
-pub struct BareHeapLayout<T: Copy>(Addr, PhantomData<T>);
-impl<T: Copy> BareHeapLayout<T> {
+pub struct BareHeapLayout<T>(Addr, PhantomData<T>);
+impl<T> Default for BareHeapLayout<T> {
+  fn default() -> Self {
+    return BareHeapLayout(std::ptr::null_mut(), PhantomData);
+  }
+}
+impl<T> Clone for BareHeapLayout<T> {
+  fn clone(&self) -> Self {
+    return *self;
+  }
+}
+impl<T> Copy for BareHeapLayout<T> {}
+impl<T> BareHeapLayout<T> {
   pub fn as_addr(&self) -> Addr {
     return self.0;
   }
@@ -416,27 +455,26 @@ impl<T: Copy> BareHeapLayout<T> {
   }
 }
 
-impl<T: Copy> Deref for BareHeapLayout<T> {
+impl<T> Deref for BareHeapLayout<T> {
   type Target = T;
   fn deref(&self) -> &Self::Target {
     return self.as_ref();
   }
 }
 
-impl<T: Copy> DerefMut for BareHeapLayout<T> {
+impl<T> DerefMut for BareHeapLayout<T> {
   fn deref_mut(&mut self) -> &mut T {
     return self.as_mut();
   }
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Default)]
+#[derive(Default)]
 pub struct CellLayout {
   object_record: ObjectRecord,
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct Cell(BareHeapLayout<CellLayout>);
 
 impl Cell {
@@ -537,6 +575,7 @@ macro_rules! impl_bare_object {
   ($name:ident, $layout:ident<$body:ty>) => {
     impl_from_addr!($name, $layout);
     impl_into_addr!($name);
+    impl_copy!($name);
     impl_repr_convertion!($name, $layout);
     impl_default!($name);
     impl_deref_heap!($name, $layout, $body);
@@ -547,6 +586,7 @@ macro_rules! impl_object {
   ($name:ident, $layout:ident<$body:ty>) => {
     impl_from_addr!($name, $layout);
     impl_into_addr!($name);
+    impl_copy!($name);
     impl_heap_object!($name);
     impl_repr_convertion!($name, $layout);
     impl_deref_heap!($name, $layout, $body);
@@ -555,6 +595,7 @@ macro_rules! impl_object {
   ($name:ident<$($type:tt : $bound:ident),+$(,)?>, $layout:ident<$body:ty>) => {
     impl_from_addr!($name<$($type: $bound),+>, $layout);
     impl_into_addr!($name<$($type: $bound),+>);
+    impl_copy!($name<$($type: $bound),+>);
     impl_heap_object!($name<$($type: $bound),+>);
     impl_repr_convertion!($name<$($type: $bound),+>,$layout);
     impl_deref_heap!($name<$($type: $bound),+>, $layout, $body);
@@ -563,6 +604,7 @@ macro_rules! impl_object {
   ($name:ident<$($type:tt : $bound:ident),+$(,)?>, $layout:ident<$body:ty>, $($args:expr),+) => {
     impl_from_addr!($name<$($type: $bound),+>, $layout, $($args),*);
     impl_into_addr!($name<$($type: $bound),+>);
+    impl_copy!($name<$($type: $bound),+>);
     impl_heap_object!($name<$($type: $bound),+>);
     impl_repr_convertion!($name<$($type: $bound),+>,$layout, $($args),*);
     impl_deref_heap!($name<$($type: $bound),+>, $layout, $body);

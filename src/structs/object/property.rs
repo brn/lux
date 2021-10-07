@@ -164,7 +164,6 @@ pub struct PropertyLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct Property(HeapLayout<PropertyLayout>);
 impl_object!(Property, HeapLayout<PropertyLayout>);
 

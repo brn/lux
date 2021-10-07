@@ -81,7 +81,6 @@ pub struct ObjectRecordsLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct ObjectRecords(HeapLayout<ObjectRecordsLayout>);
 impl_object!(ObjectRecords, HeapLayout<ObjectRecordsLayout>);
 

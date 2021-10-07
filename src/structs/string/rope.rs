@@ -36,7 +36,6 @@ pub struct StringPieceLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone, Debug)]
 struct StringPiece(HeapLayout<StringPieceLayout>);
 impl_object!(StringPiece, HeapLayout<StringPieceLayout>);
 
@@ -180,7 +179,7 @@ impl StringPiece {
 
   #[inline]
   fn str_ptr(&self) -> *mut u16 {
-    return self.data.data();
+    return self.data.data_mut();
   }
 
   #[inline]
@@ -507,7 +506,6 @@ pub struct FlattenStringLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct FlattenString(HeapLayout<FlattenStringLayout>);
 impl_object!(FlattenString, HeapLayout<FlattenStringLayout>);
 
@@ -570,7 +568,6 @@ pub struct StringRopeLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct StringRope(HeapLayout<StringRopeLayout>);
 impl_object!(StringRope, HeapLayout<StringRopeLayout>);
 

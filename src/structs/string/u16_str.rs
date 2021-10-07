@@ -51,6 +51,12 @@ impl FixedU16CodePointArray {
     return FixedU16CodePointArray::copy_construct(context, vec.len(), vec.len(), vec.as_ptr());
   }
 
+  pub fn to_u16_vec(&self) -> Vec<u16> {
+    let mut v = Vec::new();
+    v.extend_from_slice(self.to_slice());
+    return v;
+  }
+
   pub fn from_utf8(context: impl ObjectRecordsInitializedContext, str: &str) -> FixedU16CodePointArray {
     return from_utf8(context, str);
   }

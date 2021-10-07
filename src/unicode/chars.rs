@@ -124,7 +124,7 @@ pub fn uc32_to_uc16(u: u32) -> Result<(u16, u16), ()> {
   if u > 0x10FFFF {
     return Err(());
   }
-  if u < 0x1000 {
+  if u < 0x10000 {
     return Ok((u as u16, 0));
   }
   return Ok((((u - 0x10000) / 0x400 + 0xD800) as u16, ((u - 0x10000) % 0x400 + 0xDC00) as u16));
@@ -174,6 +174,14 @@ pub fn is_variation_selector(value: u32) -> bool {
 #[inline(always)]
 pub const fn ch(u: u16) -> char {
   return u as u8 as char;
+}
+
+#[inline(always)]
+pub const fn char_safe(u: u16) -> Result<char, u16> {
+  if u > (u8::MAX as u16) {
+    return Err(u);
+  }
+  return Ok(u as u8 as char);
 }
 
 // http://www.ecma-international.org/ecma-262/9.0/index.html#sec-names-and-keywords
@@ -497,21 +505,21 @@ pub fn parse_numeric_value<'a>(
       iter.next();
       kind = DecimalLeadingZero;
       if let Some(next) = iter.peek() {
-        if ch(*next) == 'x' {
+        if ch(*next).to_lowercase().last().unwrap() == 'x' {
           origin.next();
           origin.next();
           return match parse_hex(origin, should_stop_if_invalid_token_found) {
             Ok(val) => Ok((val as f64, NumericValueKind::Hex)),
             Err(e) => Err(e),
           };
-        } else if ch(*next) == 'b' {
+        } else if ch(*next).to_lowercase().last().unwrap() == 'b' {
           origin.next();
           origin.next();
           return match parse_binary(origin, should_stop_if_invalid_token_found) {
             Ok(val) => Ok((val as f64, NumericValueKind::Binary)),
             Err(e) => Err(e),
           };
-        } else if ch(*next) == 'o' {
+        } else if ch(*next).to_lowercase().last().unwrap() == 'o' {
           origin.next();
           origin.next();
           return match parse_octal(origin, should_stop_if_invalid_token_found) {

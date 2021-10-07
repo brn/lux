@@ -6,7 +6,7 @@ use super::super::shape::Shape;
 use crate::context::Context;
 use crate::def::*;
 
-pub trait NativeFunctionCall: Copy + Default {
+pub trait NativeFunctionCall: Default + Copy {
   fn call(context: impl Context, receiver: JsReceiver, arguments: InternalArray<Repr>) -> Option<Repr>;
 }
 
@@ -17,7 +17,6 @@ pub struct NativeFunctionLayout<F: NativeFunctionCall> {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct NativeFunction<F: NativeFunctionCall>(HeapLayout<NativeFunctionLayout<F>>);
 impl_object!(NativeFunction<F: NativeFunctionCall>, HeapLayout<NativeFunctionLayout<F>>);
 

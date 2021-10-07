@@ -30,7 +30,6 @@ struct HashMapEntryLayout<K: HashMapKey, V: HashMapValue> {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 struct HashMapEntry<K: HashMapKey, V: HashMapValue>(HeapLayout<HashMapEntryLayout<K, V>>);
 impl_object!(HashMapEntry<K: HashMapKey, V: HashMapValue>, HeapLayout<HashMapEntryLayout<K, V>>);
 
@@ -64,7 +63,6 @@ pub struct HashMapLayout<K: HashMapKey, V: HashMapValue> {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct HashMap<K: HashMapKey, V: HashMapValue>(HeapLayout<HashMapLayout<K, V>>);
 impl_object!(HashMap<K: HashMapKey, V: HashMapValue>, HeapLayout<HashMapLayout<K, V>>);
 

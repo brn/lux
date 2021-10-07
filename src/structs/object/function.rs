@@ -117,7 +117,6 @@ pub struct BuiltinJsFunctionLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct JsFunction(HeapLayout<JsFunctionLayout>);
 impl_object!(JsFunction, HeapLayout<JsFunctionLayout>);
 

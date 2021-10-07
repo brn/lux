@@ -17,7 +17,6 @@ use std::mem::size_of;
 #[derive(Copy, Clone, Default)]
 pub struct JsObjectLayout;
 
-#[derive(Copy, Clone)]
 pub struct JsObject(HeapLayout<JsObjectLayout>);
 impl_object!(JsObject, HeapLayout<JsObjectLayout>);
 

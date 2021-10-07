@@ -549,7 +549,6 @@ pub struct FastPropertiesLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct ObjectRecord(BareHeapLayout<LightObjectRecordLayout>);
 impl_bare_object!(ObjectRecord, BareHeapLayout<LightObjectRecordLayout>);
 
@@ -622,7 +621,6 @@ const FULL_OBJECT_RECORD_LAYOUT_SIZE: usize = size_of::<ObjectRecordLayout>();
 const EMBEDDABLE_LAYOUT_SIZE: usize = size_of::<FastPropertiesLayout>();
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct FullObjectRecord(BareHeapLayout<ObjectRecordLayout>);
 impl_bare_object!(FullObjectRecord, BareHeapLayout<ObjectRecordLayout>);
 
@@ -1256,7 +1254,6 @@ impl std::fmt::Debug for FullObjectRecord {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct FullObjectRecordTraversal(BareHeapLayout<ObjectRecordLayout>);
 impl_object!(FullObjectRecordTraversal, BareHeapLayout<ObjectRecordLayout>);
 

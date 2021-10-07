@@ -30,7 +30,6 @@ pub struct InternalArrayLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct InternalArray<T: InternalArrayElement>(HeapLayout<InternalArrayLayout>, PhantomData<T>);
 impl_object!(InternalArray<T: InternalArrayElement>, HeapLayout<InternalArrayLayout>, PhantomData);
 
@@ -104,12 +103,12 @@ impl<T: Copy> InternalArray<T> {
   }
 
   pub fn expand_and_copy(context: impl ObjectRecordsInitializedContext, base: InternalArray<T>) -> InternalArray<T> {
-    return InternalArray::<T>::construct(context, base.capacity() * 2, base.len(), base.data());
+    return InternalArray::<T>::construct(context, base.capacity() * 2, base.len(), base.data_mut());
   }
 
   pub fn expand_and_copy_with_size(context: impl ObjectRecordsInitializedContext, base: InternalArray<T>, size: usize) -> InternalArray<T> {
     assert!(base.capacity() < size);
-    return InternalArray::<T>::construct(context, size, base.len(), base.data());
+    return InternalArray::<T>::construct(context, size, base.len(), base.data_mut());
   }
 
   pub fn is_full(&self) -> bool {
@@ -168,8 +167,8 @@ impl<T: Copy> InternalArray<T> {
   pub fn concat(&self, context: impl ObjectRecordsInitializedContext, array: InternalArray<T>) -> InternalArray<T> {
     let ret = InternalArray::<T>::new(context, self.length() + array.length());
     unsafe {
-      std::ptr::copy_nonoverlapping(self.data(), ret.data(), self.length());
-      std::ptr::copy_nonoverlapping(array.data(), ret.data().offset(self.length() as isize), array.length());
+      std::ptr::copy_nonoverlapping(self.data_mut(), ret.data_mut(), self.length());
+      std::ptr::copy_nonoverlapping(array.data_mut(), ret.data_mut().offset(self.length() as isize), array.length());
     };
     return ret;
   }
@@ -179,7 +178,7 @@ impl<T: Copy> InternalArray<T> {
     let len = self.length;
     self.length = 0;
     unsafe {
-      std::ptr::copy_nonoverlapping(array.data(), self.data().offset(len as isize), array.length());
+      std::ptr::copy_nonoverlapping(array.data(), self.data_mut().offset(len as isize), array.length());
     };
     self.length = len + array.length();
   }
@@ -202,18 +201,18 @@ impl<T: Copy> InternalArray<T> {
 
   pub fn at(&self, index: usize) -> &T {
     debug_assert!(index < self.capacity());
-    return unsafe { &*(self.data().offset(index as isize)) };
+    return unsafe { &*(self.data_mut().offset(index as isize)) };
   }
 
   pub fn at_mut(&mut self, index: usize) -> &mut T {
     debug_assert!(index < self.capacity());
-    return unsafe { &mut *(self.data().offset(index as isize)) };
+    return unsafe { &mut *(self.data_mut().offset(index as isize)) };
   }
 
   pub fn write(&mut self, index: usize, data: T) {
     debug_assert!(self.capacity() > index, "Specified index exceeded array capacity");
     unsafe {
-      let addr = self.data().offset(index as isize);
+      let addr = self.data_mut().offset(index as isize);
       *addr = data;
     };
   }
@@ -237,8 +236,20 @@ impl<T: Copy> InternalArray<T> {
     self.length = len;
   }
 
-  pub fn data(&self) -> *mut T {
+  pub fn data(&self) -> *const T {
+    return unsafe { self.cell().get_body().offset((size_of::<InternalArrayLayout>()) as isize) as *const T };
+  }
+
+  pub fn data_mut(&self) -> *mut T {
     return unsafe { self.cell().get_body().offset((size_of::<InternalArrayLayout>()) as isize) as *mut T };
+  }
+
+  pub fn to_slice(&self) -> &[T] {
+    return unsafe { std::slice::from_raw_parts(self.data(), self.len()) };
+  }
+
+  pub fn to_slice_mut(&self) -> &mut [T] {
+    return unsafe { std::slice::from_raw_parts_mut(self.data_mut(), self.len()) };
   }
 
   pub fn iter<'a>(&'a self) -> RefInternalArrayIterator<'a, T> {
@@ -246,7 +257,7 @@ impl<T: Copy> InternalArray<T> {
   }
 
   fn offset(&self, offset: usize) -> *mut T {
-    return unsafe { self.data().offset(offset as isize) };
+    return unsafe { self.data_mut().offset(offset as isize) };
   }
 
   fn set_data(&self, data: *mut T) {

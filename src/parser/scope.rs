@@ -231,8 +231,13 @@ impl Scope {
       _ => false,
     } {
       if self.is_lexical() {
-        let mut scope = self.get_nearest_non_lexical_scope();
-        return scope.declare_var(var_type, var);
+        let mut scope = self.parent_scope.unwrap();
+        while scope.is_lexical() {
+          if let Some(ref a) = scope.declare_var(var_type, var.clone()) {
+            return Some(*a);
+          }
+          scope = scope.parent_scope.unwrap();
+        }
       }
     }
     return None;
@@ -242,8 +247,14 @@ impl Scope {
     if let Some(ref val) = self.var_map.get(var) {
       use VariableType::*;
       match val.1 {
-        Lexical | FormalParameter | ExportLexical => {
+        Lexical | ExportLexical => {
           return Some(&val.0);
+        }
+        FormalParameter => {
+          return match variable_type {
+            Lexical => Some(&val.0),
+            _ => None,
+          };
         }
         LegacyVar | CatchParameterLegacyVar => {
           return match variable_type {

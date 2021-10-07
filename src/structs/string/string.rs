@@ -42,7 +42,6 @@ pub struct JsStringLayout {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct JsString(HeapLayout<JsStringLayout>);
 impl_object!(JsString, HeapLayout<JsStringLayout>);
 
@@ -181,7 +180,6 @@ impl<T: StringBackend> From<T> for JsString {
 }
 
 #[repr(C)]
-#[derive(Copy, Clone)]
 pub struct FlatString(HeapLayout<JsStringLayout>);
 impl_object!(FlatString, HeapLayout<JsStringLayout>);
 
