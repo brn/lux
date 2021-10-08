@@ -149,6 +149,8 @@ pub struct StaticNamesLayout {
   #[property(get(type = "copy"), set(disable))]
   prototype_str: FixedU16CodePointArray,
   #[property(get(type = "copy"), set(disable))]
+  proto_str: FixedU16CodePointArray,
+  #[property(get(type = "copy"), set(disable))]
   description: PropertyName,
 }
 
@@ -167,6 +169,7 @@ impl StaticNames {
     layout.use_strict_str = FixedU16CodePointArray::from_utf8(context, "use strict");
     layout.constructor_str = FixedU16CodePointArray::from_utf8(context, "constructor");
     layout.prototype_str = FixedU16CodePointArray::from_utf8(context, "prototype");
+    layout.proto_str = FixedU16CodePointArray::from_utf8(context, "__proto__");
     return StaticNames(layout);
   }
 

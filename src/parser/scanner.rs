@@ -82,6 +82,11 @@ impl SourceCursor {
     return self.index;
   }
 
+  #[inline]
+  fn set_index(&mut self, idx: isize) {
+    self.index = idx;
+  }
+
   fn back(&mut self) -> Option<u16> {
     if self.source.len() == 0 {
       return None;
@@ -201,23 +206,16 @@ pub struct Scanner {
   region: Region,
   source: Source,
   contextual_keywords: [Token; 2],
-
   numeric_value: [f64; 2],
-
   literal_buffer: [Vec<u16>; 2],
-
   scanner_state: [Bitset<u8>; 2],
-
   parser_state_stack: Exotic<ParserStateStack>,
-
   previous_position: SourcePosition,
   position: [SourcePosition; 2],
-
   error_reporter: Exotic<ErrorReporter>,
-
   mode: Mode,
-
   skipped: u64,
+  last_cursor: isize,
 }
 
 impl ReportSyntaxError for Scanner {
@@ -245,21 +243,15 @@ impl Scanner {
       iter: SourceCursor::new(source.source_code()),
       contextual_keywords: [Token::Invalid, Token::Invalid],
       literal_buffer: [Vec::<u16>::new(), Vec::<u16>::new()],
-
       scanner_state: [Bitset::<u8>::new(), Bitset::<u8>::new()],
-
       numeric_value: [0.0_f64, 0.0_f64],
-
       parser_state_stack,
-
       previous_position: SourcePosition::new(),
       position: [SourcePosition::new(), SourcePosition::new()],
-
       error_reporter,
-
       mode: Mode::Current,
-
       skipped: 0,
+      last_cursor: 0,
     };
     scanner.advance();
     scanner.current_position_mut().set_end_col(0_u32);
@@ -340,6 +332,7 @@ impl Scanner {
 
   pub fn clear_peek(&mut self) {
     self.lookahead_token = Token::Invalid;
+    self.iter.set_index(self.last_cursor);
   }
 
   fn record_position(&mut self) -> SourcePosition {
@@ -357,6 +350,7 @@ impl Scanner {
       self.position[Mode::Current as usize] = self.position[Mode::Lookahead as usize].clone();
       self.numeric_value[Mode::Current as usize] = self.numeric_value[Mode::Lookahead as usize];
       self.scanner_state[Mode::Current as usize] = self.scanner_state[Mode::Lookahead as usize];
+      self.last_cursor = self.iter.index();
       return self.token;
     }
 
@@ -376,6 +370,7 @@ impl Scanner {
     let token = self.tokenize(is_html_comment_allowed);
     self.token = token;
     self.epilogue();
+    self.last_cursor = self.iter.index();
     return self.token;
   }
 
@@ -580,6 +575,49 @@ impl Scanner {
       return self.tokenize_template_literal_characters();
     } else if self.parser_state_stack.is_in_state(ParserState::RegexpExpected) {
       return self.tokenize_regexp_characters();
+    } else if self.parser_state_stack.is_in_state(ParserState::RegexpFlagExpected) {
+      let index = self.iter.index();
+      let t = self.tokenize_identifier(true);
+      if t != Token::Invalid {
+        let mut flags = Bitset::<u8>::new();
+        let mut is_error = false;
+        for uc16 in self.value().iter() {
+          macro_rules! check_flag {
+            ($self:expr, $uc16:expr, $is_error:expr, {$($flag:expr => $idx:expr,)*}) => {
+              match chars::ch($uc16) {
+                $(
+                  $flag => {
+                    if flags.get($idx) {
+                      $is_error = true;
+                      true
+                    } else {
+                      flags.set($idx);
+                      false
+                    }
+                  }
+                )*,
+                _ => {
+                  if chars::is_alpha($uc16) {
+                    $is_error = true;
+                  }
+                  true
+                }
+              }
+            }
+          }
+          if check_flag!(self, *uc16, is_error, {'g' => 1, 'i' => 2, 'm' => 3, 's' => 4, 'u' => 5, 'y' => 6,}) {
+            break;
+          }
+        }
+        if is_error {
+          report_error!(self, "Invalid regular expression flags", self.current_position(), Token::Invalid);
+        }
+        if flags.bits() != 0 {
+          return Token::RegExpFlag;
+        }
+      } else if self.iter.index() != index {
+        return Token::Invalid;
+      }
     }
 
     use Token::*;
@@ -826,7 +864,7 @@ impl Scanner {
         }
         '#' => {
           self.advance();
-          self.tokenize_identifier();
+          self.tokenize_identifier(false);
           self.contextual_keywords[self.mode as usize] = Token::PrivateIdentifier;
           return Token::Identifier;
         }
@@ -867,23 +905,28 @@ impl Scanner {
               }
             }
           }
-          return self.tokenize_identifier();
+          return self.tokenize_identifier(false);
         }
         _ => {
           if chars::is_decimal_digits(*self.iter) {
             return self.tokenize_numeric_literal(false);
           }
-          return self.tokenize_identifier();
+          return self.tokenize_identifier(false);
         }
       },
       _ => {
-        return self.tokenize_identifier();
+        return self.tokenize_identifier(false);
       }
     }
   }
 
   fn advance_and_push_surrogate_pair_safe(&mut self) {
-    if let Ok((hi, low)) = self.iter.uc32().to_u16() {
+    let a = self.iter.uc32().to_u16();
+    self.advance_and_push_surrogate_pair_safe_with_value(a);
+  }
+
+  fn advance_and_push_surrogate_pair_safe_with_value(&mut self, pair: Result<(u16, u16), ()>) {
+    if let Ok((hi, low)) = pair {
       self.current_literal_buffer_mut().push(hi);
       if low > 0 {
         self.current_literal_buffer_mut().push(low);
@@ -996,7 +1039,7 @@ impl Scanner {
     report_error!(self, "Unterminated string literal", self.current_position(), Token::Invalid);
   }
 
-  fn tokenize_identifier(&mut self) -> Token {
+  fn tokenize_identifier(&mut self, disallow_escape_sequence: bool) -> Token {
     let mut value = self.iter.uc32();
     self.current_literal_buffer_mut().clear();
     if !chars::is_identifier_start(value.code()) {
@@ -1010,6 +1053,15 @@ impl Scanner {
           let before_decode_pos = self.record_position();
           self.advance();
           if let Ok(u) = self.decode_hex_escape(4) {
+            if disallow_escape_sequence {
+              self.current_literal_buffer_mut().clear();
+              report_error!(
+                self,
+                "Escape sequence not allowed here",
+                &pos_range!(before_decode_pos, self.current_position()),
+                Token::Invalid
+              );
+            }
             if !chars::is_variation_selector(u) {
               if !chars::is_identifier_continue(u, false) {
                 self.current_literal_buffer_mut().clear();
@@ -1080,9 +1132,9 @@ impl Scanner {
     }
 
     macro_rules! _keyword_unroll_check {
-      ($buf:expr, $keyword:expr, $token:tt) => {
+      ($buf:expr, $token:tt) => {
         {
-          let k = $keyword;
+          let k = $token.symbol();
           if $buf.len() == k.len() {
             let b = k.as_bytes();
             if $buf[1] as u8 == b[1] &&
@@ -1099,12 +1151,12 @@ impl Scanner {
           }
         }
       };
-      ($buf:expr, $($group:tt => {$($keyword:tt : $token:tt,)+},)+) => {
+      ($buf:expr, $($group:tt => {$($token:tt,)+},)+) => {
         match chars::ch($buf[0]) {
           $(
             $group => {
               $(
-                _keyword_unroll_check!($buf, $keyword, $token);
+                _keyword_unroll_check!($buf, $token);
               )*
             }
           )*,
@@ -1115,83 +1167,88 @@ impl Scanner {
       }
     }
 
-    _keyword_unroll_check!(buf, 'a' => {
-      "arguments": Arguments,
-      "as": As,
-      "async": Async,
-      "await": Await,
-    }, 'b' => {
-      "break": Break,
-    }, 'c' => {
-      "case": Case,
-      "catch": Catch,
-      "class": Class,
-      "const": Const,
-      "continue": Continue,
-    }, 'd' => {
-      "debugger": Debugger,
-      "default": Default,
-      "delete": Delete,
-      "do": Do,
-    }, 'e' => {
-      "else": Else,
-      "enum": Enum,
-      "eval": Eval,
-      "export": Export,
-      "extends": Extends,
-    }, 'f' => {
-      "false": False,
-      "finally": Finally,
-      "for": For,
-      "from": From,
-      "function": Function,
-    }, 'g' => {
-      "get": Get,
-    }, 'i' => {
-      "if": If,
-      "implements": Implements,
-      "import": Import,
-      "in": In,
-      "instanceof": Instanceof,
-      "interface": Interface,
-    }, 'l' => {
-      "let": Let,
-    }, 'm' => {
-      "meta": Meta,
-    }, 'n' => {
-      "new": New,
-      "null": Null,
-    }, 'o' => {
-      "of": Of,
-    }, 'p' => {
-      "package": Package,
-      "private": Private,
-      "protected": Protected,
-      "prototype": Prototype,
-      "public": Public,
-    }, 'r' => {
-      "return": Return,
-    }, 's' => {
-      "set": Set,
-      "static": Static,
-      "super": Super,
-      "switch": Switch,
-    }, 't' => {
-      "target": Target,
-      "this": This,
-      "throw": Throw,
-      "true": True,
-      "try": Try,
-      "typeof": Typeof,
-    }, 'v' => {
-      "var": Var,
-      "void": Void,
-    }, 'w' => {
-      "while": While,
-      "with": With,
-    }, 'y' => {
-      "yield": Yield,
-    },);
+    _keyword_unroll_check!(
+      buf,
+      '_' => {
+        Proto,
+      },
+      'a' => {
+        Arguments,
+        As,
+        Async,
+        Await,
+      }, 'b' => {
+        Break,
+      }, 'c' => {
+        Case,
+        Catch,
+        Class,
+        Const,
+        Continue,
+      }, 'd' => {
+        Debugger,
+        Default,
+        Delete,
+        Do,
+      }, 'e' => {
+        Else,
+        Enum,
+        Eval,
+        Export,
+        Extends,
+      }, 'f' => {
+        False,
+        Finally,
+        For,
+        From,
+        Function,
+      }, 'g' => {
+        Get,
+      }, 'i' => {
+        If,
+        Implements,
+        Import,
+        In,
+        Instanceof,
+        Interface,
+      }, 'l' => {
+        Let,
+      }, 'm' => {
+        Meta,
+      }, 'n' => {
+        New,
+        Null,
+      }, 'o' => {
+        Of,
+      }, 'p' => {
+        Package,
+        Private,
+        Protected,
+        Prototype,
+        Public,
+      }, 'r' => {
+        Return,
+      }, 's' => {
+        Set,
+        Static,
+        Super,
+        Switch,
+      }, 't' => {
+        Target,
+        This,
+        Throw,
+        True,
+        Try,
+        Typeof,
+      }, 'v' => {
+        Var,
+        Void,
+      }, 'w' => {
+        While,
+        With,
+      }, 'y' => {
+        Yield,
+      },);
 
     return Identifier;
   }
@@ -1237,27 +1294,41 @@ impl Scanner {
 
   fn tokenize_regexp_characters(&mut self) -> Token {
     let mut is_escaped = false;
+    let mut is_in_char_class = false;
     while self.has_more() {
       match self.iter.as_char_safe() {
-        Ok(ch) => match ch {
-          '\\' => is_escaped = !is_escaped,
-          '/' => {
-            if !is_escaped {
-              self.advance();
-              return Token::RegExp;
+        Ok(ch) => {
+          match ch {
+            '\\' => is_escaped = !is_escaped,
+            '/' => {
+              if !is_escaped && !is_in_char_class {
+                self.advance();
+                return Token::RegExp;
+              }
             }
-          }
-          _ => {
-            is_escaped = false;
-            self.advance_and_push_buffer();
-          }
-        },
+            '[' => {
+              if !is_escaped {
+                is_in_char_class = true;
+              }
+              is_escaped = false;
+            }
+            ']' => {
+              if !is_escaped {
+                is_in_char_class = false;
+              }
+              is_escaped = false;
+            }
+            _ => {
+              is_escaped = false;
+            }
+          };
+          self.advance_and_push_buffer();
+        }
         _ => {
           is_escaped = false;
           self.advance_and_push_surrogate_pair_safe();
         }
       }
-      self.advance_and_push_buffer();
     }
     report_error!(self, "Unexpected end of input", self.source_position(), Token::Invalid);
   }

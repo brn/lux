@@ -8,6 +8,7 @@ pub enum ParserState {
   InTemplateInterpolation,
   InFunction,
   RegexpExpected,
+  RegexpFlagExpected,
   InSkipParsing,
   AllowIn,
   DisallowIn,

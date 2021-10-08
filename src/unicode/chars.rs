@@ -135,6 +135,11 @@ pub fn is_start_escape_sequence(u: u16) -> bool {
   return is_start_ascii_escape_sequence(u) || is_start_unicode_escape_sequence(u);
 }
 
+pub fn is_alpha(u: u16) -> bool {
+  let c = ch(u);
+  return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z');
+}
+
 // http://www.ecma-international.org/ecma-262/9.0/index.html#sec-runtime-semantics-wordcharacters-abstract-operation
 pub fn is_word_char(u: u16) -> bool {
   let c = ch(u);

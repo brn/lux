@@ -1677,6 +1677,7 @@ impl StructuralLiteral {
 pub enum LiteralValue {
   None,
   String(FixedU16CodePointArray, Token),
+  RegExp(FixedU16CodePointArray, Option<FixedU16CodePointArray>),
   Number(f64),
 }
 
@@ -1698,6 +1699,7 @@ impl_expr!(
       match self.value {
         LiteralValue::None => self.literal_type.symbol().to_string(),
         LiteralValue::String(s, _) => s.to_utf8(),
+        LiteralValue::RegExp(s, _) => s.to_utf8(),
         LiteralValue::Number(f) => f.to_string(),
       },
       source_position.to_string()

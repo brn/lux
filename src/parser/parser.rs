@@ -1081,8 +1081,11 @@ impl Parser {
       Token::OpDiv => {
         self.parser_state.enter_state(ParserState::RegexpExpected);
         self.scanner.clear_peek();
-        let ret = next_parse!(self, self.parse_regular_expression(builder));
-        return ret;
+        if !self.has_line_break_after() {
+          let ret = next_parse!(self, self.parse_regular_expression(builder));
+          return ret;
+        }
+        return parse_error!(self.region, "Invalid token found", self.source_position());
       }
       Token::LeftParen => {
         let parent_ctx = self.new_expression_context();
@@ -1126,14 +1129,23 @@ impl Parser {
     expect!(self, self.cur(), Token::OpDiv);
     let regexp = self.value().clone();
     self.parser_state.leave_state(ParserState::RegexpExpected);
+    self.parser_state.enter_state(ParserState::RegexpFlagExpected);
     expect!(self, self.cur(), Token::RegExp);
+    let flags = if self.cur() == Token::RegExpFlag {
+      let f = Some(FixedU16CodePointArray::from_u16_vec(self.context, self.value()));
+      self.advance()?;
+      f
+    } else {
+      None
+    };
+    self.parser_state.leave_state(ParserState::RegexpFlagExpected);
     return Ok(build!(
       @pos,
       builder,
       literal,
       start,
       Token::RegExp,
-      LiteralValue::String(FixedU16CodePointArray::from_u16_vec(self.context, &regexp), Token::Invalid)
+      LiteralValue::RegExp(FixedU16CodePointArray::from_u16_vec(self.context, &regexp), flags)
     ));
   }
 
@@ -1189,6 +1201,7 @@ impl Parser {
           spread_end_position = Some(self.prev_source_position().clone());
           builder.push_expr(&mut properties, a);
         } else {
+          self.invalidate_cover_binding_name(builder);
           append_var_if!(self, self.cur(), self.value(), self.source_position());
           let expr_start = self.source_position().clone();
           let expr = next_parse!(self, self.parse_assignment_expression(builder))?;
@@ -1233,6 +1246,7 @@ impl Parser {
     debug_assert!(self.cur() == Token::Spread);
     self.advance()?;
     let maybe_identifier_value = self.value().clone();
+    self.invalidate_cover_binding_name(builder);
     let expr = next_parse!(self, self.parse_assignment_expression(builder))?;
     if let Some(e) = self.expression_context.first_value_error() {
       return Err(e);
@@ -1274,10 +1288,20 @@ impl Parser {
 
     let mut properties = Vec::<Expr>::new();
     let mut is_spread_seen = false;
-    let mut key_map = HashMap::new();
+    let mut is_proto_seen = false;
     while !self.cur().one_of(&[Token::RightBrace, Token::Invalid, Token::End]) {
       let start_pos = self.source_position().clone();
-      let prop = next_parse!(self, self.parse_object_literal_property(builder, constraints, &mut key_map))?;
+      if self.contextual_keyword() == Token::Proto
+        || (self.cur() == Token::StringLiteral && self.is_value_match_with(self.context.static_names().proto_str()))
+      {
+        if !is_proto_seen {
+          is_proto_seen = true;
+        } else {
+          let e = parse_error!(@raw, self.region, "Duplicated __proto__ property is not allowed in object literal", self.source_position());
+          self.expression_context.set_first_value_error(e);
+        }
+      }
+      let prop = next_parse!(self, self.parse_object_literal_property(builder, constraints))?;
       if builder.is_spread_expression(prop) {
         if is_spread_seen {
           if let Ok(ctx) = self.expression_context.to_arrow_ctx_mut() {
@@ -1317,7 +1341,6 @@ impl Parser {
     &mut self,
     mut builder: Exotic<Builder>,
     constraints: ParserConstraints,
-    key_map: &mut HashMap<Vec<u16>, SourcePosition>,
   ) -> ParseResult<Expr> {
     macro_rules! append_var {
       ($self:expr, $value:expr, $pos:expr) => {{
@@ -1425,9 +1448,13 @@ impl Parser {
           let value = Parser::utf8_to_utf16(&k);
         }
         let key = if self.peek()? != Token::OpAssign {
-          next_parse!(self, self.parse_property_name(builder))?
+          if self.peek()? == Token::Colon {
+            next_parse!(self, self.parse_property_name(builder))?
+          } else {
+            next_parse!(self, self.parse_cover_property_name_and_binding_name(builder))?
+          }
         } else {
-          next_parse!(self, self.parse_identifier_reference(builder))?
+          next_parse!(self, self.parse_cover_identifier_reference_and_binding_name(builder))?
         };
         if self.cur() == Token::LeftParen {
           let method_start = self.source_position().clone();
@@ -1499,6 +1526,9 @@ impl Parser {
     let value_start_pos = self.source_position().clone();
     let ident_value = self.value().clone();
     let next_token = self.cur();
+    if next_token.one_of(&[Token::Identifier, Token::Yield, Token::Await]) {
+      self.invalidate_cover_binding_name(builder);
+    }
     let value = next_parse!(self, self.parse_assignment_expression(builder))?;
     let value_end_pos = self.prev_source_position().clone();
     if builder.is_identifier(value) || builder.is_initializer(value) {
@@ -1520,6 +1550,45 @@ impl Parser {
                      Some(value),
                      None,
     ));
+  }
+
+  fn invalidate_cover_binding_name<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) {
+    if self.contextual_keyword().one_of(&[Token::Eval, Token::Arguments]) {
+      let error = self.err.eval_or_arguments_in_strict_mode_code_raw(self.source_position().clone());
+      self.expression_context.set_first_strict_mode_error(error);
+    }
+
+    match self.cur() {
+      Token::Identifier | Token::Yield | Token::Await => {
+        if self.cur() == Token::Yield {
+          let e = parse_error!(
+            @raw,
+            self.region,
+            "Keyword 'yield' is not allowed here in strict mode code",
+            self.source_position()
+          );
+          self.expression_context.set_first_strict_mode_error(e);
+        }
+        if ((self.current_scope.is_root_scope() && self.parser_type == ParserType::Module)
+          || self.get_identifier_parse_option().contains(IdentifierParseOption::ASYNC_CONTEXT))
+          && self.cur() == Token::Await
+        {
+          let e = parse_error!(@raw, self.region, "await is not allowed here", self.source_position());
+          self.expression_context.set_first_async_context_error(e);
+        }
+      }
+      _ => {}
+    };
+  }
+
+  fn parse_cover_property_name_and_binding_name<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
+    self.invalidate_cover_binding_name(builder);
+    return next_parse!(self, self.parse_property_name(builder));
+  }
+
+  fn parse_cover_identifier_reference_and_binding_name<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
+    self.invalidate_cover_binding_name(builder);
+    return next_parse!(self, self.parse_identifier_reference(builder));
   }
 
   fn parse_property_name<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
@@ -1602,7 +1671,7 @@ impl Parser {
       return Ok(node.into());
     }
 
-    let n = next_parse!(self, self.parse_expression(builder, false))?;
+    let n = next_parse!(self, self.parse_expression(builder, true))?;
 
     let mut expr = if self.cur() == Token::Spread {
       let spread_start = self.source_position().clone();
@@ -2396,9 +2465,12 @@ impl Parser {
     return Ok(lhs);
   }
 
-  fn parse_expression<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>, should_return_exprs: bool) -> ParseResult<Expr> {
+  fn parse_expression<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>, is_covered_grammar: bool) -> ParseResult<Expr> {
     let start_pos = self.source_position().clone();
     append_var_if!(self, self.cur(), self.value(), self.source_position());
+    if is_covered_grammar {
+      self.invalidate_cover_binding_name(builder);
+    }
     let expr = next_parse!(self, self.parse_assignment_expression(builder))?;
     if self.cur() == Token::Comma {
       self.expression_context.set_assignment_target_type(AssignmentTargetType::Invalid);
@@ -2406,6 +2478,9 @@ impl Parser {
       builder.push_expr(&mut items, expr);
       while self.cur() == Token::Comma {
         self.advance()?;
+        if is_covered_grammar {
+          self.invalidate_cover_binding_name(builder);
+        }
         if self.cur() == Token::Spread {
           let pos = self.source_position().clone();
           self
@@ -2426,9 +2501,6 @@ impl Parser {
       return Ok(build!(@pos, builder, expressions, start_pos, items));
     }
 
-    if should_return_exprs {
-      return Ok(build!(@pos, builder, expressions, start_pos, vec![expr]));
-    }
     return Ok(expr);
   }
 
@@ -3834,7 +3906,7 @@ impl Parser {
     let mut class_field_flag = ClassFieldFlag::NONE;
     let mut attr = FunctionAttribute::NONE;
 
-    if self.contextual_keyword() == Token::Static {
+    if self.contextual_keyword() == Token::Static && !self.peek()?.one_of(&[Token::LeftParen, Token::OpAssign, Token::Terminate]) {
       if is_class_field {
         class_field_flag |= ClassFieldFlag::STATIC;
         self.advance()?;
@@ -3843,24 +3915,26 @@ impl Parser {
       }
     }
 
-    if self.contextual_keyword() == Token::Get {
-      attr |= FunctionAttribute::GETTER;
-      self.advance()?;
-      if self.contextual_keyword() == Token::PrivateIdentifier {
-        class_field_flag |= ClassFieldFlag::PRIVATE;
-      } else {
-        class_field_flag |= ClassFieldFlag::PUBLIC;
+    if !self.peek()?.one_of(&[Token::LeftParen, Token::OpAssign, Token::Terminate]) {
+      if self.contextual_keyword() == Token::Get {
+        attr |= FunctionAttribute::GETTER;
+        self.advance()?;
+        if self.contextual_keyword() == Token::PrivateIdentifier {
+          class_field_flag |= ClassFieldFlag::PRIVATE;
+        } else {
+          class_field_flag |= ClassFieldFlag::PUBLIC;
+        }
+        return Ok((attr, class_field_flag));
+      } else if self.contextual_keyword() == Token::Set {
+        attr |= FunctionAttribute::SETTER;
+        self.advance()?;
+        if self.contextual_keyword() == Token::PrivateIdentifier {
+          class_field_flag |= ClassFieldFlag::PRIVATE;
+        } else {
+          class_field_flag |= ClassFieldFlag::PUBLIC;
+        }
+        return Ok((attr, class_field_flag));
       }
-      return Ok((attr, class_field_flag));
-    } else if self.contextual_keyword() == Token::Set {
-      attr |= FunctionAttribute::SETTER;
-      self.advance()?;
-      if self.contextual_keyword() == Token::PrivateIdentifier {
-        class_field_flag |= ClassFieldFlag::PRIVATE;
-      } else {
-        class_field_flag |= ClassFieldFlag::PUBLIC;
-      }
-      return Ok((attr, class_field_flag));
     }
     if self.cur() == Token::Identifier && self.contextual_keyword() == Token::Async {
       attr |= FunctionAttribute::ASYNC;
