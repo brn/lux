@@ -1030,7 +1030,9 @@ impl Scanner {
                 report_error!(self, "Unterminated string literal", &pos_range!(start, start), Token::Invalid);
               }
             } else {
-              self.advance_and_push_buffer();
+              if !self.collect_line_break() {
+                self.advance_and_push_buffer();
+              }
               is_escaped = false;
             }
           }
@@ -1526,13 +1528,26 @@ impl Scanner {
     report_error!(self, "Unterminated template literal.", self.source_position(), Token::Invalid);
   }
 
-  fn collect_line_break(&mut self) {
+  fn collect_line_break(&mut self) -> bool {
+    let mut is_found = false;
     if chars::is_cr(*self.iter) {
       self.advance_and_push_buffer();
       if chars::is_lf(*self.iter) {
         self.advance_and_push_buffer();
       }
+      is_found = true;
+    } else if chars::is_lf(*self.iter) {
+      is_found = true;
+      self.advance_and_push_buffer();
     }
+    if is_found {
+      let end_line_number = self.current_position().end_line_number();
+      self.current_position_mut().set_start_line_number(end_line_number + 1);
+      self.current_position_mut().set_end_line_number(end_line_number + 1);
+      self.current_position_mut().set_start_col(0_u32);
+      self.current_position_mut().set_end_col(0_u32);
+    }
+    return is_found;
   }
 
   fn advance_and_push_buffer(&mut self) -> u16 {
