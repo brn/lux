@@ -268,6 +268,12 @@ impl ArrowFunctionContext {
     }
   }
 
+  pub fn propagate_arrow_error(&self, ec: &mut ExprCtx) {
+    if let Ok(ctx) = ec.to_arrow_ctx_mut() {
+      ctx.first_arrow_parameter_error = self.first_arrow_parameter_error;
+    }
+  }
+
   pub fn propagate_arrow(&self, ec: &mut ExprCtx) {
     if let Ok(ctx) = ec.to_arrow_ctx_mut() {
       ctx.first_arrow_parameter_error = self.first_arrow_parameter_error;

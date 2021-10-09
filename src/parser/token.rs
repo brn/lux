@@ -215,6 +215,7 @@ token_enum! {
     (Proto,                false, true,  true,  "__proto__"),
     (Public,               false, true,  true,  "public"),
     (Static,               false, true,  true,  "static"),
+    (StringLiteralES,      true,  true,  true,  "$StringLiteralES"),
     (Of,                   false, true,  true,  "of"),
   }
 }

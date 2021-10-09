@@ -215,6 +215,7 @@ pub struct Scanner {
   error_reporter: Exotic<ErrorReporter>,
   mode: Mode,
   skipped: u64,
+  line_break_found_in_comment: bool,
   last_cursor: isize,
 }
 
@@ -251,6 +252,7 @@ impl Scanner {
       error_reporter,
       mode: Mode::Current,
       skipped: 0,
+      line_break_found_in_comment: false,
       last_cursor: 0,
     };
     scanner.advance();
@@ -365,8 +367,11 @@ impl Scanner {
       return self.lookahead_token;
     }
 
-    let is_html_comment_allowed = self.current_position().start_col() == 0 || self.token == Token::Comment;
+    let mut is_html_comment_allowed = self.current_position().start_col() == 0 || self.token == Token::Comment;
     self.prologue();
+    if !is_html_comment_allowed {
+      is_html_comment_allowed = self.has_line_break_before();
+    }
     let token = self.tokenize(is_html_comment_allowed);
     self.token = token;
     self.epilogue();
@@ -379,17 +384,21 @@ impl Scanner {
       this.mode = Mode::Current;
     });
     this.mode = Mode::Lookahead;
+    if !this.lookahead_token.one_of(&[Token::Invalid, Token::Comment]) {
+      return this.lookahead_token;
+    }
     if !this.has_more() {
       this.position[Mode::Lookahead as usize] = this.position[Mode::Current as usize].clone();
       this.lookahead_token = Token::End;
       return this.lookahead_token;
     }
-    if this.lookahead_token != Token::Invalid {
-      return this.lookahead_token;
-    }
     this.position[Mode::Lookahead as usize] = this.position[Mode::Current as usize].clone();
-    let is_html_comment_allowed = this.current_position().start_col() == 0 || this.token == Token::Comment;
+    let mut is_html_comment_allowed =
+      this.current_position().start_col() == 0 || this.lookahead_token == Token::Comment || this.token == Token::Comment;
     this.prologue();
+    if !is_html_comment_allowed {
+      is_html_comment_allowed = this.has_line_break_before();
+    }
     this.lookahead_token = this.tokenize(is_html_comment_allowed);
     this.epilogue();
     return this.lookahead_token;
@@ -497,6 +506,10 @@ impl Scanner {
     }
     let end_line_number = self.current_position().end_line_number();
     self.current_position_mut().set_start_line_number(end_line_number);
+    if self.line_break_found_in_comment {
+      self.set_linebreak_before();
+      self.line_break_found_in_comment = false;
+    }
     loop {
       if self.skip_line_break() {
         {
@@ -561,8 +574,10 @@ impl Scanner {
   }
 
   fn epilogue(&mut self) {
-    if chars::is_cr_or_lf(*self.iter) {
+    if self.line_break_found_in_comment || chars::is_cr_or_lf(*self.iter) {
       self.set_linebreak_after();
+    } else {
+      self.unset_linebreak_after();
     }
   }
 
@@ -674,25 +689,20 @@ impl Scanner {
             self.skip_signleline_comment();
             if self.mode == Mode::Current {
               self.token = Token::Comment;
-            } else {
-              self.lookahead_token = Token::Comment
+              return self.next();
             }
-            return self.next();
+            self.lookahead_token = Token::Comment;
+            return self.peek();
           }
           if self.iter.is_char('*') {
             self.advance();
             self.skip_multiline_comment();
             if self.mode == Mode::Current {
               self.token = Token::Comment;
-            } else {
-              self.lookahead_token = Token::Comment
+              return self.next();
             }
-            return self.next();
-          }
-
-          if self.iter.is_char('=') {
-            self.advance();
-            return OpDivAssign;
+            self.lookahead_token = Token::Comment;
+            return self.peek();
           }
 
           return OpDiv;
@@ -746,6 +756,22 @@ impl Scanner {
           if self.iter.is_char('=') {
             self.advance();
             return OpLessThanOrEq;
+          }
+          if self.iter.is_char('!') {
+            self.advance();
+            if self.iter.is_char('-') {
+              self.advance();
+              if self.iter.is_char('-') {
+                self.advance();
+                self.skip_signleline_comment();
+                if self.mode == Mode::Current {
+                  self.token = Token::Comment;
+                  return self.next();
+                }
+                self.lookahead_token = Token::Comment;
+                return self.peek();
+              }
+            }
           }
           return OpLessThan;
         }
@@ -939,6 +965,7 @@ impl Scanner {
     self.current_literal_buffer_mut().clear();
     let mut value = *self.iter;
     let start = value;
+    let mut has_escape_sequence = false;
     self.advance();
 
     let mut is_escaped = false;
@@ -950,6 +977,7 @@ impl Scanner {
             if !is_escaped {
               if let Some(lookahead) = self.iter.peek() {
                 if chars::is_start_escape_sequence(lookahead) {
+                  has_escape_sequence = true;
                   let escape_sequence_start_pos = self.record_position();
                   if let Ok(ret) = self.decode_escape_sequence() {
                     if let Ok((hi, low)) = chars::uc32_to_uc16(ret) {
@@ -975,6 +1003,7 @@ impl Scanner {
                   }
                 } else if chars::is_octal_digits(lookahead) {
                   self.advance();
+                  has_escape_sequence = true;
                   if chars::ch(lookahead) == '0' {
                     if !chars::is_octal_digits(*self.iter) {
                       self.current_literal_buffer_mut().push(0_u16);
@@ -1021,6 +1050,9 @@ impl Scanner {
             if value == start {
               if !is_escaped {
                 self.advance();
+                if has_escape_sequence {
+                  self.contextual_keywords[self.mode as usize] = Token::StringLiteralES;
+                }
                 return Token::StringLiteral;
               }
             }
@@ -1442,6 +1474,9 @@ impl Scanner {
                   self.advance();
                   parts_len += 1;
                   return Token::TemplateSubstitution;
+                } else {
+                  is_escaped = false;
+                  self.advance_and_push_buffer();
                 }
               } else {
                 report_error!(self, "Unexpected end of input.", self.current_position(), Token::Invalid);
@@ -1549,18 +1584,18 @@ impl Scanner {
 
   fn skip_signleline_comment(&mut self) {
     while self.has_more() {
-      if chars::is_cr(*self.iter) {
+      if !self.skip_line_break() {
         self.advance();
-        if chars::is_lf(*self.iter) {
-          self.advance();
-          return;
-        }
+      } else {
+        let skipped = self.skipped;
+        let end_line_number = self.current_position().end_line_number();
+        self.current_position_mut().set_start_line_number(end_line_number + skipped as u32);
+        self.current_position_mut().set_end_line_number(end_line_number + skipped as u32);
+        self.current_position_mut().set_start_col(0_u32);
+        self.current_position_mut().set_end_col(0_u32);
+        self.line_break_found_in_comment = true;
+        break;
       }
-      if chars::is_lf(*self.iter) {
-        self.advance();
-        return;
-      }
-      self.advance();
     }
   }
 
@@ -1577,7 +1612,17 @@ impl Scanner {
           return;
         }
       }
-      self.advance();
+      if self.skip_line_break() {
+        let skipped = self.skipped;
+        let end_line_number = self.current_position().end_line_number();
+        self.current_position_mut().set_start_line_number(end_line_number + skipped as u32);
+        self.current_position_mut().set_end_line_number(end_line_number + skipped as u32);
+        self.current_position_mut().set_start_col(0_u32);
+        self.current_position_mut().set_end_col(0_u32);
+        self.line_break_found_in_comment = true;
+      } else {
+        self.advance();
+      }
     }
   }
 

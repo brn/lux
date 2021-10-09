@@ -425,6 +425,9 @@ pub fn parse_decimal<'a>(
   let mut digits = 0;
   while let Some(u) = iter.peek().cloned() {
     if ch(u) == '.' {
+      if is_floating_point {
+        break;
+      }
       is_floating_point = true;
       iter.next();
     } else if ch(u) == 'e' || ch(u) == 'E' {
@@ -648,27 +651,29 @@ pub fn parse_numeric_value<'a>(
           }
         }
       }
+    } else if kind == DecimalLeadingZero {
+      kind = Decimal;
+    }
 
-      return match kind {
-        Decimal | DecimalLeadingZero => {
-          if digits_len <= 9 && !has_exponents_part && !is_period_seen {
-            match parse_uint32_without_exponents(origin, should_stop_if_invalid_token_found) {
-              Ok(val) => Ok((val as f64, kind)),
-              Err(e) => Err(e),
-            }
-          } else {
-            match parse_decimal(origin, should_stop_if_invalid_token_found) {
-              Ok(val) => Ok((val as f64, kind)),
-              Err(e) => Err(e),
-            }
+    return match kind {
+      Decimal | DecimalLeadingZero => {
+        if digits_len <= 9 && !has_exponents_part && !is_period_seen {
+          match parse_uint32_without_exponents(origin, should_stop_if_invalid_token_found) {
+            Ok(val) => Ok((val as f64, kind)),
+            Err(e) => Err(e),
+          }
+        } else {
+          match parse_decimal(origin, should_stop_if_invalid_token_found) {
+            Ok(val) => Ok((val as f64, kind)),
+            Err(e) => Err(e),
           }
         }
-        _ => match parse_octal(origin, should_stop_if_invalid_token_found) {
-          Ok(val) => Ok((val as f64, kind)),
-          Err(e) => Err(e),
-        },
-      };
-    }
+      }
+      _ => match parse_octal(origin, should_stop_if_invalid_token_found) {
+        Ok(val) => Ok((val as f64, kind)),
+        Err(e) => Err(e),
+      },
+    };
   }
 
   return Err(NumericConvertionError::UnexpectedEndOfInput);

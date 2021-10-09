@@ -3178,16 +3178,6 @@ mod parser_test {
   }
 
   #[test]
-  fn array_pattern_spread_is_not_identifier_early_error_test() {
-    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 11, "([...{a: b}] = x)");
-  }
-
-  #[test]
-  fn object_pattern_spread_is_not_identifier_early_error_test() {
-    basic_env_expression_eary_error_test(EnvFlag::all(), 2, 11, "({...{a: b}} = x)");
-  }
-
-  #[test]
   fn function_has_duplicated_param_in_strict_mode_early_error_test() {
     basic_env_expression_eary_error_test(EnvFlag::STRICT_MODE, 8, 9, "((a, b, b) => {})");
   }
@@ -3247,16 +3237,6 @@ mod parser_test {
   #[test]
   fn generator_method_not_allowed_to_use_yield_param_early_error_test() {
     basic_env_expression_eary_error_test(EnvFlag::all(), 5, 10, "({*a(yield) {}})");
-  }
-
-  #[test]
-  fn in_param_array_pattern_spread_is_not_identifier_early_error_test() {
-    basic_env_expression_eary_error_test(EnvFlag::all(), 5, 11, "({a([...{a}]) {}})");
-  }
-
-  #[test]
-  fn in_param_object_pattern_spread_is_not_identifier_early_error_test() {
-    basic_env_expression_eary_error_test(EnvFlag::all(), 5, 11, "({a([...[a]]) {}})");
   }
 
   #[test]

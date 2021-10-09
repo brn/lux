@@ -62,6 +62,9 @@ pub struct Scope {
   var_map: HashMap<Vec<u16>, (SourcePosition, VariableType)>,
 
   #[property(skip)]
+  will_export_map: HashMap<Vec<u16>, (SourcePosition, VariableType)>,
+
+  #[property(skip)]
   label_stack: Vec<Vec<u16>>,
 
   #[property(skip)]
@@ -75,6 +78,7 @@ impl Scope {
       children: Vec::new(),
       var_list: Vec::new(),
       var_map: HashMap::new(),
+      will_export_map: HashMap::new(),
       parent_scope: None,
       nearest_opaque_scope: None,
       first_super_call_position: None,
@@ -217,12 +221,22 @@ impl Scope {
       }
     }
 
-    if let Some(pos) = self.get_already_declared_var_position(&var.0, var_type) {
-      return Some((var.1.clone(), pos.clone()));
+    if let Some((ref pos, v_type)) = self.get_already_declared_var_position(&var.0, var_type) {
+      if var_type == VariableType::WillExportVar {
+        if *v_type == VariableType::ExportLexical || *v_type == VariableType::WillExportVar {
+          return Some((var.1.clone(), pos.clone()));
+        }
+        self.will_export_map.insert(var.0.clone(), (var.1.clone(), var_type));
+        return None;
+      } else {
+        return Some((var.1.clone(), pos.clone()));
+      }
     }
 
     if var_type != VariableType::WillExportVar {
       self.var_list.push((var.0.clone(), var.1.clone(), var_type));
+    } else {
+      self.will_export_map.insert(var.0.clone(), (var.1.clone(), var_type));
     }
     self.var_map.insert(var.0.clone(), (var.1.clone(), var_type));
 
@@ -243,34 +257,39 @@ impl Scope {
     return None;
   }
 
-  pub fn get_already_declared_var_position(&self, var: &Vec<u16>, variable_type: VariableType) -> Option<&SourcePosition> {
+  pub fn get_already_declared_var_position(&self, var: &Vec<u16>, variable_type: VariableType) -> Option<&(SourcePosition, VariableType)> {
+    if variable_type == VariableType::WillExportVar {
+      if let Some(ref val) = self.will_export_map.get(var) {
+        return Some(val);
+      }
+    }
     if let Some(ref val) = self.var_map.get(var) {
       use VariableType::*;
       match val.1 {
         Lexical | ExportLexical => {
-          return Some(&val.0);
+          return Some(val);
         }
         FormalParameter => {
           return match variable_type {
-            Lexical => Some(&val.0),
+            Lexical => Some(val),
             _ => None,
           };
         }
         LegacyVar | CatchParameterLegacyVar => {
           return match variable_type {
-            Lexical | ExportLexical => Some(&val.0),
+            Lexical | ExportLexical => Some(val),
             _ => None,
           };
         }
         ExportLegacyVar => {
           return match variable_type {
-            Lexical | ExportLexical | ExportLegacyVar => Some(&val.0),
+            Lexical | ExportLexical | ExportLegacyVar => Some(val),
             _ => None,
           };
         }
         WillExportVar => {
           return match variable_type {
-            ExportLexical | ExportLegacyVar => Some(&val.0),
+            ExportLexical | ExportLegacyVar | WillExportVar => Some(val),
             _ => None,
           }
         }

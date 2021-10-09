@@ -86,6 +86,28 @@ fn format_one_line(target_source: &str, source_position: &SourcePosition) -> (St
   return (indicator_buffer, formatted_source);
 }
 
+fn split_by_line(source: &str) -> Vec<String> {
+  let mut ret = Vec::new();
+  let mut buf = String::new();
+  for ch in source.chars() {
+    buf.push(ch);
+    if ch == '\r' {
+      ret.push(buf.to_owned());
+      buf.clear();
+      if ch == '\n' {
+        continue;
+      }
+    } else if ch == '\n' {
+      ret.push(buf.to_owned());
+      buf.clear();
+    }
+  }
+  if buf.len() > 0 {
+    ret.push(buf.to_owned());
+  }
+  return ret;
+}
+
 pub fn format_error(
   filename: &str,
   source: FixedU16CodePointArray,
@@ -94,10 +116,10 @@ pub fn format_error(
   should_omit_position: bool,
 ) -> String {
   let utf8_source = source.to_utf8();
-  let line_sources = utf8_source.split("\n").collect::<Vec<_>>();
+  let line_sources = split_by_line(&utf8_source);
   if source_position.start_line_number() == source_position.end_line_number() {
     if source_position.start_line_number() < line_sources.len() as u32 {
-      let (indicator_buffer, target_source) = format_one_line(line_sources[source_position.start_line_number() as usize], source_position);
+      let (indicator_buffer, target_source) = format_one_line(&line_sources[source_position.start_line_number() as usize], source_position);
 
       if !should_omit_position {
         return format!(
@@ -129,7 +151,7 @@ pub fn format_error(
 
       for line in source_position.start_line_number()..source_position.end_line_number() + 1 {
         msgs.push_str("\n");
-        let target_source = line_sources[line as usize];
+        let target_source = &line_sources[line as usize];
         let (indicator, source) = if line == 0 {
           format_one_line(
             target_source,

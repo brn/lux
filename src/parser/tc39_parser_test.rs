@@ -112,10 +112,10 @@ fn run_tc39_parser_test(dir: &str, should_fail: bool) {
 fn extract_test() {
   parse(
     "anonymout",
-    "/[\\]/]/",
+    "let a; export {a, a as a};",
     ParserOptionBuilder::default().build(),
-    ParserType::Script,
-    false,
+    ParserType::Module,
+    true,
   );
 }
 

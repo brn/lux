@@ -378,10 +378,15 @@ pub trait NodeOps {
       return match stmt {
         Stmt::VariableDeclaration(node) => node.initializer().is_none(),
         Stmt::VariableDeclarations(_) => false,
-        _ => true,
+        _ => false,
+      };
+    } else if let Ok(expr) = Expr::try_from(var) {
+      return match expr {
+        Expr::StructuralLiteral(_) => true,
+        _ => false,
       };
     }
-    return true;
+    return false;
   }
 
   fn new_break_stmt(&mut self, identifier: Option<FixedU16CodePointArray>, pos: Option<&RuntimeSourcePosition>) -> Stmt {

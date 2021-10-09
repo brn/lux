@@ -418,11 +418,16 @@ impl NodeOps for SkipTreeBuilder {
   fn is_valid_for_of_in_lhs(&self, var: Ast) -> bool {
     if let Ok(stmt) = Stmt::try_from(var) {
       return match stmt {
-        Stmt::SkipStmt(node) => node.is_var_without_init() || !node.is_vars(),
-        _ => true,
+        Stmt::SkipStmt(node) => node.is_var_without_init(),
+        _ => false,
+      };
+    } else if let Ok(expr) = Expr::try_from(var) {
+      return match expr {
+        Expr::SkipExpr(node) => node.is_structural_literal(),
+        _ => false,
       };
     }
-    return true;
+    return false;
   }
 
   fn new_break_stmt(&mut self, identifier: Option<FixedU16CodePointArray>, pos: Option<&RuntimeSourcePosition>) -> Stmt {
