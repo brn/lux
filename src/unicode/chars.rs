@@ -90,6 +90,11 @@ pub fn is_cr_or_lf(u: u16) -> bool {
 }
 
 #[inline(always)]
+pub fn is_line_terminator(u: u16) -> bool {
+  return is_cr(u) || is_lf(u) || u == 0x2028 || u == 0x2029;
+}
+
+#[inline(always)]
 pub fn is_surrogate_pair(u: u16) -> bool {
   return is_high_surrogate(u) || is_low_surrogate(u);
 }

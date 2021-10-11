@@ -29,6 +29,7 @@ pub enum VariableType {
   FormalParameter,
   Lexical,
   ExportLexical,
+  ExportRenamed,
   LegacyVar,
   ExportLegacyVar,
   WillExportVar,
@@ -223,7 +224,7 @@ impl Scope {
 
     if let Some((ref pos, v_type)) = self.get_already_declared_var_position(&var.0, var_type) {
       if var_type == VariableType::WillExportVar {
-        if *v_type == VariableType::ExportLexical || *v_type == VariableType::WillExportVar {
+        if *v_type == VariableType::ExportLexical || *v_type == VariableType::WillExportVar || *v_type == VariableType::ExportRenamed {
           return Some((var.1.clone(), pos.clone()));
         }
         self.will_export_map.insert(var.0.clone(), (var.1.clone(), var_type));
@@ -266,7 +267,13 @@ impl Scope {
     if let Some(ref val) = self.var_map.get(var) {
       use VariableType::*;
       match val.1 {
-        Lexical | ExportLexical => {
+        Lexical => {
+          return match variable_type {
+            ExportRenamed => None,
+            _ => Some(val),
+          };
+        }
+        ExportLexical => {
           return Some(val);
         }
         FormalParameter => {
@@ -283,13 +290,13 @@ impl Scope {
         }
         ExportLegacyVar => {
           return match variable_type {
-            Lexical | ExportLexical | ExportLegacyVar => Some(val),
+            Lexical | ExportLexical | ExportLegacyVar | ExportRenamed => Some(val),
             _ => None,
           };
         }
         WillExportVar => {
           return match variable_type {
-            ExportLexical | ExportLegacyVar | WillExportVar => Some(val),
+            ExportLexical | ExportLegacyVar | WillExportVar | ExportRenamed => Some(val),
             _ => None,
           }
         }

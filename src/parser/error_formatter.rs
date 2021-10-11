@@ -90,7 +90,6 @@ fn split_by_line(source: &str) -> Vec<String> {
   let mut ret = Vec::new();
   let mut buf = String::new();
   for ch in source.chars() {
-    buf.push(ch);
     if ch == '\r' {
       ret.push(buf.to_owned());
       buf.clear();
@@ -100,6 +99,8 @@ fn split_by_line(source: &str) -> Vec<String> {
     } else if ch == '\n' {
       ret.push(buf.to_owned());
       buf.clear();
+    } else {
+      buf.push(ch);
     }
   }
   if buf.len() > 0 {

@@ -122,6 +122,10 @@ macro_rules! _get_set {
         }
       }
 
+      pub fn [<clear_ $name>](&mut self) {
+        self.[<$name>] = None;
+      }
+
       pub fn [<$name>](&self) -> Option<Exotic<ErrorDescriptor>> {
         return self.[<$name>];
       }

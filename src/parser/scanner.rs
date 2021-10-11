@@ -332,13 +332,23 @@ impl Scanner {
     return &self.previous_position;
   }
 
+  #[inline]
   pub fn clear_peek(&mut self) {
     self.lookahead_token = Token::Invalid;
     self.iter.set_index(self.last_cursor);
   }
 
+  #[inline]
   fn record_position(&mut self) -> SourcePosition {
     return self.current_position().clone();
+  }
+
+  #[inline]
+  fn current_token(&self) -> Token {
+    if self.mode == Mode::Current {
+      return self.token;
+    }
+    return self.lookahead_token;
   }
 
   pub fn next(&mut self) -> Token {
@@ -588,7 +598,7 @@ impl Scanner {
       .match_states(&[ParserState::InTemplateLiteral, ParserState::InTaggedTemplateLiteral])
     {
       return self.tokenize_template_literal_characters();
-    } else if self.parser_state_stack.is_in_state(ParserState::RegexpExpected) {
+    } else if self.token == Token::OpDiv && self.parser_state_stack.is_in_state(ParserState::RegexpExpected) {
       return self.tokenize_regexp_characters();
     } else if self.parser_state_stack.is_in_state(ParserState::RegexpFlagExpected) {
       let index = self.iter.index();
@@ -1030,9 +1040,7 @@ impl Scanner {
                 report_error!(self, "Unterminated string literal", &pos_range!(start, start), Token::Invalid);
               }
             } else {
-              if !self.collect_line_break() {
-                self.advance_and_push_buffer();
-              }
+              self.advance_and_push_buffer();
               is_escaped = false;
             }
           }
@@ -1040,13 +1048,14 @@ impl Scanner {
             report_error!(self, "Unexpected token found", self.source_position(), Token::Invalid);
           }
           _ => {
-            if chars::is_cr_or_lf(*self.iter) {
+            if chars::is_line_terminator(*self.iter) {
               if !is_escaped {
                 let start = self.record_position();
                 self.advance();
                 report_error!(self, "Unterminated string literal", &pos_range!(start, start), Token::Invalid);
               }
               self.collect_line_break();
+              is_escaped = false;
               continue;
             }
             if value == start {
@@ -1076,6 +1085,7 @@ impl Scanner {
   fn tokenize_identifier(&mut self, disallow_escape_sequence: bool) -> Token {
     let mut value = self.iter.uc32();
     self.current_literal_buffer_mut().clear();
+    println!("0x{:x}", value.code());
     if !chars::is_identifier_start(value.code()) {
       return if self.has_more() { Token::Invalid } else { Token::End };
     }
@@ -1433,6 +1443,7 @@ impl Scanner {
                 let escape_sequence_start_pos = self.record_position();
                 if chars::is_start_escape_sequence(lookahead) {
                   self.advance();
+                  self.advance();
                   if !self.decode_template_literal_escape_sequence(
                     &escape_sequence_start_pos,
                     start_index as u32,
@@ -1462,7 +1473,7 @@ impl Scanner {
                 report_error!(self, "Unexpected end of input.", self.current_position(), Token::Invalid);
               }
             } else {
-              is_escaped = !is_escaped;
+              is_escaped = false;
             }
           }
           '$' => {
@@ -1500,27 +1511,18 @@ impl Scanner {
               self.advance_and_push_buffer();
             }
           }
-          chars::CR_CHAR => {
-            if let Some(next) = self.iter.peek() {
-              if chars::is_lf(next) {
-                self.advance_and_push_buffer();
-              }
-              self.advance_and_push_buffer();
-              self.current_position_mut().set_end_col(0_u32);
-              self.current_position_mut().inc_end_line_number();
-            }
-          }
-          chars::LF_CHAR => {
-            self.advance_and_push_buffer();
-            self.current_position_mut().set_end_col(0_u32);
-            self.current_position_mut().inc_end_line_number();
-          }
           _ => {
-            self.advance_and_push_buffer();
+            if chars::is_line_terminator(*self.iter) {
+              self.collect_line_break();
+            } else {
+              self.advance_and_push_buffer();
+            }
+            is_escaped = false;
           }
         },
         _ => {
           self.advance_and_push_surrogate_pair_safe();
+          is_escaped = false;
         }
       }
     }
@@ -1536,16 +1538,14 @@ impl Scanner {
         self.advance_and_push_buffer();
       }
       is_found = true;
-    } else if chars::is_lf(*self.iter) {
+    } else if chars::is_line_terminator(*self.iter) {
       is_found = true;
       self.advance_and_push_buffer();
     }
     if is_found {
       let end_line_number = self.current_position().end_line_number();
-      self.current_position_mut().set_start_line_number(end_line_number + 1);
-      self.current_position_mut().set_end_line_number(end_line_number + 1);
-      self.current_position_mut().set_start_col(0_u32);
       self.current_position_mut().set_end_col(0_u32);
+      self.current_position_mut().set_end_line_number(end_line_number + 1);
     }
     return is_found;
   }
@@ -1578,7 +1578,7 @@ impl Scanner {
         self.skipped = 2;
       }
       return true;
-    } else if chars::is_lf(*self.iter) {
+    } else if chars::is_line_terminator(*self.iter) {
       self.advance();
       self.skipped += 1;
       return true;

@@ -15,10 +15,10 @@ fn parse(filename: &str, content: &str, parser_option: ParserOption, parser_type
         if should_fail {
           println!(" ... failed");
           parser.print_stack_trace();
-          // panic!(
-          //   "{}",
-          //   format!("Parsing {} succeeded, but failure expected\ncode is\n{}", filename, content)
-          // );
+          panic!(
+            "{}",
+            format!("Parsing {} succeeded, but failure expected\ncode is\n{}", filename, content)
+          );
         }
         println!(" ... ok");
       }
@@ -26,15 +26,15 @@ fn parse(filename: &str, content: &str, parser_option: ParserOption, parser_type
         if !should_fail {
           println!(" ... failed");
           parser.print_stack_trace();
-          //          panic!("{}", err.error_message());
+          panic!("{}", err.error_message());
         }
         println!(" ... ok");
       }
     },
     Err(err) => {
       println!(" ... failed");
-      //      parser.print_stack_trace();
-      //      panic!("{:?}", err);
+      parser.print_stack_trace();
+      panic!("{:?}", err);
     }
   }
 }
@@ -61,7 +61,7 @@ const SHOULD_RUN_UNDER_STRICT_MODE_CASES: [&'static str; 6] = [
   "early/ec31fa5e521c5df4.js",
   "early/a610a46980d6cc37.js",
 ];
-const EXCLUDES_CASES: [&'static str; 1] = ["early/0f5f47108da5c34e.js"];
+const EXCLUDES_CASES: [&'static str; 2] = ["early/0f5f47108da5c34e.js", "early/4de83a7417cd30dd.js"];
 
 fn run_tc39_parser_test(dir: &str, should_fail: bool) {
   if let Err(e) = get_test_files(dir, |entry| {
@@ -112,10 +112,10 @@ fn run_tc39_parser_test(dir: &str, should_fail: bool) {
 fn extract_test() {
   parse(
     "anonymout",
-    "let a; export {a, a as a};",
+    "你好",
     ParserOptionBuilder::default().build(),
-    ParserType::Module,
-    true,
+    ParserType::Script,
+    false,
   );
 }
 
