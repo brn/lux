@@ -15,6 +15,7 @@ fn parse(filename: &str, content: &str, parser_option: ParserOption, parser_type
         if should_fail {
           println!(" ... failed");
           parser.print_stack_trace();
+          println!("code: \n{}", content);
           panic!(
             "{}",
             format!("Parsing {} succeeded, but failure expected\ncode is\n{}", filename, content)
@@ -26,6 +27,7 @@ fn parse(filename: &str, content: &str, parser_option: ParserOption, parser_type
         if !should_fail {
           println!(" ... failed");
           parser.print_stack_trace();
+          println!("code: \n{}", content);
           panic!("{}", err.error_message());
         }
         println!(" ... ok");
@@ -112,7 +114,8 @@ fn run_tc39_parser_test(dir: &str, should_fail: bool) {
 fn extract_test() {
   parse(
     "anonymout",
-    "你好",
+    "for (let [a, b] of c);
+",
     ParserOptionBuilder::default().build(),
     ParserType::Script,
     false,

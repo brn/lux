@@ -351,6 +351,17 @@ impl Scanner {
     return self.lookahead_token;
   }
 
+  fn exit_scanning(&mut self) -> Token {
+    self.position[Mode::Lookahead as usize] = self.position[Mode::Current as usize].clone();
+    let end_col = self.current_position().end_col();
+    let end_line = self.current_position().end_line_number();
+    self.current_position_mut().set_start_col(end_col);
+    self.current_position_mut().set_start_line_number(end_line);
+    self.token = Token::End;
+    self.lookahead_token = Token::End;
+    return self.lookahead_token;
+  }
+
   pub fn next(&mut self) -> Token {
     self.mode = Mode::Current;
     self.previous_position = self.position[Mode::Current as usize].clone();
@@ -367,18 +378,14 @@ impl Scanner {
     }
 
     if !self.has_more() {
-      self.position[Mode::Lookahead as usize] = self.position[Mode::Current as usize].clone();
-      let end_col = self.current_position().end_col();
-      let end_line = self.current_position().end_line_number();
-      self.current_position_mut().set_start_col(end_col);
-      self.current_position_mut().set_start_line_number(end_line);
-      self.token = Token::End;
-      self.lookahead_token = Token::End;
-      return self.lookahead_token;
+      return self.exit_scanning();
     }
 
     let mut is_html_comment_allowed = self.current_position().start_col() == 0 || self.token == Token::Comment;
     self.prologue();
+    if !self.has_more() {
+      return self.exit_scanning();
+    }
     if !is_html_comment_allowed {
       is_html_comment_allowed = self.has_line_break_before();
     }
@@ -406,6 +413,11 @@ impl Scanner {
     let mut is_html_comment_allowed =
       this.current_position().start_col() == 0 || this.lookahead_token == Token::Comment || this.token == Token::Comment;
     this.prologue();
+    if !this.has_more() {
+      this.position[Mode::Lookahead as usize] = this.position[Mode::Current as usize].clone();
+      this.lookahead_token = Token::End;
+      return this.lookahead_token;
+    }
     if !is_html_comment_allowed {
       is_html_comment_allowed = this.has_line_break_before();
     }
@@ -1085,7 +1097,6 @@ impl Scanner {
   fn tokenize_identifier(&mut self, disallow_escape_sequence: bool) -> Token {
     let mut value = self.iter.uc32();
     self.current_literal_buffer_mut().clear();
-    println!("0x{:x}", value.code());
     if !chars::is_identifier_start(value.code()) {
       return if self.has_more() { Token::Invalid } else { Token::End };
     }
@@ -1106,29 +1117,27 @@ impl Scanner {
                 Token::Invalid
               );
             }
-            if !chars::is_variation_selector(u) {
-              if !chars::is_identifier_continue(u, false) {
-                self.current_literal_buffer_mut().clear();
-                report_error!(
-                  self,
-                  "Invalid unicode escape sequence",
-                  &pos_range!(before_decode_pos, self.current_position()),
-                  Token::Invalid
-                );
+            if !chars::is_identifier_continue(u, false) {
+              self.current_literal_buffer_mut().clear();
+              report_error!(
+                self,
+                "Invalid unicode escape sequence",
+                &pos_range!(before_decode_pos, self.current_position()),
+                Token::Invalid
+              );
+            }
+            if let Ok((hi, low)) = chars::uc32_to_uc16(u) {
+              self.current_literal_buffer_mut().push(hi);
+              if low != 0 {
+                self.current_literal_buffer_mut().push(low);
               }
-              if let Ok((hi, low)) = chars::uc32_to_uc16(u) {
-                self.current_literal_buffer_mut().push(hi);
-                if low != 0 {
-                  self.current_literal_buffer_mut().push(low);
-                }
-              } else {
-                report_error!(
-                  self,
-                  "Invalid unicode escape sequence",
-                  &pos_range!(before_decode_pos, self.current_position()),
-                  Token::Invalid
-                );
-              }
+            } else {
+              report_error!(
+                self,
+                "Invalid unicode escape sequence",
+                &pos_range!(before_decode_pos, self.current_position()),
+                Token::Invalid
+              );
             }
           } else {
             self.current_literal_buffer_mut().clear();
@@ -1143,17 +1152,13 @@ impl Scanner {
           self.advance_and_push_buffer();
         }
       } else {
-        if chars::is_variation_selector(value.code()) {
-          self.advance();
-        } else {
-          if let Ok((hi, low)) = value.to_u16() {
-            self.current_literal_buffer_mut().push(hi);
-            if low > 0 {
-              self.current_literal_buffer_mut().push(low);
-            }
+        if let Ok((hi, low)) = value.to_u16() {
+          self.current_literal_buffer_mut().push(hi);
+          if low > 0 {
+            self.current_literal_buffer_mut().push(low);
           }
-          self.advance();
         }
+        self.advance();
       }
       value = self.iter.uc32();
     }

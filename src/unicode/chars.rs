@@ -1,4 +1,5 @@
-use super::data::*;
+use super::ucd::*;
+use super::ucd_type::*;
 use std::iter::{Iterator, Peekable};
 
 pub const LF: u16 = 0x00A;
@@ -171,17 +172,6 @@ pub fn is_whitespace(c: u16) -> bool {
 }
 
 #[inline(always)]
-pub fn is_variation_selector(value: u32) -> bool {
-  let index = (value % VARIATION_SELECTOR_HASH_MOD) as usize;
-  for ch in VARIATION_SELECTOR[index].iter() {
-    if *ch == value {
-      return true;
-    }
-  }
-  return false;
-}
-
-#[inline(always)]
 pub const fn ch(u: u16) -> char {
   return u as u8 as char;
 }
@@ -201,13 +191,7 @@ pub fn is_identifier_start(value: u32) -> bool {
   if value == 36 || value == 95 || value == 92 || value == 0x200C || value == 0x200D {
     return true;
   }
-  let index = (value % ID_START_HASH_MOD) as usize;
-  for ch in ID_START[index].iter() {
-    if *ch == value {
-      return true;
-    }
-  }
-  return false;
+  return Ucd::get_id_property(value) == UcdIdProperty::IdStart;
 }
 
 // http://www.ecma-international.org/ecma-262/9.0/index.html#sec-names-and-keywords
@@ -221,14 +205,7 @@ pub fn is_identifier_continue(value: u32, is_unicode_escape_seq: bool) -> bool {
     return true;
   }
 
-  let index = (value % ID_CONTINUE_HASH_MOD) as usize;
-
-  for ch in ID_CONTINUE_DIFF[index].iter() {
-    if *ch == value {
-      return true;
-    }
-  }
-  return false;
+  return Ucd::get_id_property(value) == UcdIdProperty::IdContinue;
 }
 
 #[inline]
