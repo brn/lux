@@ -345,15 +345,15 @@ impl<T: UcdAttributeValue> UcdAttributesCmpTable<T> {
     self.codepoint_mapping.insert(codepoint, value);
   }
 
-  fn serialize(&mut self, level_2_bit: u32, level_3_bit: u32) -> (&Vec<u16>, Vec<u8>, &Vec<T>) {
-    self.serialize_to_cmp_table(level_2_bit, level_3_bit, false);
+  fn serialize(&mut self, level_2_bit: u32, level_3_bit: u32, cut_off: bool) -> (&Vec<u16>, Vec<u8>, &Vec<T>) {
+    self.serialize_to_cmp_table(level_2_bit, level_3_bit, cut_off);
     let mut level2 = Vec::new();
     for i in self.level_2_index.iter() {
-      if self.level_2_has_bytes {
-        level2.push(*i as u8);
-      } else {
-        level2.extend_from_slice(&i.to_ne_bytes());
-      }
+      //      if self.level_2_has_bytes {
+      level2.push(*i as u8);
+      // } else {
+      //   level2.extend_from_slice(&i.to_ne_bytes());
+      // }
     }
     return (&self.level_1_index, level2, &self.level_3_data);
   }
@@ -373,13 +373,10 @@ impl<T: UcdAttributeValue> UcdAttributesCmpTable<T> {
     let mut level_3_row_data = vec![T::default(); level_3_block];
     let mut level_2_row_data = vec![0_u16; level_2_block];
 
-    if cut_off {
-      self.level_1_index = Vec::new();
-    }
     let mut ch = 0_u32;
     for i in 0..level_1_block {
       for j in 0..level_2_row_data.len() {
-        for k in 0..level_3_row_data.len() {
+        for k in 0..level_3_block {
           if let Some(value) = self.codepoint_mapping.get(&ch) {
             level_3_row_data[k] = *value;
           } else {
@@ -389,6 +386,7 @@ impl<T: UcdAttributeValue> UcdAttributesCmpTable<T> {
         }
 
         let key = level_3_row_data.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>().join(";");
+        let o = key.clone();
         let mut value_in_hash3 = level_3_hash.get(&key).copied();
         if value_in_hash3.is_none() {
           value_in_hash3 = Some(level_3_count as u16);
@@ -396,11 +394,10 @@ impl<T: UcdAttributeValue> UcdAttributesCmpTable<T> {
           self.level_3_data.extend_from_slice(&level_3_row_data);
           level_3_count += 1;
         }
-
         level_2_row_data[j] = value_in_hash3.unwrap();
       }
 
-      let key = level_2_row_data.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>().join(";");
+      let key = level_2_row_data.iter().map(|v| format!("{}", v)).collect::<Vec<_>>().join(";");
       let mut value_in_hash = level_2_hash.get(&key).copied();
       if value_in_hash.is_none() {
         let value = level_2_count as u16;
@@ -409,7 +406,6 @@ impl<T: UcdAttributeValue> UcdAttributesCmpTable<T> {
         level_2_count += 1;
         value_in_hash = Some(value);
       }
-
       self.level_1_index.push(value_in_hash.unwrap());
       level_1_count += 1;
     }
@@ -420,11 +416,10 @@ impl<T: UcdAttributeValue> UcdAttributesCmpTable<T> {
       if let Some(index) = level_3_hash.get(&l3_key) {
         level_2_row_data.fill(*index);
 
-        let l2_key = level_2_row_data.iter().map(|v| format!("{:?}", v)).collect::<Vec<_>>().join(";");
+        let l2_key = level_2_row_data.iter().map(|v| format!("{}", v)).collect::<Vec<_>>().join(";");
         if let Some(index) = level_2_hash.get(&l2_key) {
-          let cur_len = self.level_1_index.len() - 1;
           while self.level_1_index.len() > 0 && self.level_1_index[self.level_1_index.len() - 1] == *index {
-            self.level_1_index.shrink_to(self.level_1_index.len() - 1);
+            self.level_1_index.remove(self.level_1_index.len() - 1);
             level_1_count -= 1;
           }
         }
@@ -435,7 +430,19 @@ impl<T: UcdAttributeValue> UcdAttributesCmpTable<T> {
     let level_2_uint = if level_3_hash.len() < 256 { 1 } else { 2 };
 
     self.level_2_has_bytes = level_2_uint == 1;
-
+    println!(
+      "level 1: {:>4} [{:>5}]{}",
+      level_1_count,
+      level_1_count * level_1_uint,
+      if level_1_uint > 1 { "*" } else { "" }
+    );
+    println!(
+      "level 2: {:>4} [{:>5}]{}",
+      level_2_count,
+      level_2_count * level_2_uint * level_2_block as u32,
+      if level_2_uint > 1 { "*" } else { "" }
+    );
+    println!("level 3: {:>4} [{:>5}]", level_3_count, level_3_count * level_3_block as u32);
     return level_1_count + level_2_count + level_3_count;
   }
 }
@@ -449,8 +456,9 @@ macro_rules! write_to_array {
       if count == $wrap {
         buf = format!("{}\n  ", buf);
         count = 0;
+      } else {
+        count += 1;
       }
-      count += 1;
     }
     format!("{}\n];\n", buf)
   }};
@@ -516,10 +524,9 @@ impl UnicodeDataTable {
       let lines = raw_unicode_data.split('\n').collect::<Vec<_>>();
       let mut is_next_range_end = false;
       let mut last_codepoint = 0;
-      let mut table = BTreeMap::new();
       let mut map = HashMap::new();
       map.insert((GeneralCategory::Cn, BidiCategory::L), 0);
-      table.insert(0, (GeneralCategory::Cn, BidiCategory::L));
+      self.general_category_value_table.insert(0, (GeneralCategory::Cn, BidiCategory::L));
       let mut i = 0;
       for line in lines.iter() {
         if line.len() == 0 {
@@ -578,7 +585,6 @@ impl UnicodeDataTable {
   ) {
     let data = UnicodeData::new(codepoint, raw_unicode_char_info);
     let key = (data.general_category(), data.bidi_category());
-
     let category_item = if let Some(i) = map.get(&key) {
       *i
     } else {
@@ -629,11 +635,8 @@ impl UnicodeDataTable {
         if normalization.len() > 1 || (normalization.len() == 1 && normalization[0].codepoint() != data.codepoint()) {
           self.id_property_table.add(data.codepoint(), UcdIdProperty::IdStart);
         }
-        for _ in normalization.iter().cloned() {
-          self.id_property_table.add(data.codepoint(), UcdIdProperty::IdStart);
-        }
-        if data.codepoint() == 0x1ee0a {
-          println!("{:?} {}", data, data.general_category().is_id_start());
+        for d in normalization.iter().cloned() {
+          self.id_property_table.add(d.codepoint(), UcdIdProperty::IdStart);
         }
       } else if data.general_category().is_id_continue()
         || match data.codepoint() {
@@ -645,8 +648,8 @@ impl UnicodeDataTable {
         if normalization.len() > 1 || (normalization.len() == 1 && normalization[0].codepoint() != data.codepoint()) {
           self.id_property_table.add(data.codepoint(), UcdIdProperty::IdContinue);
         }
-        for _ in normalization.iter().cloned() {
-          self.id_property_table.add(data.codepoint(), UcdIdProperty::IdContinue);
+        for d in normalization.iter().cloned() {
+          self.id_property_table.add(d.codepoint(), UcdIdProperty::IdContinue);
         }
       } else {
         self.id_property_table.add(data.codepoint(), UcdIdProperty::None);
@@ -706,10 +709,28 @@ impl UnicodeDataTable {
   fn serialize(&mut self) -> std::io::Result<()> {
     const PROLOGUE: &str = "use super::ucd::*;\nuse super::ucd_type::*;\n\n";
     let mut content = {
-      let tables = self.general_category_table.serialize(5, 4);
-      let table1 = write_to_array!("GENERAL_CATEGORIES_LEVEL1_INDICES", "u32", tables.0, tables.0.iter(), 16);
-      let table2 = write_to_array!("GENERAL_CATEGORIES_LEVEL2_INDICES", "u32", tables.1, tables.1.iter(), 16);
-      let table3 = write_to_array!("GENERAL_CATEGORIES_LEVEL3_INDICES", "u32", tables.2, tables.2.iter(), 16);
+      let tables = self.general_category_table.serialize(5, 4, false);
+      let table1 = write_to_array!(
+        "GENERAL_CATEGORIES_LEVEL1_INDICES",
+        "u32",
+        tables.0,
+        tables.0.iter().map(|x| format!("0x{:02x}", x)),
+        15
+      );
+      let table2 = write_to_array!(
+        "GENERAL_CATEGORIES_LEVEL2_INDICES",
+        "u32",
+        tables.1,
+        tables.1.iter().map(|x| format!("0x{:02x}", x)),
+        15
+      );
+      let table3 = write_to_array!(
+        "GENERAL_CATEGORIES_LEVEL3_INDICES",
+        "u32",
+        tables.2,
+        tables.2.iter().map(|x| format!("0x{:02x}", x)),
+        15
+      );
       let values = write_to_array!(
         "GENERAL_CATEGORIES_VALUES",
         "(GeneralCategory, BidiCategory)",
@@ -718,20 +739,32 @@ impl UnicodeDataTable {
           .general_category_value_table
           .values()
           .map(|(a, b)| format!("(GeneralCategory::{:?}, BidiCategory::{:?})", a, b)),
-        6
+        7
       );
       format!("{}{}{}{}{}", PROLOGUE, table1, table2, table3, values)
     };
     content = {
-      let tables = self.id_property_table.serialize(4, 4);
-      let table1 = write_to_array!("ID_PROPERTY_LEVEL1_INDICES", "u32", tables.0, tables.0.iter(), 16);
-      let table2 = write_to_array!("ID_PROPERTY_LEVEL2_INDICES", "u32", tables.1, tables.1.iter(), 16);
+      let tables = self.id_property_table.serialize(4, 4, true);
+      let table1 = write_to_array!(
+        "ID_PROPERTY_LEVEL1_INDICES",
+        "u32",
+        tables.0,
+        tables.0.iter().map(|x| format!("0x{:02x}", x)),
+        15
+      );
+      let table2 = write_to_array!(
+        "ID_PROPERTY_LEVEL2_INDICES",
+        "u32",
+        tables.1,
+        tables.1.iter().map(|x| format!("0x{:02x}", x)),
+        15
+      );
       let values = write_to_array!(
         "ID_PROPERTY_VALUES",
         "UcdIdProperty",
         tables.2,
         tables.2.iter().map(|p| format!("UcdIdProperty::{:?}", p)),
-        6
+        7
       );
       format!("{}{}{}{}", content, table1, table2, values)
     };

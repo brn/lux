@@ -20,6 +20,8 @@ extern crate itertools;
 
 extern crate termion;
 
+extern crate byteorder;
+
 #[macro_use]
 mod debug;
 
