@@ -29,10 +29,11 @@ impl Ucd {
   pub fn get_id_property(ch: u32) -> UcdIdProperty {
     let level_1_index = (ch >> 8) as usize;
     let level_2_base_index = ID_PROPERTY_LEVEL1_INDICES[level_1_index];
-    let level_2_index = ((level_2_base_index << 4) + ((ch >> 4) & 0x000F)) as usize;
-    let level_3_base_index = ID_PROPERTY_LEVEL2_INDICES[level_2_index];
-    let swapped_l3_base_index = level_3_base_index.to_le();
-    let level_3_index = (((swapped_l3_base_index << 4) + (ch & 0x000f)) as usize);
+    let level_2_index = ((level_2_base_index << 4) + ((ch >> 4) & 0x000F)) as usize * 2;
+    let level_3_base_index =
+      unsafe { std::ptr::read_unaligned((&ID_PROPERTY_LEVEL2_INDICES as *const u8).offset(level_2_index as isize) as *const u16) };
+    let swapped_l3_base_index = level_3_base_index.to_le() as u32;
+    let level_3_index = ((swapped_l3_base_index << 4) + (ch & 0x000f)) as usize;
     // println!(
     //   "leve1[{}] level2[base: {}, real: {}], level3[base: {} real: {}] {:?} {:?}",
     //   level_1_index,

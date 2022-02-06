@@ -349,11 +349,11 @@ impl<T: UcdAttributeValue> UcdAttributesCmpTable<T> {
     self.serialize_to_cmp_table(level_2_bit, level_3_bit, cut_off);
     let mut level2 = Vec::new();
     for i in self.level_2_index.iter() {
-      //      if self.level_2_has_bytes {
-      level2.push(*i as u8);
-      // } else {
-      //   level2.extend_from_slice(&i.to_ne_bytes());
-      // }
+      if self.level_2_has_bytes {
+        level2.push(*i as u8);
+      } else {
+        level2.extend_from_slice(&i.to_ne_bytes());
+      }
     }
     return (&self.level_1_index, level2, &self.level_3_data);
   }
@@ -640,8 +640,14 @@ impl UnicodeDataTable {
         }
       } else if data.general_category().is_id_continue()
         || match data.codepoint() {
-          0x1369 | 0x00B7 | 0x0387 | 0x19DA => true,
-          _ => false,
+          0x00B7 | 0x0387 | 0x19DA => true,
+          _ => {
+            if data.codepoint() >= 0x1369 && data.codepoint() <= 0x1371 {
+              true
+            } else {
+              false
+            }
+          }
         }
       {
         let normalization = data.normalize(self);
@@ -655,6 +661,7 @@ impl UnicodeDataTable {
         self.id_property_table.add(data.codepoint(), UcdIdProperty::None);
       }
     }
+    println!("{:?}", self.id_property_table.codepoint_mapping.get(&0x136A));
   }
 
   fn get_unicode(&self, codepoint: u32) -> Option<UnicodeData> {
@@ -754,7 +761,7 @@ impl UnicodeDataTable {
       );
       let table2 = write_to_array!(
         "ID_PROPERTY_LEVEL2_INDICES",
-        "u32",
+        "u8",
         tables.1,
         tables.1.iter().map(|x| format!("0x{:02x}", x)),
         15

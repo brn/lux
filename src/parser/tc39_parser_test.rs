@@ -114,8 +114,7 @@ fn run_tc39_parser_test(dir: &str, should_fail: bool) {
 fn extract_test() {
   parse(
     "anonymout",
-    "for (let [a, b] of c);
-",
+    "_፩፪፫፬፭፮፯፰፱",
     ParserOptionBuilder::default().build(),
     ParserType::Script,
     false,

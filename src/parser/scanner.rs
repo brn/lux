@@ -1098,7 +1098,6 @@ impl Scanner {
     let mut value = self.iter.uc32();
     self.current_literal_buffer_mut().clear();
     if !chars::is_identifier_start(value.code()) {
-      println!("Invalid {}", value.code());
       return if self.has_more() { Token::Invalid } else { Token::End };
     }
     while self.has_more() && chars::is_identifier_continue(value.code(), false) {
