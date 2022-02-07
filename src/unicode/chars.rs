@@ -221,6 +221,7 @@ pub enum NumericConvertionError {
   NotANumber,
   ExponentsExpectedNumber,
   UnexpectedEndOfInput,
+  LeadingZeroesNotAllowed,
 }
 
 #[inline]
@@ -470,6 +471,7 @@ pub fn parse_numeric_value<'a>(
   start: &'a mut impl Iterator<Item = u16>,
   is_double: bool,
   should_stop_if_invalid_token_found: bool,
+  is_allow_leading_zeroes: bool,
 ) -> Result<(f64, NumericValueKind), NumericConvertionError> {
   use NumericValueKind::*;
   let mut kind = Decimal;
@@ -524,6 +526,14 @@ pub fn parse_numeric_value<'a>(
           char_count += 1;
         }
       }
+
+      while let Some(next) = iter.peek().cloned() {
+        if ch(next) == '0' {
+          iter.next();
+        } else {
+          break;
+        }
+      }
     }
 
     if let Some(next) = iter.peek().cloned() {
@@ -566,11 +576,17 @@ pub fn parse_numeric_value<'a>(
         }
       }
 
-      if !is_period_seen && ch(next) == '.' && !is_period_seen {
-        if kind == Decimal {
-          is_period_seen = true;
-          iter.next();
-          char_count += 1;
+      if let Some(next) = iter.peek().cloned() {
+        if ch(next) == '.' && !is_period_seen {
+          if match kind {
+            Decimal | DecimalLeadingZero => true,
+            _ => false,
+          } {
+            kind = if is_leading_zeros { DecimalLeadingZero } else { Decimal };
+            is_period_seen = true;
+            iter.next();
+            char_count += 1;
+          }
         }
       }
 
@@ -639,6 +655,9 @@ pub fn parse_numeric_value<'a>(
 
     return match kind {
       Decimal | DecimalLeadingZero => {
+        if kind == DecimalLeadingZero && digits_len > 1 && !is_allow_leading_zeroes {
+          return Err(NumericConvertionError::LeadingZeroesNotAllowed);
+        }
         if digits_len <= 9 && !has_exponents_part && !is_period_seen {
           match parse_uint32_without_exponents(origin, should_stop_if_invalid_token_found) {
             Ok(val) => Ok((val as f64, kind)),
@@ -726,7 +745,7 @@ mod chars_test {
     let buf = value.encode_utf16().collect::<Vec<_>>();
     let mut iter = buf.into_iter().peekable();
     let mut clone = iter.clone();
-    let result = parse_numeric_value(iter.by_ref(), &mut clone, false, true);
+    let result = parse_numeric_value(iter.by_ref(), &mut clone, false, true, true);
     assert!(result.is_ok());
     let (value, kind) = result.unwrap();
     assert_eq!(value, expected_value);

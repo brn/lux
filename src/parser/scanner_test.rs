@@ -451,6 +451,22 @@ mod scanner_test {
   }
 
   #[test]
+  fn scanner_scan_digit_leading_zeroes() {
+    init_scanner("0002396", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::NumericLiteral);
+      assert_eq!(scanner.current_numeric_value(), 2396 as f64);
+    });
+  }
+
+  #[test]
+  fn scanner_scan_digit_leading_zeroes_with_dot() {
+    init_scanner("0002.396", None, |mut scanner| {
+      assert_eq!(scanner.next(), Token::NumericLiteral);
+      assert_eq!(scanner.current_numeric_value(), 2.396 as f64);
+    });
+  }
+
+  #[test]
   fn scanner_scan_single_line_comment() {
     init_scanner(
       "//abcdefghijklmnopqrstuvwxyz1234567890!@#$%^&*()-_|\\`~{}[]\"\':;/?.<>,",

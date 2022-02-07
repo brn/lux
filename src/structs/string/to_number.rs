@@ -10,7 +10,7 @@ pub fn to_number(array: FixedU16CodePointArray) -> Result<Repr, Repr> {
 
   let mut iter = array.into_iter();
   let mut clone = iter.clone();
-  return match chars::parse_numeric_value(iter.by_ref(), &mut clone, false, false) {
+  return match chars::parse_numeric_value(iter.by_ref(), &mut clone, false, false, true) {
     Ok((value, _)) => Ok(Repr::from(value)),
     _ => Err(Repr::nan()),
   };

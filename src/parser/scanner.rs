@@ -993,6 +993,7 @@ impl Scanner {
     let mut is_escaped = false;
     while self.has_more() {
       value = *self.iter;
+      println!("{:?} {}", self.iter.as_char_safe(), is_escaped);
       match self.iter.as_char_safe() {
         Ok(ch) => match ch {
           '\\' => {
@@ -1307,7 +1308,13 @@ impl Scanner {
     self.set_current_numeric_value(0.0);
     let pos = self.iter.pos();
     let mut clone = self.iter.clone();
-    let result = chars::parse_numeric_value(self.iter.by_ref(), &mut clone, is_period_seen, true);
+    let result = chars::parse_numeric_value(
+      self.iter.by_ref(),
+      &mut clone,
+      is_period_seen,
+      true,
+      !self.parser_state_stack.is_in_state(ParserState::InStrictMode),
+    );
     if pos != self.iter.pos() {
       self.iter.back();
     }
@@ -1337,6 +1344,14 @@ impl Scanner {
       }
       chars::NumericConvertionError::UnexpectedEndOfInput => {
         report_error!(self, "Unexpected end of input", self.source_position(), Token::Invalid);
+      }
+      chars::NumericConvertionError::LeadingZeroesNotAllowed => {
+        report_error!(
+          self,
+          "Numeric literal leading zeroes not allowed here",
+          self.source_position(),
+          Token::Invalid
+        );
       }
     };
   }

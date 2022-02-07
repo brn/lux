@@ -4803,12 +4803,16 @@ impl Parser {
       let specifier_start_pos = self.source_position().clone();
       let name_value = self.value().clone();
       let token = self.cur();
-      let identifier = if allow_reserved_keyword {
-        next_parse!(self, self.parse_identifier_name(builder))?
-      } else {
-        next_parse!(self, self.parse_binding_identifier(builder, self.get_identifier_parse_option()))?
-      };
-      let node = if self.cur() == Token::Identifier && self.contextual_keyword() == Token::As {
+      let identifier = next_parse!(self, self.parse_identifier_name(builder))?;
+      let has_successor_as = self.cur() == Token::Identifier && self.contextual_keyword() == Token::As;
+      if !has_successor_as && !allow_reserved_keyword && !token.one_of(&[Token::Identifier, Token::Yield, Token::Await]) {
+        return parse_error!(
+          self.region,
+          &format!("Reserved keyword {} not allowed here", token.symbol()),
+          &specifier_start_pos
+        );
+      }
+      let node = if has_successor_as {
         self.advance()?;
         let pos = self.source_position().clone();
         let val = self.value().clone();
@@ -4825,13 +4829,6 @@ impl Parser {
         };
         build!(@pos, builder, import_specifier, specifier_start_pos, false, Some(identifier), Some(value_ref))
       } else {
-        if !allow_reserved_keyword && !token.one_of(&[Token::Identifier, Token::Yield, Token::Await]) {
-          return parse_error!(
-            self.region,
-            &format!("Reserved keyword {} not allowed here", token.symbol()),
-            &specifier_start_pos
-          );
-        }
         var_list.push((name_value, specifier_start_pos.clone()));
         build!(@pos, builder, import_specifier, specifier_start_pos, false, Some(identifier), None)
       };
