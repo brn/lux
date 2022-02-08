@@ -1213,14 +1213,13 @@ impl Parser {
           self.invalidate_cover_binding_name(builder);
           append_var_if!(self, self.cur(), self.value(), self.source_position());
           let expr_start = self.source_position().clone();
-          let next_is_valid_binding_identifier =
-            self.cur().one_of(&[Token::Identifier, Token::Yield, Token::Await]) && self.peek_with_regexp()? == Token::OpAssign;
           let expr = scoped_expr_ctx!(@propagate, self, {
             self.expression_context.set_is_in_allowed(true);
             next_parse!(self, self.parse_assignment_expression(builder))?
           });
-          if (!builder.is_structural_literal(expr) && self.expression_context.assignment_target_type() == AssignmentTargetType::Invalid)
-            && !next_is_valid_binding_identifier
+          if !builder.is_structural_literal(expr)
+            && !builder.is_initializer(expr)
+            && self.expression_context.assignment_target_type() == AssignmentTargetType::Invalid
           {
             let e = parse_error!(@raw, self.region, "Invalid pattern found", self.source_position());
             self.expression_context.set_first_pattern_error(e);
@@ -1268,6 +1267,7 @@ impl Parser {
       next_parse!(self, self.parse_assignment_expression(builder))?
     });
     let expr_end_pos = self.prev_source_position().clone();
+    self.expression_context.set_assignment_target_type(AssignmentTargetType::Invalid);
     return Ok(build!(@pos, builder, unary_expression, start_pos,
       UnaryExpressionOperandPosition::Pre,
       Token::Spread,

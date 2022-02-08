@@ -993,28 +993,18 @@ impl Scanner {
     let mut is_escaped = false;
     while self.has_more() {
       value = *self.iter;
-      println!("{:?} {}", self.iter.as_char_safe(), is_escaped);
-      match self.iter.as_char_safe() {
-        Ok(ch) => match ch {
-          '\\' => {
-            if !is_escaped {
-              if let Some(lookahead) = self.iter.peek() {
-                if chars::is_start_escape_sequence(lookahead) {
-                  has_escape_sequence = true;
-                  let escape_sequence_start_pos = self.record_position();
-                  if let Ok(ret) = self.decode_escape_sequence() {
-                    if let Ok((hi, low)) = chars::uc32_to_uc16(ret) {
-                      self.current_literal_buffer_mut().push(hi);
-                      if low != 0 {
-                        self.current_literal_buffer_mut().push(low);
-                      }
-                    } else {
-                      report_error!(
-                        self,
-                        "Invalid escape sequence",
-                        &pos_range!(escape_sequence_start_pos, self.current_position()),
-                        Token::Invalid
-                      );
+      match self.iter.val() {
+        92 /* \\ */ => {
+          if !is_escaped {
+            if let Some(lookahead) = self.iter.peek() {
+              if chars::is_start_escape_sequence(lookahead) {
+                has_escape_sequence = true;
+                let escape_sequence_start_pos = self.record_position();
+                if let Ok(ret) = self.decode_escape_sequence() {
+                  if let Ok((hi, low)) = chars::uc32_to_uc16(ret) {
+                    self.current_literal_buffer_mut().push(hi);
+                    if low != 0 {
+                      self.current_literal_buffer_mut().push(low);
                     }
                   } else {
                     report_error!(
@@ -1024,71 +1014,75 @@ impl Scanner {
                       Token::Invalid
                     );
                   }
-                } else if chars::is_octal_digits(lookahead) {
-                  self.advance();
-                  has_escape_sequence = true;
-                  if chars::ch(lookahead) == '0' {
-                    if !chars::is_octal_digits(*self.iter) {
-                      self.current_literal_buffer_mut().push(0_u16);
-                    }
-                  } else {
-                    if self.parser_state_stack.is_in_state(ParserState::InStrictMode) {
-                      report_error!(
-                        self,
-                        "In strict mode code, octal escape is not allowed",
-                        self.current_position(),
-                        Token::Invalid
-                      );
-                    }
-                    let octal_value = self.decode_octal_escape();
-                    self.current_literal_buffer_mut().push(octal_value);
+                } else {
+                  report_error!(
+                    self,
+                    "Invalid escape sequence",
+                    &pos_range!(escape_sequence_start_pos, self.current_position()),
+                    Token::Invalid
+                  );
+                }
+              } else if chars::is_octal_digits(lookahead) {
+                self.advance();
+                has_escape_sequence = true;
+                if chars::ch(lookahead) == '0' {
+                  if !chars::is_octal_digits(*self.iter) {
+                    self.current_literal_buffer_mut().push(0_u16);
                   }
                 } else {
-                  is_escaped = true;
-                  self.advance();
+                  if self.parser_state_stack.is_in_state(ParserState::InStrictMode) {
+                    report_error!(
+                      self,
+                      "In strict mode code, octal escape is not allowed",
+                      self.current_position(),
+                      Token::Invalid
+                    );
+                  }
+                  let octal_value = self.decode_octal_escape();
+                  self.current_literal_buffer_mut().push(octal_value);
                 }
               } else {
-                let start = self.record_position();
+                is_escaped = true;
                 self.advance();
-                report_error!(self, "Unterminated string literal", &pos_range!(start, start), Token::Invalid);
               }
             } else {
-              self.advance_and_push_buffer();
-              is_escaped = false;
+              let start = self.record_position();
+              self.advance();
+              report_error!(self, "Unterminated string literal", &pos_range!(start, start), Token::Invalid);
             }
+          } else {
+            self.advance_and_push_buffer();
+            is_escaped = false;
           }
-          INVALID_CHAR => {
-            report_error!(self, "Unexpected token found", self.source_position(), Token::Invalid);
-          }
-          _ => {
-            if chars::is_line_terminator(*self.iter) {
-              if !is_escaped {
-                let start = self.record_position();
-                self.advance();
-                report_error!(self, "Unterminated string literal", &pos_range!(start, start), Token::Invalid);
-              }
-              self.collect_line_break();
-              is_escaped = false;
-              continue;
-            }
-            if value == start {
-              if !is_escaped {
-                self.advance();
-                if has_escape_sequence {
-                  self.contextual_keywords[self.mode as usize] = Token::StringLiteralES;
-                }
-                return Token::StringLiteral;
-              }
-            }
-            if is_escaped {
-              is_escaped = false;
-            }
-            self.current_literal_buffer_mut().push(value);
-            self.advance();
-          }
-        },
+        }
+        INVALID => {
+          report_error!(self, "Unexpected token found", self.source_position(), Token::Invalid);
+        }
         _ => {
-          self.advance_and_push_surrogate_pair_safe();
+          if chars::is_line_terminator(*self.iter) {
+            if !is_escaped && !chars::is_paragraph_separator(*self.iter) {
+              let start = self.record_position();
+              self.advance();
+              report_error!(self, "Unterminated string literal", &pos_range!(start, start), Token::Invalid);
+            }
+            self.collect_line_break();
+            is_escaped = false;
+            continue;
+          }
+          if value == start {
+            if !is_escaped {
+              self.advance();
+              if has_escape_sequence {
+                self.contextual_keywords[self.mode as usize] = Token::StringLiteralES;
+              }
+              return Token::StringLiteral;
+            }
+          }
+          if is_escaped {
+            is_escaped = false;
+          }
+          self.current_literal_buffer_mut().push(value);
+          self.advance();
         }
       }
     }

@@ -24,6 +24,7 @@ pub struct SkipTreeBuilder {
   skip_yield_aggregator_expr: Expr,
   skip_template: Expr,
   skip_import_meta: Expr,
+  skip_property_access: Expr,
   skip_stmt: Stmt,
   skip_class_field: Stmt,
   skip_class: Ast,
@@ -54,6 +55,7 @@ impl SkipTreeBuilder {
       skip_yield_aggregator_expr: SkipExpr::new(&mut region, SkipExprType::YIELD_AGGREGATOR_EXPR).into(),
       skip_template: SkipExpr::new(&mut region, SkipExprType::TEMPLATE).into(),
       skip_import_meta: SkipExpr::new(&mut region, SkipExprType::IMPORT_META).into(),
+      skip_property_access: SkipExpr::new(&mut region, SkipExprType::PROPERTY_ACCESS_EXPR).into(),
       skip_stmt: SkipStmt::new(&mut region, SkipStmtType::STMT).into(),
       skip_exprs: SkipExpr::new(&mut region, SkipExprType::EXPRS).into(),
       skip_class_field: SkipStmt::new(&mut region, SkipStmtType::CLASS_FIELD).into(),
@@ -94,7 +96,7 @@ impl NodeOps for SkipTreeBuilder {
   fn new_binary_expr(&mut self, op: Token, lhs: Expr, rhs: Expr, pos: Option<&RuntimeSourcePosition>) -> Expr {
     if op == Token::OpAssign
       && match lhs {
-        Expr::SkipExpr(n) => n.is_identifier(),
+        Expr::SkipExpr(n) => n.is_identifier() || n.is_property_access_expr(),
         _ => false,
       }
     {
@@ -153,7 +155,7 @@ impl NodeOps for SkipTreeBuilder {
     property: Option<Expr>,
     pos: Option<&RuntimeSourcePosition>,
   ) -> Expr {
-    return self.skip_expr;
+    return self.skip_property_access;
   }
 
   fn new_structural_literal(

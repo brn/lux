@@ -92,7 +92,12 @@ pub fn is_cr_or_lf(u: u16) -> bool {
 
 #[inline(always)]
 pub fn is_line_terminator(u: u16) -> bool {
-  return is_cr(u) || is_lf(u) || u == 0x2028 || u == 0x2029;
+  return is_cr(u) || is_lf(u) || is_paragraph_separator(u);
+}
+
+#[inline(always)]
+pub fn is_paragraph_separator(u: u16) -> bool {
+  return u == 0x2028 || u == 0x2029;
 }
 
 #[inline(always)]
@@ -174,6 +179,11 @@ pub fn is_whitespace(c: u16) -> bool {
 #[inline(always)]
 pub const fn ch(u: u16) -> char {
   return u as u8 as char;
+}
+
+#[inline(always)]
+pub const fn ch_code(u: char) -> u16 {
+  return u as u16;
 }
 
 #[inline(always)]
@@ -394,13 +404,6 @@ pub fn parse_decimal<'a>(
   const DIGITS: f64 = 10.0;
   let mut iter = start.by_ref().peekable();
 
-  while let Some(peek) = iter.peek().cloned() {
-    if ch(peek) == '0' {
-      iter.next();
-    } else {
-      break;
-    }
-  }
   let mut is_floating_point = false;
   let mut floating_digits = 1;
   let mut value = 0.0_f64;
@@ -655,7 +658,7 @@ pub fn parse_numeric_value<'a>(
 
     return match kind {
       Decimal | DecimalLeadingZero => {
-        if kind == DecimalLeadingZero && digits_len > 1 && !is_allow_leading_zeroes {
+        if kind == DecimalLeadingZero && digits_len > 1 && !has_exponents_part && !is_allow_leading_zeroes {
           return Err(NumericConvertionError::LeadingZeroesNotAllowed);
         }
         if digits_len <= 9 && !has_exponents_part && !is_period_seen {

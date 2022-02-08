@@ -2609,6 +2609,7 @@ bitflags! {
     const STRUCTURAL_LITERAL = 0x8000;
     const YIELD_EXPR = 0x10000;
     const YIELD_AGGREGATOR_EXPR = 0x20000;
+    const PROPERTY_ACCESS_EXPR = 0x40000;
   }
 }
 pub struct SkipExpr(SkipExprType);
@@ -2683,6 +2684,10 @@ impl SkipExpr {
 
   pub fn is_yield(&self) -> bool {
     return self.0.intersects(SkipExprType::YIELD_EXPR | SkipExprType::YIELD_AGGREGATOR_EXPR);
+  }
+
+  pub fn is_property_access_expr(&self) -> bool {
+    return self.0.contains(SkipExprType::PROPERTY_ACCESS_EXPR);
   }
 }
 impl_expr!(
