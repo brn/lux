@@ -186,7 +186,7 @@ pub trait NodeOps {
         node.op() == Token::OpAssign
           && match node.lhs() {
             Expr::Literal(n) => n.is_identifier(),
-            Expr::PropertyAccessExpression(_) => true,
+            Expr::PropertyAccessExpression(_) | Expr::StructuralLiteral(_) => true,
             _ => false,
           }
       }

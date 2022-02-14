@@ -1363,6 +1363,7 @@ impl Scanner {
                 self.advance();
                 return Token::RegExp;
               }
+              is_escaped = false;
             }
             '[' => {
               if !is_escaped {

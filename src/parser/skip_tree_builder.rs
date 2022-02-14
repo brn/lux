@@ -96,7 +96,7 @@ impl NodeOps for SkipTreeBuilder {
   fn new_binary_expr(&mut self, op: Token, lhs: Expr, rhs: Expr, pos: Option<&RuntimeSourcePosition>) -> Expr {
     if op == Token::OpAssign
       && match lhs {
-        Expr::SkipExpr(n) => n.is_identifier() || n.is_property_access_expr(),
+        Expr::SkipExpr(n) => n.is_identifier() || n.is_property_access_expr() || n.is_structural_literal(),
         _ => false,
       }
     {

@@ -114,10 +114,10 @@ fn run_tc39_parser_test(dir: &str, should_fail: bool) {
 fn extract_test() {
   parse(
     "anonymout",
-    "[...[0]] = 0",
+    "1e100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
     ParserOptionBuilder::default().build(),
     ParserType::Script,
-    true,
+    false,
   );
 }
 

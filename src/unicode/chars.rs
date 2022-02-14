@@ -355,6 +355,7 @@ fn parse_exponents<'a>(
   let mut exponents_value: u32 = 0;
   let mut digits = 0;
   let mut last_ch: char = '0';
+  let mut is_overflowed = false;
   while let Some(next) = iter.peek().cloned() {
     last_ch = ch(next);
     if ch(next) == '-' {
@@ -364,7 +365,11 @@ fn parse_exponents<'a>(
       iter.next();
       continue;
     } else if is_decimal_digits(next) {
-      exponents_value = exponents_value * DIGITS + (to_int(next).unwrap() as u32);
+      if !is_overflowed {
+        exponents_value = exponents_value * DIGITS + (to_int(next).unwrap() as u32);
+        // If exponents_value exceeds 309, exponent_value is overflowed.
+        is_overflowed = value > 0.0 && exponents_value >= 309;
+      }
       iter.next();
     } else {
       if digits == 0 && should_stop_if_invalid_token_found {
@@ -373,6 +378,10 @@ fn parse_exponents<'a>(
       break;
     }
     digits += 1;
+  }
+
+  if is_overflowed {
+    return Ok(f64::INFINITY);
   }
 
   if digits == 0 || last_ch == '-' || last_ch == '+' {

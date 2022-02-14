@@ -871,17 +871,20 @@ impl Parser {
       && self.contextual_keyword() != Token::StringLiteralES
       && self.is_value_match_with(self.context.static_names().use_strict_str())
     {
-      if !self.current_scope.is_simple_parameter() {
-        return self.err.use_strict_after_non_simple_param(self.source_position().clone());
+      let source_position = self.source_position().clone();
+      if self.peek()? == Token::Terminate {
+        self.advance()?;
+        self.advance()?;
+      } else if !self.has_line_break_after() && !self.peek()?.one_of(&[Token::RightBrace, Token::End]) {
+        return Ok(self.empty.into());
+      } else {
+        self.advance()?;
       }
-      self.advance()?;
+      if !self.current_scope.is_simple_parameter() {
+        return self.err.use_strict_after_non_simple_param(source_position);
+      }
       scope.mark_as_strict_mode();
       self.parser_state.enter_state(ParserState::InStrictMode);
-      if self.cur() == Token::Terminate {
-        self.advance()?;
-      } else if !self.has_line_break_before() && !self.cur().one_of(&[Token::RightBrace, Token::End]) {
-        return self.err.unexpected_token_found(self.source_position().clone());
-      }
     }
     return Ok(self.empty.into());
   }
@@ -960,6 +963,15 @@ impl Parser {
       return Ok(expr);
     } else if !self.is_eol(self.cur()) {
       return parse_error!(self.region, "';' expected", self.source_position());
+    }
+
+    return Ok(expr);
+  }
+
+  fn consume_terminator<T>(&mut self, expr: T) -> ParseResult<T> {
+    if self.cur() == Token::Terminate {
+      self.advance()?;
+      return Ok(expr);
     }
 
     return Ok(expr);
@@ -1217,6 +1229,7 @@ impl Parser {
             self.expression_context.set_is_in_allowed(true);
             next_parse!(self, self.parse_assignment_expression(builder))?
           });
+
           if !builder.is_structural_literal(expr)
             && !builder.is_initializer(expr)
             && self.expression_context.assignment_target_type() == AssignmentTargetType::Invalid
@@ -2109,6 +2122,9 @@ impl Parser {
   fn parse_update_expression<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
     match self.cur() {
       Token::OpIncrement | Token::OpDecrement => {
+        if self.has_line_break_after() {
+          return parse_error!(self.region, "Unexpected token found", self.source_position());
+        }
         let op = self.cur();
         let start = self.source_position().clone();
         self.advance()?;
@@ -2136,6 +2152,9 @@ impl Parser {
         let end_expr_pos = self.prev_source_position().clone();
         let result = match self.cur() {
           Token::OpIncrement | Token::OpDecrement => {
+            if self.has_line_break_before() {
+              return Ok(n);
+            }
             let child_ctx = self.set_expression_context(parent_ctx);
             if child_ctx.assignment_target_type() == AssignmentTargetType::Invalid {
               return self.err.invalid_update_expression(pos_range!(@just expr_start, end_expr_pos));
@@ -2624,6 +2643,7 @@ impl Parser {
           self.parse_lexical_or_variable_declaration(
             builder,
             VariableDeclarationType::Var,
+            self.current_scope,
             DeclarationParseOption::CONST_INITIALIZER_REQUIRED
           )
         );
@@ -2692,6 +2712,7 @@ impl Parser {
               } else {
                 VariableDeclarationType::Const
               },
+              self.current_scope,
               option
             )
           );
@@ -2785,6 +2806,7 @@ impl Parser {
     &mut self,
     mut builder: Exotic<Builder>,
     var_type: VariableDeclarationType,
+    mut scope: Exotic<Scope>,
     option: DeclarationParseOption,
   ) -> ParseResult<Stmt> {
     let start_pos = self.source_position().clone();
@@ -2833,7 +2855,7 @@ impl Parser {
         return Err(e);
       }
 
-      if let Some((ref cur, ref first)) = self.current_scope.declare_vars(
+      if let Some((ref cur, ref first)) = scope.declare_vars(
         if var_type == VariableDeclarationType::Var {
           if option.contains(DeclarationParseOption::EXPORT_RHS) {
             VariableType::ExportLegacyVar
@@ -3087,7 +3109,12 @@ impl Parser {
     let lhs: Ast = if self.cur() == Token::Var {
       next_parse!(
         self,
-        self.parse_lexical_or_variable_declaration(builder, VariableDeclarationType::Var, DeclarationParseOption::IGNORE_TERMINATION)
+        self.parse_lexical_or_variable_declaration(
+          builder,
+          VariableDeclarationType::Var,
+          scope.parent_scope().unwrap(),
+          DeclarationParseOption::IGNORE_TERMINATION
+        )
       )?
       .into()
     } else if self.contextual_keyword() == Token::Let
@@ -3096,13 +3123,23 @@ impl Parser {
     {
       next_parse!(
         self,
-        self.parse_lexical_or_variable_declaration(builder, VariableDeclarationType::Let, DeclarationParseOption::IGNORE_TERMINATION)
+        self.parse_lexical_or_variable_declaration(
+          builder,
+          VariableDeclarationType::Let,
+          self.current_scope,
+          DeclarationParseOption::IGNORE_TERMINATION
+        )
       )?
       .into()
     } else if self.cur() == Token::Const {
       next_parse!(
         self,
-        self.parse_lexical_or_variable_declaration(builder, VariableDeclarationType::Const, DeclarationParseOption::IGNORE_TERMINATION)
+        self.parse_lexical_or_variable_declaration(
+          builder,
+          VariableDeclarationType::Const,
+          self.current_scope,
+          DeclarationParseOption::IGNORE_TERMINATION
+        )
       )?
       .into()
     } else if self.cur() == Token::Terminate {
@@ -3406,14 +3443,17 @@ impl Parser {
     expect!(self, self.cur(), Token::RightParen);
 
     self.set_statement_block(prev_block);
-    return Ok(build!(
-      @pos,
-      builder,
-      do_while_stmt,
-      start_pos,
-      condition,
-      stmt
-    ));
+    return next_parse!(
+      self,
+      self.consume_terminator(build!(
+        @pos,
+        builder,
+        do_while_stmt,
+        start_pos,
+        condition,
+        stmt
+      ))
+    );
   }
 
   fn parse_switch_statement<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Stmt> {
@@ -4045,7 +4085,7 @@ impl Parser {
     if self.contextual_keyword() == Token::Static
       && !self
         .peek_with_regexp()?
-        .one_of(&[Token::LeftParen, Token::OpAssign, Token::Terminate])
+        .one_of(&[Token::LeftParen, Token::OpAssign, Token::Terminate, Token::RightBrace])
     {
       if is_class_field {
         class_field_flag |= ClassFieldFlag::STATIC;
@@ -4055,7 +4095,10 @@ impl Parser {
       }
     }
 
-    if !self.peek()?.one_of(&[Token::LeftParen, Token::OpAssign, Token::Terminate]) {
+    if !self
+      .peek()?
+      .one_of(&[Token::LeftParen, Token::OpAssign, Token::Terminate, Token::RightBrace])
+    {
       if self.contextual_keyword() == Token::Get {
         attr |= FunctionAttribute::GETTER;
         self.advance()?;
@@ -4242,8 +4285,11 @@ impl Parser {
   ) -> ParseResult<Expr> {
     let mut params = Vec::new();
     match self.cur() {
-      Token::Identifier | Token::LeftBrace | Token::LeftBracket => {
-        if self.cur() == Token::Identifier {
+      Token::Identifier | Token::Yield | Token::Await | Token::LeftBrace | Token::LeftBracket => {
+        if self.cur() == Token::Yield && self.current_scope.is_strict_mode() {
+          return parse_error!(self.region, "Yield not allowed here", self.source_position());
+        }
+        if self.cur().one_of(&[Token::Identifier, Token::Yield, Token::Await]) {
           if self.expression_context.to_arrow_ctx_mut().is_ok() {
             let value = self.value().clone();
             let pos = self.source_position().clone();
@@ -4720,7 +4766,8 @@ impl Parser {
             self.parse_lexical_or_variable_declaration(
               builder,
               VariableDeclarationType::Var,
-              DeclarationParseOption::from_named_export_stmt()
+              self.current_scope,
+              DeclarationParseOption::from_named_export_stmt(),
             )
           )?
           .into(),
