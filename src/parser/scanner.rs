@@ -2,6 +2,7 @@ use super::super::structs::FixedU16CodePointArray;
 use super::super::unicode::chars;
 use super::error_reporter::*;
 use super::parser_state::{ParserState, ParserStateStack};
+use super::scope_tree::ScopeTree;
 use super::source::Source;
 use super::source_position::SourcePosition;
 use super::token::Token;
@@ -217,6 +218,7 @@ pub struct Scanner {
   skipped: u64,
   line_break_found_in_comment: bool,
   last_cursor: isize,
+  scope: ScopeTree,
 }
 
 impl ReportSyntaxError for Scanner {
@@ -235,6 +237,7 @@ impl Scanner {
     source: Source,
     parser_state_stack: Exotic<ParserStateStack>,
     error_reporter: Exotic<ErrorReporter>,
+    scope: ScopeTree,
   ) -> Scanner {
     let mut scanner = Scanner {
       token: Token::Invalid,
@@ -254,6 +257,7 @@ impl Scanner {
       skipped: 0,
       line_break_found_in_comment: false,
       last_cursor: 0,
+      scope,
     };
     scanner.advance();
     scanner.current_position_mut().set_end_col(0_u32);
@@ -438,7 +442,9 @@ impl Scanner {
       let mut ret: u32 = 0;
       if unicode_hex_start == '{' {
         self.advance();
+        let mut digit_count = 0;
         while *self.iter != INVALID && !self.iter.is_char('}') {
+          digit_count += 1;
           match self.iter.as_char_safe() {
             Ok(ch) => {
               if let Ok(hex) = chars::to_hex(*self.iter) {
@@ -451,7 +457,7 @@ impl Scanner {
             _ => return Err(()),
           }
         }
-        if !self.iter.is_char('}') {
+        if !self.iter.is_char('}') || digit_count == 0 {
           return Err(());
         } else {
           self.advance();
@@ -467,7 +473,7 @@ impl Scanner {
         }
       }
 
-      if ret == 0 {
+      if ret > 0x10FFFF {
         return Err(());
       }
 
@@ -478,9 +484,6 @@ impl Scanner {
 
   fn decode_ascii_escape(&mut self) -> Result<u16, ()> {
     let u = self.decode_hex_escape(2)?;
-    if u > 127 {
-      return Err(());
-    }
     return Ok(u as u16);
   }
 
@@ -718,7 +721,9 @@ impl Scanner {
           }
           if self.iter.is_char('*') {
             self.advance();
-            self.skip_multiline_comment();
+            if !self.skip_multiline_comment() {
+              return Token::Invalid;
+            }
             if self.mode == Mode::Current {
               self.token = Token::Comment;
               return self.next();
@@ -1030,7 +1035,7 @@ impl Scanner {
                     self.current_literal_buffer_mut().push(0_u16);
                   }
                 } else {
-                  if self.parser_state_stack.is_in_state(ParserState::InStrictMode) {
+                  if self.scope.current().is_strict_mode() {
                     report_error!(
                       self,
                       "In strict mode code, octal escape is not allowed",
@@ -1144,7 +1149,7 @@ impl Scanner {
             );
           }
         } else {
-          self.advance_and_push_buffer();
+          report_error!(self, "Unexpected token found", self.source_position(), Token::Invalid);
         }
       } else {
         if let Ok((hi, low)) = value.to_u16() {
@@ -1307,7 +1312,7 @@ impl Scanner {
       &mut clone,
       is_period_seen,
       true,
-      !self.parser_state_stack.is_in_state(ParserState::InStrictMode),
+      !self.scope.current().is_strict_mode(),
     );
     if pos != self.iter.pos() {
       self.iter.back();
@@ -1629,17 +1634,17 @@ impl Scanner {
     }
   }
 
-  fn skip_multiline_comment(&mut self) {
-    loop {
+  fn skip_multiline_comment(&mut self) -> bool {
+    while self.has_more() {
       if chars::ch(*self.iter) == '*' {
         if let Some(next) = self.iter.peek() {
           if chars::ch(next) == '/' {
             self.advance();
             self.advance();
-            return;
+            return true;
           }
         } else {
-          return;
+          return true;
         }
       }
       if self.skip_line_break() {
@@ -1654,6 +1659,13 @@ impl Scanner {
         self.advance();
       }
     }
+    report_error!(
+      noreturn
+        self,
+      "Unexpected end of input",
+      self.current_position()
+    );
+    return false;
   }
 
   #[inline(always)]

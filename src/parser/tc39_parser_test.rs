@@ -55,13 +55,14 @@ fn get_test_files<F: Fn(&fs::DirEntry)>(dir: &str, cb: F) -> io::Result<()> {
   Ok(())
 }
 
-const SHOULD_RUN_UNDER_STRICT_MODE_CASES: [&'static str; 6] = [
+const SHOULD_RUN_UNDER_STRICT_MODE_CASES: [&'static str; 7] = [
   "early/1aff49273f3e3a98.js",
   "early/12a74c60f52a60de.js",
   "early/be7329119eaa3d47.js",
   "early/e262ea7682c36f92.js",
   "early/ec31fa5e521c5df4.js",
   "early/a610a46980d6cc37.js",
+  "fail/3990bb94b19b1071.module.js",
 ];
 const EXCLUDES_CASES: [&'static str; 2] = ["early/0f5f47108da5c34e.js", "early/4de83a7417cd30dd.js"];
 
@@ -85,6 +86,7 @@ fn run_tc39_parser_test(dir: &str, should_fail: bool) {
       }
     }
     print!("test parser::tc39_parer_tests::{}", path_str);
+
     parse(
       path_str,
       &content,
@@ -113,11 +115,11 @@ fn run_tc39_parser_test(dir: &str, should_fail: bool) {
 #[test]
 fn extract_test() {
   parse(
-    "anonymout",
-    "1e100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000",
+    "anonymous",
+    r#"var x = /[P QR]/\\u0067"#,
     ParserOptionBuilder::default().build(),
     ParserType::Script,
-    false,
+    true,
   );
 }
 
@@ -129,4 +131,9 @@ fn tc39_parser_test_early() {
 #[test]
 fn tc39_parser_test_pass() {
   run_tc39_parser_test("pass", false);
+}
+
+#[test]
+fn tc39_parser_test_fail() {
+  run_tc39_parser_test("fail", true);
 }

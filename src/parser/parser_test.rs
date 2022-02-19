@@ -3241,11 +3241,12 @@ mod parser_test {
 
   #[test]
   fn parser_parse_empty_class_expression() {
-    single_expression_test(
+    single_expression_test_with_scope(
       |(col, line, _, _)| {
         return class(pos!(col + 1, line), Some(ident!("A", pos!(col + 7, line))), None, &[], &[]);
       },
       "(class A {})",
+      1,
     )
   }
 
@@ -3484,7 +3485,7 @@ mod parser_test {
   #[test]
   fn parser_parse_class_expression() {
     single_expression_test_with_options(
-      |(col, line, is_strict, _)| {
+      |(col, line, _, _)| {
         return class(
           pos!(col + 1, line),
           Some(ident!("A", pos!(col + 7, line))),
@@ -3499,29 +3500,29 @@ mod parser_test {
             class_field_with_value(ClassFieldFlag::PRIVATE | ClassFieldFlag::STATIC, "s_priv_field_v", "1", 2, 14),
           ],
           &[
-            normal_method(ClassFieldFlag::PUBLIC, col, is_strict, "fn", 2, 1, 19, 19),
-            generator_method(ClassFieldFlag::PUBLIC, col, is_strict, "gen", 2, 2, 31, 31),
-            async_method(ClassFieldFlag::PUBLIC, col, is_strict, "asy", 2, 3, 48, 48),
-            async_generator_method(ClassFieldFlag::PUBLIC, col, is_strict, "asyg", 2, 4, 67, 67),
-            normal_method(ClassFieldFlag::PRIVATE, col, is_strict, "priv_fn", 2, 8, 122, 122),
-            generator_method(ClassFieldFlag::PRIVATE, col, is_strict, "priv_gen", 2, 9, 140, 140),
-            async_generator_method(ClassFieldFlag::PRIVATE, col, is_strict, "priv_agen", 2, 10, 165, 165),
-            normal_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_fn", 2, 15, 276, 276),
-            generator_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_gen", 2, 16, 297, 297),
-            async_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_asy", 2, 17, 323, 323),
-            async_generator_method(cfa!(PUBLIC | STATIC), col, is_strict, "s_asyg", 2, 18, 351, 351),
-            normal_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_fn", 2, 19, 373, 373),
-            generator_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_gen", 2, 20, 397, 397),
-            async_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_asy", 2, 21, 426, 426),
-            async_generator_method(cfa!(PRIVATE | STATIC), col, is_strict, "s_p_asyg", 2, 22, 457, 457),
-            getset_method("get", cfa!(PUBLIC), col, is_strict, "get_fn", 2, 23, 475, 475),
-            getset_method("set", cfa!(PUBLIC), col, is_strict, "set_fn", 2, 24, 494, 494),
-            getset_method("get", cfa!(PRIVATE), col, is_strict, "p_get_fn", 2, 25, 515, 515),
-            getset_method("set", cfa!(PRIVATE), col, is_strict, "p_set_fn", 2, 26, 537, 537),
-            getset_method("get", cfa!(PUBLIC | STATIC), col, is_strict, "s_get_fn", 2, 27, 564, 564),
-            getset_method("set", cfa!(PUBLIC | STATIC), col, is_strict, "s_set_fn", 2, 28, 592, 592),
-            getset_method("get", cfa!(PRIVATE | STATIC), col, is_strict, "s_p_get_fn", 2, 29, 622, 622),
-            getset_method("set", cfa!(PRIVATE | STATIC), col, is_strict, "s_p_set_fn", 2, 30, 653, 653),
+            normal_method(ClassFieldFlag::PUBLIC, col, true, "fn", 2, 1, 19, 19),
+            generator_method(ClassFieldFlag::PUBLIC, col, true, "gen", 2, 2, 31, 31),
+            async_method(ClassFieldFlag::PUBLIC, col, true, "asy", 2, 3, 48, 48),
+            async_generator_method(ClassFieldFlag::PUBLIC, col, true, "asyg", 2, 4, 67, 67),
+            normal_method(ClassFieldFlag::PRIVATE, col, true, "priv_fn", 2, 8, 122, 122),
+            generator_method(ClassFieldFlag::PRIVATE, col, true, "priv_gen", 2, 9, 140, 140),
+            async_generator_method(ClassFieldFlag::PRIVATE, col, true, "priv_agen", 2, 10, 165, 165),
+            normal_method(cfa!(PUBLIC | STATIC), col, true, "s_fn", 2, 15, 276, 276),
+            generator_method(cfa!(PUBLIC | STATIC), col, true, "s_gen", 2, 16, 297, 297),
+            async_method(cfa!(PUBLIC | STATIC), col, true, "s_asy", 2, 17, 323, 323),
+            async_generator_method(cfa!(PUBLIC | STATIC), col, true, "s_asyg", 2, 18, 351, 351),
+            normal_method(cfa!(PRIVATE | STATIC), col, true, "s_p_fn", 2, 19, 373, 373),
+            generator_method(cfa!(PRIVATE | STATIC), col, true, "s_p_gen", 2, 20, 397, 397),
+            async_method(cfa!(PRIVATE | STATIC), col, true, "s_p_asy", 2, 21, 426, 426),
+            async_generator_method(cfa!(PRIVATE | STATIC), col, true, "s_p_asyg", 2, 22, 457, 457),
+            getset_method("get", cfa!(PUBLIC), col, true, "get_fn", 2, 23, 475, 475),
+            getset_method("set", cfa!(PUBLIC), col, true, "set_fn", 2, 24, 494, 494),
+            getset_method("get", cfa!(PRIVATE), col, true, "p_get_fn", 2, 25, 515, 515),
+            getset_method("set", cfa!(PRIVATE), col, true, "p_set_fn", 2, 26, 537, 537),
+            getset_method("get", cfa!(PUBLIC | STATIC), col, true, "s_get_fn", 2, 27, 564, 564),
+            getset_method("set", cfa!(PUBLIC | STATIC), col, true, "s_set_fn", 2, 28, 592, 592),
+            getset_method("get", cfa!(PRIVATE | STATIC), col, true, "s_p_get_fn", 2, 29, 622, 622),
+            getset_method("set", cfa!(PRIVATE | STATIC), col, true, "s_p_set_fn", 2, 30, 653, 653),
           ],
         );
       },
@@ -3558,7 +3559,7 @@ mod parser_test {
   static set #s_p_set_fn(a) {}
 })",
       ParserOption::default(),
-      23,
+      1,
       EnvFlag::all(),
       655,
     );
@@ -3567,7 +3568,7 @@ mod parser_test {
   #[test]
   fn parser_parse_class_expression_with_heritage() {
     single_expression_test_with_options(
-      |(col, line, is_strict, _)| {
+      |(col, line, _, _)| {
         return class(
           pos!(col + 1, line),
           Some(ident!("A", pos!(col + 7, line))),
@@ -3599,11 +3600,7 @@ mod parser_test {
                 "Function",
                 col + 32,
                 col + 32,
-                if is_strict {
-                  scope!(@opaque @strict 0, true)
-                } else {
-                  scope!(@opaque 0, true)
-                },
+                scope!(@opaque @strict 0, true),
                 ident!("fn", pos!(2, 1)),
                 exprs!(pos!(5, 1))
               )
@@ -3616,11 +3613,7 @@ mod parser_test {
                 "Generator",
                 col + 44,
                 col + 44,
-                if is_strict {
-                  scope!(@opaque @strict 0, true)
-                } else {
-                  scope!(@opaque 0, true)
-                },
+                scope!(@opaque @strict 0, true),
                 ident!("gen", pos!(3, 2)),
                 exprs!(pos!(7, 2))
               )
@@ -3633,11 +3626,7 @@ mod parser_test {
                 "Function",
                 col + 61,
                 col + 61,
-                if is_strict {
-                  scope!(@opaque @strict 0, true)
-                } else {
-                  scope!(@opaque 0, true)
-                },
+                scope!(@opaque @strict 0, true),
                 ident!("asy", pos!(8, 3)),
                 exprs!(pos!(12, 3))
               )
@@ -3650,11 +3639,7 @@ mod parser_test {
                 "Generator",
                 col + 80,
                 col + 80,
-                if is_strict {
-                  scope!(@opaque @strict 0, true)
-                } else {
-                  scope!(@opaque 0, true)
-                },
+                scope!(@opaque @strict 0, true),
                 ident!("asyg", pos!(9, 4)),
                 exprs!(pos!(14, 4))
               )
@@ -3667,11 +3652,7 @@ mod parser_test {
                 "Function",
                 col + 135,
                 col + 135,
-                if is_strict {
-                  scope!(@opaque @strict 0, true)
-                } else {
-                  scope!(@opaque 0, true)
-                },
+                scope!(@opaque @strict 0, true),
                 ident!("priv_fn", pos!(2, 8)),
                 exprs!(pos!(11, 8))
               )
@@ -3690,7 +3671,7 @@ mod parser_test {
   #priv_fn() {}
 })",
       ParserOption::default(),
-      5,
+      1,
       EnvFlag::all(),
       137,
     );
@@ -3699,13 +3680,13 @@ mod parser_test {
   #[test]
   fn parse_class_constructor_has_direct_super_with_heritage() {
     single_expression_test_with_options(
-      |(col, line, is_strict, _)| {
+      |(col, line, _, _)| {
         return class(
           pos!(col + 1, line),
           Some(ident!("K", pos!(col + 7, line))),
           Some(ident!("A", pos!(col + 17, line))),
           &[],
-          &[normal_method(cfa!(PUBLIC), col, is_strict, "constructor", col + 20, line, 35, 42)],
+          &[normal_method(cfa!(PUBLIC), col, true, "constructor", col + 20, line, 35, 42)],
         );
       },
       "(class K extends A {constructor() {super()}})",
@@ -3719,13 +3700,13 @@ mod parser_test {
   #[test]
   fn parse_class_constructor_has_direct_super_with_heritage_without_identifier() {
     single_expression_test_with_options(
-      |(col, line, is_strict, _)| {
+      |(col, line, _, _)| {
         return class(
           pos!(col + 1, line),
           None,
           Some(ident!("A", pos!(col + 15, line))),
           &[],
-          &[normal_method(cfa!(PUBLIC), col, is_strict, "constructor", col + 18, line, 33, 40)],
+          &[normal_method(cfa!(PUBLIC), col, true, "constructor", col + 18, line, 33, 40)],
         );
       },
       "(class extends A {constructor() {super()}})",

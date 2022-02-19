@@ -23,7 +23,7 @@ extern crate termion;
 extern crate byteorder;
 
 #[macro_use]
-mod debug;
+mod debug_tools;
 
 pub mod def;
 

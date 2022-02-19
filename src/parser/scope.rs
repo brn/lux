@@ -21,6 +21,7 @@ bitflags! {
     const ALLOW_SUPER_PROPERTY = 0x400;
     const ALLOW_NEW_TARGET = 0x800;
     const DEFAULT_EXPORTED = 0x1000;
+    const CLASS = 0x2000;
   }
 }
 
@@ -149,12 +150,30 @@ impl Scope {
     return self.scope_flag.contains(ScopeFlag::ASYNC_CONTEXT);
   }
 
-  pub fn is_generator_context(&self) -> bool {
+  pub fn is_generator_context_origin(&self) -> bool {
     return self.scope_flag.contains(ScopeFlag::GENERATOR_CONTEXT);
   }
 
+  pub fn is_generator_context(&self) -> bool {
+    return self.is_generator_context_origin()
+      || if let Some(p) = self.parent_scope {
+        p.is_generator_context()
+      } else {
+        false
+      };
+  }
+
+  pub fn is_strict_mode_origin(&self) -> bool {
+    return self.scope_flag.intersects(ScopeFlag::STRICT_MODE | ScopeFlag::CLASS);
+  }
+
   pub fn is_strict_mode(&self) -> bool {
-    return self.scope_flag.contains(ScopeFlag::STRICT_MODE);
+    return self.is_strict_mode_origin()
+      || if let Some(p) = self.parent_scope {
+        p.is_strict_mode()
+      } else {
+        false
+      };
   }
 
   pub fn is_opaque(&self) -> bool {
@@ -181,6 +200,10 @@ impl Scope {
     return self.scope_flag.contains(ScopeFlag::ALLOW_NEW_TARGET);
   }
 
+  pub fn is_class_scope(&self) -> bool {
+    return self.scope_flag.contains(ScopeFlag::CLASS);
+  }
+
   pub fn add_child_scope(&mut self, mut scope: Exotic<Scope>) {
     if self.is_strict_mode() {
       scope.mark_as_strict_mode();
@@ -193,7 +216,8 @@ impl Scope {
   }
 
   pub fn get_unfilled_will_be_exported_var(&self) -> Option<SourcePosition> {
-    for (_, (pos, var_type)) in self.var_map.iter() {
+    let mut scope = self.get_declaratable_scope();
+    for (_, (pos, var_type)) in scope.var_map.iter() {
       if *var_type == VariableType::WillExportVar {
         return Some(pos.clone());
       }
@@ -206,8 +230,9 @@ impl Scope {
     var_type: VariableType,
     vars: &Vec<(Vec<u16>, SourcePosition)>,
   ) -> Option<(SourcePosition, SourcePosition)> {
+    let mut scope = self.get_declaratable_scope();
     for var in vars.iter() {
-      if let Some(ref dup_info) = self.declare_var(var_type, var.clone()) {
+      if let Some(ref dup_info) = scope.declare_var(var_type, var.clone()) {
         return Some(dup_info.clone());
       }
     }
@@ -215,6 +240,11 @@ impl Scope {
   }
 
   pub fn declare_var(&mut self, var_type: VariableType, var: (Vec<u16>, SourcePosition)) -> Option<(SourcePosition, SourcePosition)> {
+    let mut scope = self.get_declaratable_scope();
+    return scope.declare_var_internal(var_type, var);
+  }
+
+  fn declare_var_internal(&mut self, var_type: VariableType, var: (Vec<u16>, SourcePosition)) -> Option<(SourcePosition, SourcePosition)> {
     #[cfg(debug_assertions)]
     {
       if var_type == VariableType::ExportLegacyVar {
@@ -222,7 +252,7 @@ impl Scope {
       }
     }
 
-    if let Some((ref pos, v_type)) = self.get_already_declared_var_position(&var.0, var_type) {
+    if let Some((ref pos, v_type)) = self.get_already_declared_var_position_internal(&var.0, var_type) {
       if var_type == VariableType::WillExportVar {
         if *v_type == VariableType::ExportLexical || *v_type == VariableType::WillExportVar || *v_type == VariableType::ExportRenamed {
           return Some((var.1.clone(), pos.clone()));
@@ -258,7 +288,16 @@ impl Scope {
     return None;
   }
 
-  pub fn get_already_declared_var_position(&self, var: &Vec<u16>, variable_type: VariableType) -> Option<&(SourcePosition, VariableType)> {
+  pub fn get_already_declared_var_position(&self, var: &Vec<u16>, variable_type: VariableType) -> Option<(SourcePosition, VariableType)> {
+    let scope = self.get_declaratable_scope();
+    return scope.get_already_declared_var_position_internal(var, variable_type).cloned();
+  }
+
+  fn get_already_declared_var_position_internal(
+    &self,
+    var: &Vec<u16>,
+    variable_type: VariableType,
+  ) -> Option<&(SourcePosition, VariableType)> {
     if variable_type == VariableType::WillExportVar {
       if let Some(ref val) = self.will_export_map.get(var) {
         return Some(val);
@@ -349,14 +388,25 @@ impl Scope {
   }
 
   pub fn get_nearest_non_lexical_scope(&self) -> Exotic<Scope> {
-    if !self.is_lexical() {
+    let mut scope = self.get_declaratable_scope();
+    if !scope.is_lexical() {
       return Exotic::from_self(self);
     }
-    let mut parent = self.parent_scope;
+    let mut parent = scope.parent_scope;
     while parent.is_some() && parent.unwrap().is_lexical() {
       parent = parent.unwrap().parent_scope;
     }
     return parent.unwrap();
+  }
+
+  fn get_declaratable_scope(&self) -> Exotic<Scope> {
+    let mut scope = Exotic::from_self(self);
+    if self.is_class_scope() {
+      while !scope.is_root_scope() && scope.is_class_scope() {
+        scope = scope.parent_scope().unwrap();
+      }
+    }
+    return scope;
   }
 }
 

@@ -12,6 +12,7 @@ mod scanner;
 #[cfg(test)]
 mod scanner_test;
 mod scope;
+mod scope_tree;
 mod source;
 mod source_position;
 #[cfg(test)]

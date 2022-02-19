@@ -3,6 +3,8 @@ mod scanner_test {
   use super::super::error_reporter::{ErrorReporter, ReportSyntaxError};
   use super::super::parser_state::{ParserState, ParserStateStack};
   use super::super::scanner::*;
+  use super::super::scope::*;
+  use super::super::scope_tree::ScopeTree;
   use super::super::source::*;
   use super::super::source_position::SourcePosition;
   use super::super::token::*;
@@ -23,8 +25,16 @@ mod scanner_test {
       ParserStateStack::new()
     });
     let source = Source::new(context, "anonymouse", &source);
+    let region = Region::new();
     let error_reporter = Exotic::from(Box::new(ErrorReporter::new(source.clone())));
-    let mut scanner = Scanner::new(Region::new(), source.clone(), parser_state_stack.into(), error_reporter);
+    let scope = ScopeTree::new(region.clone(), ScopeFlag::ROOT_SCOPE);
+    let mut scanner = Scanner::new(
+      region.clone(),
+      source.clone(),
+      parser_state_stack.into(),
+      error_reporter,
+      scope.clone(),
+    );
     return cb(scanner);
   }
 

@@ -24,7 +24,7 @@ impl<C, T: FnMut(&mut C)> Drop for _Scoped<C, T> {
 }
 
 macro_rules! scoped {
-  ($self:tt, $fn:expr) => {{
+  ($self:expr, $fn:expr) => {{
     let __scoped_var__ = _Scoped::new($self, $fn);
     __scoped_var__
   }};
