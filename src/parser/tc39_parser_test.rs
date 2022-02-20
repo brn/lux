@@ -5,11 +5,11 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 
-fn parse(filename: &str, content: &str, parser_option: ParserOption, parser_type: ParserType, should_fail: bool) {
+fn parse(filename: &str, content: &str, parser_option: ParserOption, should_fail: bool) {
   let context = LuxContext::new();
   let source = Source::new(context, filename, content);
   let mut parser = Parser::new(context, source.clone(), parser_option.clone());
-  match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parser.parse(parser_type))) {
+  match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parser.parse())) {
     Ok(r) => match r {
       Ok(ast) => {
         if should_fail {
@@ -71,6 +71,7 @@ const EXCLUDES_CASES: [&'static str; 2] = ["early/0f5f47108da5c34e.js", "early/4
 fn run_tc39_parser_test(dir: &str, should_fail: bool) {
   if let Err(e) = get_test_files(dir, |entry| {
     let path = entry.path();
+    println!("{:?}", path);
     let content = fs::read_to_string(entry.path()).unwrap();
     let path_str = path.to_str().unwrap();
     let is_module = path_str.ends_with("module.js");
@@ -96,17 +97,18 @@ fn run_tc39_parser_test(dir: &str, should_fail: bool) {
         ParserOptionBuilder {
           is_strict_mode: true,
           disable_skip_parser: true,
+          is_module,
           ..Default::default()
         }
         .build()
       } else {
         ParserOptionBuilder {
           disable_skip_parser: true,
+          is_module,
           ..Default::default()
         }
         .build()
       },
-      if is_module { ParserType::Module } else { ParserType::Script },
       should_fail,
     );
   }) {
@@ -116,14 +118,7 @@ fn run_tc39_parser_test(dir: &str, should_fail: bool) {
 
 #[test]
 fn extract_test() {
-  parse(
-    "anonymous",
-    r#"/a\
-/"#,
-    ParserOptionBuilder::default().build(),
-    ParserType::Script,
-    true,
-  );
+  parse("anonymous", r#"while (a-->1){}"#, ParserOptionBuilder::default().build(), false);
 }
 
 #[test]

@@ -332,6 +332,9 @@ pub struct ParserOption {
 
   #[property(get(type = "copy"), set(disable))]
   is_strict_mode: bool,
+
+  #[property(get(type = "copy"), set(disable))]
+  is_module: bool,
 }
 impl ParserOption {
   pub fn with_disable_skip_parser(mut self) -> Self {
@@ -353,6 +356,11 @@ impl ParserOption {
     self.is_root_new_target_allowed = true;
     return self;
   }
+
+  pub fn with_module(mut self) -> Self {
+    self.is_module = true;
+    return self;
+  }
 }
 impl Default for ParserOption {
   fn default() -> Self {
@@ -363,6 +371,7 @@ impl Default for ParserOption {
       is_root_new_target_allowed: false,
       is_root_super_allowed: false,
       is_strict_mode: false,
+      is_module: false,
     }
   }
 }
@@ -374,6 +383,7 @@ pub struct ParserOptionBuilder {
   pub is_root_super_allowed: bool,
   pub is_root_new_target_allowed: bool,
   pub is_strict_mode: bool,
+  pub is_module: bool,
 }
 impl Default for ParserOptionBuilder {
   fn default() -> Self {
@@ -383,6 +393,7 @@ impl Default for ParserOptionBuilder {
       is_root_new_target_allowed: false,
       is_root_super_allowed: false,
       is_strict_mode: false,
+      is_module: false,
       allow_undefined_named_module: false,
     }
   }
@@ -395,6 +406,7 @@ impl ParserOptionBuilder {
       is_root_new_target_allowed: self.is_root_new_target_allowed,
       is_root_super_allowed: self.is_root_super_allowed,
       is_strict_mode: self.is_strict_mode,
+      is_module: self.is_module,
       allow_undefined_named_module: self.allow_undefined_named_module,
     }
   }
@@ -407,7 +419,6 @@ pub enum ParserType {
 }
 pub struct Parser {
   context: LuxContext,
-  parser_type: ParserType,
   parser_state: Exotic<ParserStateStack>,
   scanner: Exotic<Scanner>,
   region: Region,
@@ -526,11 +537,15 @@ impl Parser {
           ScopeFlag::ALLOW_NEW_TARGET
         } else {
           ScopeFlag::NONE
+        }
+        | if parser_option.is_module() {
+          ScopeFlag::MODULE | ScopeFlag::STRICT_MODE
+        } else {
+          ScopeFlag::NONE
         },
     );
-    let mut parser = Parser {
+    return Parser {
       context: LuxContext::from_allocation_only_context(context),
-      parser_type: ParserType::Script,
       parser_state,
       scanner: region.alloc(Scanner::new(
         region.clone(),
@@ -554,7 +569,6 @@ impl Parser {
       parser_option,
       statement_block: StatementBlock::new(),
     };
-    return parser;
   }
 
   pub fn has_error(&self) -> bool {
@@ -569,12 +583,8 @@ impl Parser {
     return self.error_reporter.last_error();
   }
 
-  pub fn parse(&mut self, parser_type: ParserType) -> ParseResult<Ast> {
+  pub fn parse(&mut self) -> ParseResult<Ast> {
     self.scanner.next();
-    self.parser_type = parser_type;
-    if self.parser_type == ParserType::Module {
-      self.scope.root().mark_as_strict_mode();
-    }
     self.parse_program();
     return self.result.clone();
   }
@@ -907,7 +917,7 @@ impl Parser {
       return;
     }
 
-    self.result = if self.parser_type == ParserType::Script {
+    self.result = if !self.scope.root().is_module() {
       self.parse_script()
     } else {
       self.parse_module()
@@ -1020,7 +1030,7 @@ impl Parser {
     }
     self.expression_context.set_assignment_target_type(AssignmentTargetType::Simple);
 
-    if (self.scope.current().is_root_scope() && self.parser_type == ParserType::Module) && self.cur() == Token::Await {
+    if (self.scope.current().is_root_scope() && self.scope.root().is_module()) && self.cur() == Token::Await {
       return parse_error!(self.region, "await is not allowed here", self.source_position());
     }
 
@@ -1043,7 +1053,7 @@ impl Parser {
           let await_error = parse_error!(@raw, self.region, "await is not allowed here", self.source_position());
           self.expression_context.set_first_global_error(await_error);
           self.expression_context.set_first_async_context_error(await_error);
-          if (self.scope.current().is_root_scope() && self.parser_type == ParserType::Module) || self.scope.current().is_async_context() {
+          if (self.scope.current().is_root_scope() && self.scope.root().is_module()) || self.scope.current().is_async_context() {
             return Err(await_error);
           }
         }
@@ -1493,7 +1503,7 @@ impl Parser {
           Parser::utf8_to_utf16(self.cur().symbol())
         };
 
-        if self.cur() == Token::Yield && self.scope.current().is_generator_context_origin() {
+        if self.cur() == Token::Yield && self.scope.current().is_generator_context_origin() && self.peek()? != Token::Colon {
           let e = parse_error!(@raw, self.region, "Yield not allowed here", self.source_position());
           self.expression_context.set_first_generator_context_origin_error(e);
         }
@@ -1636,7 +1646,7 @@ impl Parser {
           );
           self.expression_context.set_first_strict_mode_error(e);
         }
-        if ((self.scope.current().is_root_scope() && self.parser_type == ParserType::Module)
+        if ((self.scope.current().is_root_scope() && self.scope.root().is_module())
           || self.get_identifier_parse_option().contains(IdentifierParseOption::ASYNC_CONTEXT))
           && self.cur() == Token::Await
         {
@@ -1644,17 +1654,7 @@ impl Parser {
           self.expression_context.set_first_async_context_error(e);
         }
       }
-      _ => {
-        let e = parse_error!(
-          @raw,
-          self.region,
-          "Invalid function parameter found",
-          self.source_position()
-        );
-        if let Ok(ctx) = self.expression_context.to_arrow_ctx_mut() {
-          ctx.set_first_arrow_parameter_error(e);
-        }
-      }
+      _ => {}
     };
   }
 
@@ -1793,6 +1793,9 @@ impl Parser {
       if builder.is_structural_literal(n) {
         let e = parse_error!(@raw, self.region, "Unexpected destructuring assignment target found", &expr_pos);
         self.expression_context.set_first_pattern_error(e);
+      }
+      if let Ok(ctx) = self.expression_context.to_arrow_ctx_mut() {
+        ctx.clear_first_arrow_parameter_error();
       }
     }
     return Ok(expr);
@@ -2530,7 +2533,10 @@ impl Parser {
     let expr = next_parse!(self, self.parse_conditional_expression(builder))?;
     let expr_end_pos = self.prev_source_position().clone();
 
-    if self.cur() == Token::ArrowFunctionGlyph && !self.has_line_break_before() {
+    if self.cur() == Token::ArrowFunctionGlyph {
+      if self.has_line_break_before() {
+        return parse_error!(self.region, "Unexpected token found", self.source_position());
+      }
       self.expression_context.set_assignment_target_type(AssignmentTargetType::Invalid);
       let mut attr = FunctionAttribute::NONE;
       if builder.is_new_call(expr) || builder.is_super_call(expr) {
@@ -2556,8 +2562,6 @@ impl Parser {
       );
       self.set_expression_context(ec);
       return result;
-    } else {
-      return parse_error!(self.region, "Unexpected token found", self.source_position());
     }
 
     let mut token = self.cur();
@@ -2606,6 +2610,7 @@ impl Parser {
       if let Some(e) = self.expression_context.first_value_error() {
         return Err(e);
       }
+
       if token == Token::OpAssign {
         if let Ok(arrow) = self.expression_context.to_arrow_ctx_mut() {
           arrow.propagate_arrow_error(&mut ec);
@@ -2630,11 +2635,29 @@ impl Parser {
     return Ok(lhs);
   }
 
+  fn invalidate_cover_expression(&mut self) {
+    match self.cur() {
+      Token::Identifier | Token::Yield | Token::Await | Token::LeftBrace | Token::LeftBracket | Token::Spread => {}
+      _ => {
+        let e = parse_error!(
+          @raw,
+          self.region,
+          "Invalid function parameter found",
+          self.source_position()
+        );
+        if let Ok(ctx) = self.expression_context.to_arrow_ctx_mut() {
+          ctx.set_first_arrow_parameter_error(e);
+        }
+      }
+    }
+  }
+
   fn parse_expression<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>, is_covered_grammar: bool) -> ParseResult<Expr> {
     let start_pos = self.source_position().clone();
     append_var_if!(self, self.cur(), self.value(), self.source_position());
     if is_covered_grammar {
       self.invalidate_cover_binding_name(builder);
+      self.invalidate_cover_expression();
     }
     let expr = next_parse!(self, self.parse_assignment_expression(builder))?;
     if self.cur() == Token::Comma {
@@ -2645,6 +2668,7 @@ impl Parser {
         self.advance()?;
         if is_covered_grammar {
           self.invalidate_cover_binding_name(builder);
+          self.invalidate_cover_expression();
         }
         if self.cur() == Token::Spread {
           let pos = self.source_position().clone();
@@ -2975,7 +2999,7 @@ impl Parser {
           } else {
             self.statement_block.set_first_const_initializer_error(e);
           }
-        } else if builder.is_structural_literal(lhs) {
+        } else if builder.is_structural_literal(lhs) && option.contains(DeclarationParseOption::CONST_INITIALIZER_REQUIRED) {
           return parse_error!(self.region, "Destructuring requires initializer", &lhs_pos);
         }
         None
@@ -3073,7 +3097,7 @@ impl Parser {
           }
           self.expression_context.set_first_strict_mode_error(e);
         }
-        if ((self.scope.current().is_root_scope() && self.parser_type == ParserType::Module)
+        if ((self.scope.current().is_root_scope() && self.scope.root().is_module())
           || option.contains(IdentifierParseOption::ASYNC_CONTEXT))
           && self.cur() == Token::Await
         {
@@ -4241,12 +4265,12 @@ impl Parser {
     let mut class_field_flag = ClassFieldFlag::NONE;
     let mut attr = FunctionAttribute::NONE;
 
-    if self.contextual_keyword() == Token::Static {
-      if is_class_field
-        && !self
-          .peek_with_regexp()?
-          .one_of(&[Token::LeftParen, Token::OpAssign, Token::Terminate, Token::RightBrace])
-      {
+    if self.contextual_keyword() == Token::Static
+      && !self
+        .peek_with_regexp()?
+        .one_of(&[Token::LeftParen, Token::OpAssign, Token::Terminate, Token::RightBrace])
+    {
+      if is_class_field {
         class_field_flag |= ClassFieldFlag::STATIC;
         self.advance()?;
       } else {
@@ -4729,6 +4753,9 @@ impl Parser {
         );
         builder.push_stmt(methods, field);
       } else {
+        if is_constructor {
+          return parse_error!(self.region, "constructor is not allowed in class field name", &prop_name_pos);
+        }
         let value = if self.cur() == Token::OpAssign {
           self.advance()?;
           let expr = next_parse!(self, self.parse_assignment_expression(builder))?;
@@ -4747,14 +4774,14 @@ impl Parser {
         } else {
           name
         };
-        let field = build!(
+        let field = self.parse_terminator(build!(
           @pos,
           builder,
           class_field,
           start_pos,
           class_field_attr,
           value
-        );
+        ))?;
         builder.push_stmt(fields, field);
       }
     }

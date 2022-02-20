@@ -22,6 +22,7 @@ bitflags! {
     const ALLOW_NEW_TARGET = 0x800;
     const DEFAULT_EXPORTED = 0x1000;
     const CLASS = 0x2000;
+    const MODULE = 0x4000;
   }
 }
 
@@ -174,6 +175,22 @@ impl Scope {
       } else {
         false
       };
+  }
+
+  pub fn is_module(&self) -> bool {
+    return if self.is_root_scope() {
+      self.scope_flag.contains(ScopeFlag::MODULE)
+    } else {
+      if let Some(p) = self.parent_scope {
+        p.is_module()
+      } else {
+        false
+      }
+    };
+  }
+
+  pub fn mark_as_module(&mut self) {
+    self.scope_flag |= ScopeFlag::MODULE;
   }
 
   pub fn is_opaque(&self) -> bool {

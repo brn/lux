@@ -10,7 +10,6 @@ mod parser_test {
   use crate::context::*;
   use crate::utility::*;
   use paste::paste;
-  use std::rc::Rc;
 
   const STATIC_STR_LEN: u64 = "static ".len() as u64;
 
@@ -570,7 +569,6 @@ mod parser_test {
     code: &str,
     expectations: &'a Expectations,
     parser_option: ParserOption,
-    parser_type: ParserType,
     should_skip_node_comparison: bool,
   ) {
     let context = LuxContext::new();
@@ -580,7 +578,7 @@ mod parser_test {
         let str = format!("{}{}{};PARSER_SENTINEL", env.0, code, env.1);
         let source = Source::new(context, "anonymouse", &str);
         let mut parser = Parser::new(context, source.clone(), parser_option.clone());
-        match parser.parse(parser_type) {
+        match parser.parse() {
           Ok(ast) => {
             if !should_skip_node_comparison {
               let tree = ast.to_string_tree();
@@ -603,19 +601,12 @@ mod parser_test {
       }
     }
     if !should_skip_node_comparison {
-      parse_test(
-        env_list,
-        code,
-        expectations,
-        parser_option.clone().with_skip_parser(),
-        parser_type,
-        true,
-      );
+      parse_test(env_list, code, expectations, parser_option.clone().with_skip_parser(), true);
     }
   }
 
   fn syntax_error_test<'a>(env_list: &EnvList, code: &str, source_positions: &[&SourcePosition], show_error: bool) {
-    syntax_error_test_with_parser_type(env_list, code, source_positions, show_error, ParserType::Script);
+    syntax_error_test_with_parser_type(env_list, code, source_positions, show_error, false);
   }
 
   fn syntax_error_test_with_parser_type<'a>(
@@ -623,12 +614,26 @@ mod parser_test {
     code: &str,
     source_positions: &[&SourcePosition],
     show_error: bool,
-    parser_type: ParserType,
+    is_module: bool,
   ) {
     let parser_options = [
-      ParserOption::default(),
-      ParserOption::default().with_disable_skip_parser(),
-      ParserOption::default().with_skip_parser(),
+      ParserOptionBuilder {
+        is_module,
+        ..Default::default()
+      }
+      .build(),
+      ParserOptionBuilder {
+        is_module,
+        disable_skip_parser: true,
+        ..Default::default()
+      }
+      .build(),
+      ParserOptionBuilder {
+        is_module,
+        should_parse_with_skip_parser: true,
+        ..Default::default()
+      }
+      .build(),
     ];
     let context = LuxContext::new();
     for opt in (&parser_options).iter() {
@@ -638,7 +643,7 @@ mod parser_test {
           let str = format!("{}{}{};PARSER_SENTINEL", env.0, code, env.1);
           let source = Source::new(context, "anonymouse", &str);
           let mut parser = Parser::new(context, source.clone(), opt.clone());
-          let ast = parser.parse(parser_type);
+          let ast = parser.parse();
           let m = format!("Code {} not generate error", code);
           if !ast.is_err() {
             parser.print_stack_trace();
@@ -727,16 +732,7 @@ mod parser_test {
   }
 
   fn single_expression_test<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str) {
-    let ast_b = parser_ast_test_with_options(
-      ast_builder,
-      value,
-      ParserOption::default(),
-      0,
-      EnvFlag::all(),
-      0,
-      ParserType::Script,
-      false,
-    );
+    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::default(), 0, EnvFlag::all(), 0, false);
     parser_ast_test_with_options(
       ast_b,
       value,
@@ -744,22 +740,12 @@ mod parser_test {
       0,
       EnvFlag::all(),
       0,
-      ParserType::Script,
       false,
     );
   }
 
   fn single_expression_test_with_scope<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str, scope_count: u32) {
-    let ast_b = parser_ast_test_with_options(
-      ast_builder,
-      value,
-      ParserOption::default(),
-      scope_count,
-      EnvFlag::all(),
-      0,
-      ParserType::Script,
-      false,
-    );
+    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::default(), scope_count, EnvFlag::all(), 0, false);
     parser_ast_test_with_options(
       ast_b,
       value,
@@ -767,7 +753,6 @@ mod parser_test {
       scope_count,
       EnvFlag::all(),
       0,
-      ParserType::Script,
       false,
     );
   }
@@ -787,7 +772,6 @@ mod parser_test {
       scope_count,
       env_flag,
       before_line_break_count,
-      ParserType::Script,
       false,
     );
     parser_ast_test_with_options(
@@ -797,22 +781,12 @@ mod parser_test {
       scope_count,
       env_flag,
       before_line_break_count,
-      ParserType::Script,
       false,
     );
   }
 
   fn stmt_test<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str) {
-    let ast_b = parser_ast_test_with_options(
-      ast_builder,
-      value,
-      ParserOption::default(),
-      0,
-      EnvFlag::all(),
-      0,
-      ParserType::Script,
-      true,
-    );
+    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::default(), 0, EnvFlag::all(), 0, true);
     parser_ast_test_with_options(
       ast_b,
       value,
@@ -820,7 +794,6 @@ mod parser_test {
       0,
       EnvFlag::all(),
       0,
-      ParserType::Script,
       true,
     );
   }
@@ -835,30 +808,20 @@ mod parser_test {
     env_flag: EnvFlag,
     parser_option: ParserOption,
   ) {
-    let ast_b = parser_ast_test_with_options(ast_builder, value, parser_option.clone(), 0, env_flag, 0, ParserType::Module, true);
+    let ast_b = parser_ast_test_with_options(ast_builder, value, parser_option.clone().with_module(), 0, env_flag, 0, true);
     parser_ast_test_with_options(
       ast_b,
       value,
-      parser_option.clone().with_disable_skip_parser(),
+      parser_option.clone().with_disable_skip_parser().with_module(),
       0,
       env_flag,
       0,
-      ParserType::Module,
       true,
     );
   }
 
   fn stmt_test_with_scope<F: Fn((u64, u32, bool, bool)) -> TestableAst>(ast_builder: F, value: &str, scope_count: u32) {
-    let ast_b = parser_ast_test_with_options(
-      ast_builder,
-      value,
-      ParserOption::default(),
-      scope_count,
-      EnvFlag::all(),
-      0,
-      ParserType::Script,
-      true,
-    );
+    let ast_b = parser_ast_test_with_options(ast_builder, value, ParserOption::default(), scope_count, EnvFlag::all(), 0, true);
     parser_ast_test_with_options(
       ast_b,
       value,
@@ -866,7 +829,6 @@ mod parser_test {
       scope_count,
       EnvFlag::all(),
       0,
-      ParserType::Script,
       true,
     );
   }
@@ -884,7 +846,6 @@ mod parser_test {
       scope_count,
       EnvFlag::all(),
       before_line_break_count,
-      ParserType::Script,
       true,
     );
     parser_ast_test_with_options(
@@ -894,7 +855,6 @@ mod parser_test {
       scope_count,
       EnvFlag::all(),
       before_line_break_count,
-      ParserType::Script,
       true,
     );
   }
@@ -906,7 +866,6 @@ mod parser_test {
     scope_count: u32,
     env_flag: EnvFlag,
     before_line_break_count: u64,
-    parser_type: ParserType,
     is_stmt: bool,
   ) -> F {
     let env: EnvList = [
@@ -962,16 +921,16 @@ mod parser_test {
     .to_string();
 
     let expected: Expectations = [&normal, &strict, &f];
-    parse_test(&env, value, &expected, parser_option, parser_type, false);
+    parse_test(&env, value, &expected, parser_option, false);
     return ast_b;
   }
 
   #[inline]
   fn basic_env_expression_eary_error_test(env_flag: EnvFlag, start: u64, end: u64, code: &str) {
-    basic_env_expression_eary_error_test_with_parser_type(env_flag, start, end, code, ParserType::Script);
+    basic_env_expression_eary_error_test_with_parser_type(env_flag, start, end, code, false);
   }
 
-  fn basic_env_expression_eary_error_test_with_parser_type(env_flag: EnvFlag, start: u64, end: u64, code: &str, parser_type: ParserType) {
+  fn basic_env_expression_eary_error_test_with_parser_type(env_flag: EnvFlag, start: u64, end: u64, code: &str, is_module: bool) {
     let env: EnvList = [
       if env_flag.contains(EnvFlag::BASIC) { Some(("", "")) } else { None },
       if env_flag.contains(EnvFlag::STRICT_MODE) {
@@ -994,7 +953,7 @@ mod parser_test {
         &s_pos!(start + 15, end + 15, 0, 0),
       ],
       false,
-      parser_type,
+      is_module,
     );
   }
 
@@ -3366,7 +3325,7 @@ mod parser_test {
     fn_end: u64,
   ) -> TestableAst {
     let static_additional = if attr.contains(ClassFieldFlag::STATIC) { STATIC_STR_LEN } else { 0 };
-    let async_len = ("async ".len() as u64);
+    let async_len = "async ".len() as u64;
     let addition = if attr.contains(ClassFieldFlag::PRIVATE) { 1 } else { 0 };
     return class_field!(
       &get_visibility_str(attr),
@@ -3398,7 +3357,7 @@ mod parser_test {
     fn_end: u64,
   ) -> TestableAst {
     let static_additional = if attr.contains(ClassFieldFlag::STATIC) { STATIC_STR_LEN } else { 0 };
-    let async_len = ("async *".len() as u64);
+    let async_len = "async *".len() as u64;
     let addition = if attr.contains(ClassFieldFlag::PRIVATE) { 1 } else { 0 };
     return class_field!(
       &get_visibility_str(attr),
@@ -5644,7 +5603,6 @@ let a = 0",
       1,
       EnvFlag::BASIC | EnvFlag::FUNCTION_WRAPPER,
       0,
-      ParserType::Script,
       true,
     );
   }
@@ -5788,7 +5746,7 @@ let a = 0",
       14,
       15,
       "import {a, b, a} from 'bar'",
-      ParserType::Module,
+      true,
     );
 
     basic_env_expression_eary_error_test_with_parser_type(
@@ -5796,7 +5754,7 @@ let a = 0",
       15,
       16,
       "import a, * as a from 'bar'",
-      ParserType::Module,
+      true,
     );
 
     basic_env_expression_eary_error_test_with_parser_type(
@@ -5804,7 +5762,7 @@ let a = 0",
       18,
       21,
       "import foo, {bar, foo} from 'bar'",
-      ParserType::Module,
+      true,
     );
   }
 
@@ -6200,20 +6158,14 @@ let a = 0",
 
   #[test]
   fn named_export_reserved_keyword_eary_error_test() {
-    basic_env_expression_eary_error_test_with_parser_type(
-      EnvFlag::BASIC | EnvFlag::STRICT_MODE,
-      8,
-      18,
-      "export {implements}",
-      ParserType::Module,
-    );
+    basic_env_expression_eary_error_test_with_parser_type(EnvFlag::BASIC | EnvFlag::STRICT_MODE, 8, 18, "export {implements}", true);
 
     basic_env_expression_eary_error_test_with_parser_type(
       EnvFlag::BASIC | EnvFlag::STRICT_MODE,
       11,
       12,
       "export {a, b as c}; let a, d",
-      ParserType::Module,
+      true,
     );
   }
 }

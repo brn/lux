@@ -218,6 +218,7 @@ pub struct Scanner {
   skipped: u64,
   line_break_found_in_comment: bool,
   last_cursor: isize,
+  current_line_first_token: [Token; 2],
   scope: ScopeTree,
 }
 
@@ -257,6 +258,7 @@ impl Scanner {
       skipped: 0,
       line_break_found_in_comment: false,
       last_cursor: 0,
+      current_line_first_token: [Token::Invalid, Token::Invalid],
       scope,
     };
     scanner.advance();
@@ -371,6 +373,7 @@ impl Scanner {
     self.previous_position = self.position[Mode::Current as usize].clone();
     if self.lookahead_token != Token::Invalid {
       self.contextual_keywords[self.mode as usize] = self.peek_contextual_keyword();
+      self.current_line_first_token[self.mode as usize] = self.current_line_first_token[Mode::Lookahead as usize];
       self.token = self.lookahead_token;
       self.lookahead_token = Token::Invalid;
       self.literal_buffer[Mode::Current as usize] = self.literal_buffer[Mode::Lookahead as usize].clone();
@@ -385,15 +388,20 @@ impl Scanner {
       return self.exit_scanning();
     }
 
-    let mut is_html_comment_allowed = self.current_position().start_col() == 0 || self.token == Token::Comment;
+    let mut is_html_comment_allowed = self.current_line_first_token[self.mode as usize].one_of(&[Token::Invalid, Token::Comment]);
     self.prologue();
     if !self.has_more() {
       return self.exit_scanning();
     }
+
     if !is_html_comment_allowed {
       is_html_comment_allowed = self.has_line_break_before();
     }
     let token = self.tokenize(is_html_comment_allowed);
+    if self.current_line_first_token[self.mode as usize] == Token::Invalid {
+      self.current_line_first_token[self.mode as usize] = token;
+      self.current_line_first_token[Mode::Lookahead as usize] = token;
+    }
     self.token = token;
     self.epilogue();
     self.last_cursor = self.iter.index();
@@ -414,8 +422,7 @@ impl Scanner {
       return this.lookahead_token;
     }
     this.position[Mode::Lookahead as usize] = this.position[Mode::Current as usize].clone();
-    let mut is_html_comment_allowed =
-      this.current_position().start_col() == 0 || this.lookahead_token == Token::Comment || this.token == Token::Comment;
+    let mut is_html_comment_allowed = this.current_line_first_token[this.mode as usize].one_of(&[Token::Invalid, Token::Comment]);
     this.prologue();
     if !this.has_more() {
       this.position[Mode::Lookahead as usize] = this.position[Mode::Current as usize].clone();
@@ -426,6 +433,9 @@ impl Scanner {
       is_html_comment_allowed = this.has_line_break_before();
     }
     this.lookahead_token = this.tokenize(is_html_comment_allowed);
+    if this.current_line_first_token[Mode::Lookahead as usize] == Token::Invalid {
+      this.current_line_first_token[Mode::Lookahead as usize] = this.lookahead_token;
+    }
     this.epilogue();
     return this.lookahead_token;
   }
@@ -539,6 +549,7 @@ impl Scanner {
       if self.skip_line_break() {
         {
           let skipped = self.skipped;
+          self.current_line_first_token[self.mode as usize] = Token::Invalid;
           self.current_position_mut().set_start_line_number(end_line_number + skipped as u32);
           self.current_position_mut().set_end_line_number(end_line_number + skipped as u32);
           self.current_position_mut().set_start_col(0_u32);
@@ -735,6 +746,7 @@ impl Scanner {
           return OpDiv;
         }
         '-' => {
+          let start_pos = self.source_position().clone();
           self.advance();
           if self.iter.is_char('=') {
             self.advance();
@@ -743,6 +755,14 @@ impl Scanner {
           if self.iter.is_char('-') {
             self.advance();
             if is_html_comment_allowed && self.iter.is_char('>') {
+              if self.scope.root().is_module() {
+                report_error!(
+                  self,
+                  "HTML Comment not allowed in module",
+                  &pos_range!(start_pos, self.current_position()),
+                  Token::Invalid
+                );
+              }
               self.skip_signleline_comment();
               return self.next();
             }
@@ -785,10 +805,19 @@ impl Scanner {
             return OpLessThanOrEq;
           }
           if self.iter.is_char('!') {
+            let start_pos = self.source_position().clone();
             self.advance();
             if self.iter.is_char('-') {
               self.advance();
               if self.iter.is_char('-') {
+                if self.scope.root().is_module() {
+                  report_error!(
+                    self,
+                    "HTML Comment not allowed in module",
+                    &pos_range!(start_pos, self.current_position()),
+                    Token::Invalid
+                  );
+                }
                 self.advance();
                 self.skip_signleline_comment();
                 if self.mode == Mode::Current {
