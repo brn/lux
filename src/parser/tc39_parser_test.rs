@@ -55,7 +55,7 @@ fn get_test_files<F: Fn(&fs::DirEntry)>(dir: &str, cb: F) -> io::Result<()> {
   Ok(())
 }
 
-const SHOULD_RUN_UNDER_STRICT_MODE_CASES: [&'static str; 7] = [
+const SHOULD_RUN_UNDER_STRICT_MODE_CASES: [&'static str; 9] = [
   "early/1aff49273f3e3a98.js",
   "early/12a74c60f52a60de.js",
   "early/be7329119eaa3d47.js",
@@ -63,6 +63,8 @@ const SHOULD_RUN_UNDER_STRICT_MODE_CASES: [&'static str; 7] = [
   "early/ec31fa5e521c5df4.js",
   "early/a610a46980d6cc37.js",
   "fail/3990bb94b19b1071.module.js",
+  "fail/79f882da06f88c9f.js",
+  "fail/92b6af54adef3624.js",
 ];
 const EXCLUDES_CASES: [&'static str; 2] = ["early/0f5f47108da5c34e.js", "early/4de83a7417cd30dd.js"];
 
@@ -116,7 +118,8 @@ fn run_tc39_parser_test(dir: &str, should_fail: bool) {
 fn extract_test() {
   parse(
     "anonymous",
-    r#"var x = /[P QR]/\\u0067"#,
+    r#"/a\
+/"#,
     ParserOptionBuilder::default().build(),
     ParserType::Script,
     true,

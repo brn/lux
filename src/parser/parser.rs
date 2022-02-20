@@ -1493,6 +1493,11 @@ impl Parser {
           Parser::utf8_to_utf16(self.cur().symbol())
         };
 
+        if self.cur() == Token::Yield && self.scope.current().is_generator_context_origin() {
+          let e = parse_error!(@raw, self.region, "Yield not allowed here", self.source_position());
+          self.expression_context.set_first_generator_context_origin_error(e);
+        }
+
         let key = if self.peek_with_regexp()? != Token::OpAssign {
           if self.peek_with_regexp()? == Token::Colon {
             next_parse!(self, self.parse_property_name(builder))?
@@ -1639,7 +1644,17 @@ impl Parser {
           self.expression_context.set_first_async_context_error(e);
         }
       }
-      _ => {}
+      _ => {
+        let e = parse_error!(
+          @raw,
+          self.region,
+          "Invalid function parameter found",
+          self.source_position()
+        );
+        if let Ok(ctx) = self.expression_context.to_arrow_ctx_mut() {
+          ctx.set_first_arrow_parameter_error(e);
+        }
+      }
     };
   }
 
@@ -1743,6 +1758,7 @@ impl Parser {
       return Ok(node.into());
     }
 
+    let expr_pos = self.source_position().clone();
     let n = scoped_expr_ctx!(@propagate, self, {
       self.expression_context.set_is_in_allowed(true);
       next_parse!(self, self.parse_expression(builder, true))?
@@ -1773,6 +1789,10 @@ impl Parser {
     if self.cur() != Token::ArrowFunctionGlyph {
       if let Some(e) = self.expression_context.first_value_error() {
         return Err(e);
+      }
+      if builder.is_structural_literal(n) {
+        let e = parse_error!(@raw, self.region, "Unexpected destructuring assignment target found", &expr_pos);
+        self.expression_context.set_first_pattern_error(e);
       }
     }
     return Ok(expr);
@@ -2460,10 +2480,14 @@ impl Parser {
       let parent = self.new_arrow_context();
       self.expression_context.set_assignment_target_type(AssignmentTargetType::Invalid);
       let params = next_parse!(self, self.parse_binding_identifier(builder, self.get_identifier_parse_option()))?;
-      expect!(self, self.cur(), Token::ArrowFunctionGlyph);
-      let ret = next_parse!(self, self.parse_concise_body(builder, true, FunctionAttribute::NONE, params))?;
-      self.set_expression_context(parent);
-      return Ok(ret);
+      if !self.has_line_break_before() {
+        expect!(self, self.cur(), Token::ArrowFunctionGlyph);
+        let ret = next_parse!(self, self.parse_concise_body(builder, true, FunctionAttribute::NONE, params))?;
+        self.set_expression_context(parent);
+        return Ok(ret);
+      } else {
+        return parse_error!(self.region, "Unexpected token found", self.source_position());
+      }
     }
 
     if self.cur() == Token::LeftParen && self.peek_with_regexp()? == Token::RightParen {
@@ -2471,11 +2495,15 @@ impl Parser {
       let exprs = build!(@pos, builder, expressions, self.source_position(), Vec::new());
       self.advance()?;
       self.advance()?;
-      expect!(self, self.cur(), Token::ArrowFunctionGlyph);
-      self.expression_context.set_assignment_target_type(AssignmentTargetType::Invalid);
-      let ret = next_parse!(self, self.parse_concise_body(builder, true, FunctionAttribute::NONE, exprs))?;
-      self.set_expression_context(parent);
-      return Ok(ret);
+      if !self.has_line_break_before() {
+        expect!(self, self.cur(), Token::ArrowFunctionGlyph);
+        self.expression_context.set_assignment_target_type(AssignmentTargetType::Invalid);
+        let ret = next_parse!(self, self.parse_concise_body(builder, true, FunctionAttribute::NONE, exprs))?;
+        self.set_expression_context(parent);
+        return Ok(ret);
+      } else {
+        return parse_error!(self.region, "Unexpected token found", self.source_position());
+      }
     }
 
     let expr_start_pos = self.prev_source_position().clone();
@@ -2487,18 +2515,22 @@ impl Parser {
       let pos = self.source_position().clone();
       self.expression_context.to_arrow_ctx_mut_unchecked().new_var(value, pos);
       let expr = next_parse!(self, self.parse_binding_identifier(builder, self.get_identifier_parse_option()))?;
-      expect!(self, self.cur(), Token::ArrowFunctionGlyph);
-      self.expression_context.set_assignment_target_type(AssignmentTargetType::Invalid);
-      let ret = next_parse!(self, self.parse_concise_body(builder, true, FunctionAttribute::ASYNC, expr))?;
-      self.set_expression_context(parent);
-      return Ok(ret);
+      if !self.has_line_break_before() {
+        expect!(self, self.cur(), Token::ArrowFunctionGlyph);
+        self.expression_context.set_assignment_target_type(AssignmentTargetType::Invalid);
+        let ret = next_parse!(self, self.parse_concise_body(builder, true, FunctionAttribute::ASYNC, expr))?;
+        self.set_expression_context(parent);
+        return Ok(ret);
+      } else {
+        return parse_error!(self.region, "Unexpected token found", self.source_position());
+      }
     }
 
     let mut ec = self.new_arrow_context();
     let expr = next_parse!(self, self.parse_conditional_expression(builder))?;
     let expr_end_pos = self.prev_source_position().clone();
 
-    if self.cur() == Token::ArrowFunctionGlyph {
+    if self.cur() == Token::ArrowFunctionGlyph && !self.has_line_break_before() {
       self.expression_context.set_assignment_target_type(AssignmentTargetType::Invalid);
       let mut attr = FunctionAttribute::NONE;
       if builder.is_new_call(expr) || builder.is_super_call(expr) {
@@ -2524,6 +2556,8 @@ impl Parser {
       );
       self.set_expression_context(ec);
       return result;
+    } else {
+      return parse_error!(self.region, "Unexpected token found", self.source_position());
     }
 
     let mut token = self.cur();
@@ -2925,6 +2959,8 @@ impl Parser {
         if let Some(e) = self.expression_context.first_value_error() {
           return Err(e);
         }
+        let e = parse_error!(@raw, self.region, "Unexpected initializer", self.source_position());
+        self.expression_context.set_first_for_in_of_lhs_error(e);
         Some(rhs)
       } else {
         if var_type == VariableDeclarationType::Const {
@@ -2939,6 +2975,8 @@ impl Parser {
           } else {
             self.statement_block.set_first_const_initializer_error(e);
           }
+        } else if builder.is_structural_literal(lhs) {
+          return parse_error!(self.region, "Destructuring requires initializer", &lhs_pos);
         }
         None
       };
@@ -3209,6 +3247,9 @@ impl Parser {
         if let Some(e) = cur_ctx.first_pattern_error() {
           return Err(e);
         }
+        if let Some(e) = cur_ctx.first_for_in_of_lhs_error() {
+          return Err(e);
+        }
 
         if !builder.is_valid_for_of_in_lhs(lhs) && cur_ctx.assignment_target_type() == AssignmentTargetType::Invalid {
           return parse_error!(
@@ -3287,6 +3328,9 @@ impl Parser {
         // For of declaration branch
         if self.contextual_keyword() == Token::Of {
           if let Some(e) = cur_ctx.first_pattern_error() {
+            return Err(e);
+          }
+          if let Some(e) = cur_ctx.first_for_in_of_lhs_error() {
             return Err(e);
           }
           if !builder.is_valid_for_of_in_lhs(lhs) && cur_ctx.assignment_target_type() == AssignmentTargetType::Invalid {
@@ -3913,6 +3957,11 @@ impl Parser {
       self,
       self.parse_formal_parameters(builder, attr.contains(FunctionAttribute::GENERATOR))
     )?;
+    if attr.contains(FunctionAttribute::GENERATOR) {
+      if let Some(e) = self.expression_context.first_generator_context_origin_error() {
+        return Err(e);
+      }
+    }
     if let Some(pos) = self.scope.current().first_super_call_position() {
       return parse_error!(self.region, "Super not allowed here", &pos);
     }
@@ -4006,7 +4055,10 @@ impl Parser {
           )?;
         }
         Token::LeftBrace | Token::LeftBracket => {
-          next_expr = next_parse!(self, self.parse_binding_element(builder, self.get_identifier_parse_option()))?;
+          next_expr = next_parse!(
+            self,
+            self.parse_binding_pattern(builder, StructuralLiteralParseOption::BINDING_PATTERN_IN_DECL)
+          )?;
           self
             .expression_context
             .to_arrow_ctx_mut()
@@ -4189,12 +4241,12 @@ impl Parser {
     let mut class_field_flag = ClassFieldFlag::NONE;
     let mut attr = FunctionAttribute::NONE;
 
-    if self.contextual_keyword() == Token::Static
-      && !self
-        .peek_with_regexp()?
-        .one_of(&[Token::LeftParen, Token::OpAssign, Token::Terminate, Token::RightBrace])
-    {
-      if is_class_field {
+    if self.contextual_keyword() == Token::Static {
+      if is_class_field
+        && !self
+          .peek_with_regexp()?
+          .one_of(&[Token::LeftParen, Token::OpAssign, Token::Terminate, Token::RightBrace])
+      {
         class_field_flag |= ClassFieldFlag::STATIC;
         self.advance()?;
       } else {
@@ -4327,6 +4379,12 @@ impl Parser {
       }
       var_list.append(self.expression_context.to_arrow_ctx_mut_unchecked().var_list_mut());
       expect!(self, self.cur(), Token::RightParen);
+    }
+
+    if attr.contains(FunctionAttribute::GENERATOR) {
+      if let Some(e) = self.expression_context.first_generator_context_origin_error() {
+        return Err(e);
+      }
     }
 
     let function_body_start = if self.parser_option.disable_skip_parser {

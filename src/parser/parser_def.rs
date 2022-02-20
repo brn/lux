@@ -103,6 +103,12 @@ pub struct ExpressionContext {
   #[property(skip)]
   first_generator_context_error: Option<Exotic<ErrorDescriptor>>,
 
+  #[property(skip)]
+  first_generator_context_origin_error: Option<Exotic<ErrorDescriptor>>,
+
+  #[property(skip)]
+  first_for_in_of_lhs_error: Option<Exotic<ErrorDescriptor>>,
+
   #[property(get(type = "copy"), set(type = "ref"))]
   assignment_target_type: AssignmentTargetType,
 
@@ -141,7 +147,9 @@ impl ExpressionContext {
       first_strict_mode_error: None,
       first_async_context_error: None,
       first_generator_context_error: None,
+      first_generator_context_origin_error: None,
       first_global_error: None,
+      first_for_in_of_lhs_error: None,
       is_maybe_immediate_function: false,
       is_in_allowed: true,
       assignment_target_type: AssignmentTargetType::Simple,
@@ -180,8 +188,14 @@ impl ExpressionContext {
     if self.first_generator_context_error.is_some() {
       ec.first_generator_context_error = self.first_generator_context_error.clone();
     }
+    if self.first_generator_context_origin_error.is_some() {
+      ec.first_generator_context_origin_error = self.first_generator_context_origin_error.clone();
+    }
     if self.first_global_error.is_some() {
       ec.first_global_error = self.first_global_error.clone();
+    }
+    if self.first_for_in_of_lhs_error.is_some() {
+      ec.first_for_in_of_lhs_error = self.first_for_in_of_lhs_error.clone();
     }
     ec.assignment_target_type = self.assignment_target_type;
   }
@@ -196,6 +210,8 @@ impl ExpressionContext {
   _get_set!(first_async_context_error);
   _get_set!(first_global_error);
   _get_set!(first_generator_context_error);
+  _get_set!(first_generator_context_origin_error);
+  _get_set!(first_for_in_of_lhs_error);
 }
 impl std::fmt::Debug for ExpressionContext {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

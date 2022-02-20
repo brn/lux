@@ -22,6 +22,11 @@ pub fn is_octal_digits(u: u16) -> bool {
 }
 
 #[inline(always)]
+pub fn is_non_octal_digits(u: u16) -> bool {
+  return u >= 0x38 && u <= 0x39;
+}
+
+#[inline(always)]
 pub fn octal_hex_followable_count(u: u16) -> u8 {
   return if u >= 0x30 && u <= 0x33 { 2 } else { 1 };
 }

@@ -1046,6 +1046,13 @@ impl Scanner {
                   let octal_value = self.decode_octal_escape();
                   self.current_literal_buffer_mut().push(octal_value);
                 }
+              } else if chars::is_non_octal_digits(lookahead) && self.scope.current().is_strict_mode() {
+                report_error!(
+                  self,
+                  "In strict mode code, non octal escape digits is not allowed",
+                  self.current_position(),
+                  Token::Invalid
+                );
               } else {
                 is_escaped = true;
                 self.advance();
@@ -1383,6 +1390,14 @@ impl Scanner {
               is_escaped = false;
             }
             _ => {
+              if self.skip_line_break() {
+                return report_error!(
+                  self,
+                  "Unterminated regular expression literal",
+                  self.source_position(),
+                  Token::Invalid
+                );
+              }
               is_escaped = false;
             }
           };
