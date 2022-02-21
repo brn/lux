@@ -202,8 +202,8 @@ pub const fn char_safe(u: u16) -> Result<char, u16> {
 // http://www.ecma-international.org/ecma-262/9.0/index.html#sec-names-and-keywords
 #[inline]
 pub fn is_identifier_start(value: u32) -> bool {
-  // [:ID_Start:] + $ + _ + \\ + <ZWNJ> + <ZWJ>
-  if value == 36 || value == 95 || value == 92 || value == 0x200C || value == 0x200D {
+  // [:ID_Start:] + $ + _ + \\
+  if value == 36 || value == 95 || value == 92 {
     return true;
   }
   return Ucd::get_id_property(value) == UcdIdProperty::IdStart;
@@ -214,6 +214,12 @@ pub fn is_identifier_start(value: u32) -> bool {
 pub fn is_identifier_continue(value: u32, is_unicode_escape_seq: bool) -> bool {
   if is_unicode_escape_seq {
     return is_hex_digits(value as u16);
+  }
+
+  // in https://262.ecma-international.org/12.0/ 12.1 Unicode Format-Control Characaters
+  // <ZWNJ> + <ZWJ>
+  if value == 0x200C || value == 0x200D {
+    return true;
   }
 
   if is_identifier_start(value) {
@@ -672,7 +678,7 @@ pub fn parse_numeric_value<'a>(
 
     return match kind {
       Decimal | DecimalLeadingZero => {
-        if kind == DecimalLeadingZero && digits_len > 1 && !has_exponents_part && !is_allow_leading_zeroes {
+        if kind == DecimalLeadingZero && digits_len >= 1 && !has_exponents_part && !is_allow_leading_zeroes {
           return Err(NumericConvertionError::LeadingZeroesNotAllowed);
         }
         if digits_len <= 9 && !has_exponents_part && !is_period_seen {

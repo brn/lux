@@ -71,7 +71,6 @@ const EXCLUDES_CASES: [&'static str; 2] = ["early/0f5f47108da5c34e.js", "early/4
 fn run_tc39_parser_test(dir: &str, should_fail: bool) {
   if let Err(e) = get_test_files(dir, |entry| {
     let path = entry.path();
-    println!("{:?}", path);
     let content = fs::read_to_string(entry.path()).unwrap();
     let path_str = path.to_str().unwrap();
     let is_module = path_str.ends_with("module.js");
@@ -118,7 +117,7 @@ fn run_tc39_parser_test(dir: &str, should_fail: bool) {
 
 #[test]
 fn extract_test() {
-  parse("anonymous", r#"while (a-->1){}"#, ParserOptionBuilder::default().build(), false);
+  parse("anonymous", "'use strict';'\\001'", ParserOptionBuilder::default().build(), true);
 }
 
 #[test]

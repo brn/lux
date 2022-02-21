@@ -1059,21 +1059,23 @@ impl Scanner {
               } else if chars::is_octal_digits(lookahead) {
                 self.advance();
                 has_escape_sequence = true;
-                if chars::ch(lookahead) == '0' {
-                  if !chars::is_octal_digits(*self.iter) {
+                if let Some(next) = self.iter.peek() {
+                  if chars::ch(lookahead) == '0' && !chars::is_octal_digits(next) {
                     self.current_literal_buffer_mut().push(0_u16);
+                  } else {
+                    if self.scope.current().is_strict_mode() {
+                      report_error!(
+                        self,
+                        "In strict mode code, octal escape is not allowed",
+                        self.current_position(),
+                        Token::Invalid
+                      );
+                    }
+                    let octal_value = self.decode_octal_escape();
+                    self.current_literal_buffer_mut().push(octal_value);
                   }
                 } else {
-                  if self.scope.current().is_strict_mode() {
-                    report_error!(
-                      self,
-                      "In strict mode code, octal escape is not allowed",
-                      self.current_position(),
-                      Token::Invalid
-                    );
-                  }
-                  let octal_value = self.decode_octal_escape();
-                  self.current_literal_buffer_mut().push(octal_value);
+                  report_error!(self, "Unterminated string literal", self.source_position(), Token::Invalid);
                 }
               } else if chars::is_non_octal_digits(lookahead) && self.scope.current().is_strict_mode() {
                 report_error!(

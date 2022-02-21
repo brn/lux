@@ -1053,11 +1053,15 @@ mod parser_test {
 
   #[test]
   fn parse_decimal_leading_zero_literal_test() {
-    single_expression_test(
+    single_expression_test_with_options(
       |(col, line, _, _)| {
         return number!("7778", pos!(col, line));
       },
       "07778",
+      ParserOption::default(),
+      0,
+      EnvFlag::BASIC | EnvFlag::FUNCTION_WRAPPER,
+      0,
     );
   }
 
