@@ -1,17 +1,17 @@
 use super::node_ops::*;
-use crate::utility::Region;
+use crate::utility::WeakRegion;
 
 pub struct AstBuilder {
-  region: Region,
+  region: WeakRegion,
 }
 impl AstBuilder {
-  pub fn new(region: Region) -> Self {
+  pub fn new(region: WeakRegion) -> Self {
     return AstBuilder { region };
   }
 }
 
 impl NodeOps for AstBuilder {
-  fn region(&mut self) -> &mut Region {
+  fn region(&mut self) -> &mut WeakRegion {
     return &mut self.region;
   }
 }

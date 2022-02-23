@@ -7,7 +7,7 @@ use crate::structs::FixedU16CodePointArray;
 use crate::utility::*;
 
 pub struct SkipTreeBuilder {
-  region: Region,
+  region: WeakRegion,
   skip_array: Expr,
   skip_object: Expr,
   skip_call: Expr,
@@ -37,7 +37,7 @@ pub struct SkipTreeBuilder {
 }
 
 impl SkipTreeBuilder {
-  pub fn new(mut region: Region) -> Self {
+  pub fn new(mut region: WeakRegion) -> Self {
     return SkipTreeBuilder {
       region: region.clone(),
       skip_call: SkipExpr::new(&mut region, SkipExprType::CALL).into(),
@@ -71,7 +71,7 @@ impl SkipTreeBuilder {
 }
 
 impl NodeOps for SkipTreeBuilder {
-  fn region(&mut self) -> &mut Region {
+  fn region(&mut self) -> &mut WeakRegion {
     return &mut self.region;
   }
 

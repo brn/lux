@@ -1086,9 +1086,9 @@ mod parser_test {
   fn parse_single_quote_string_literal_test() {
     single_expression_test(
       |(col, line, _, _)| {
-        return str!("test", pos!(col, line));
+        return str!("test", pos!(col + 1, line));
       },
-      "'test'",
+      "('test')",
     );
   }
 
@@ -1096,9 +1096,9 @@ mod parser_test {
   fn parse_double_quote_string_literal_test() {
     single_expression_test(
       |(col, line, _, _)| {
-        return str!("test", pos!(col, line));
+        return str!("test", pos!(col + 1, line));
       },
-      "\"test\"",
+      "(\"test\")",
     );
   }
 
@@ -1106,9 +1106,9 @@ mod parser_test {
   fn parse_single_quote_escaped_string_literal_test() {
     single_expression_test(
       |(col, line, _, _)| {
-        return str!("test 'value", pos!(col, line));
+        return str!("test 'value", pos!(col + 1, line));
       },
-      "'test \\'value'",
+      "('test \\'value')",
     );
   }
 
@@ -1116,9 +1116,9 @@ mod parser_test {
   fn parse_double_quote_escaped_string_literal_test() {
     single_expression_test(
       |(col, line, _, _)| {
-        return str!("test \"value", pos!(col, line));
+        return str!("test \"value", pos!(col + 1, line));
       },
-      "\"test \\\"value\"",
+      "(\"test \\\"value\")",
     );
   }
 
@@ -1126,9 +1126,9 @@ mod parser_test {
   fn parse_single_quote_backslash_escaped_string_literal_test() {
     single_expression_test(
       |(col, line, _, _)| {
-        return str!("test\\ value", pos!(col, line));
+        return str!("test\\ value", pos!(col + 1, line));
       },
-      "'test\\\\ value'",
+      "('test\\\\ value')",
     );
   }
 
@@ -1136,9 +1136,9 @@ mod parser_test {
   fn parse_double_quote_backslash_escaped_string_literal_test() {
     single_expression_test(
       |(col, line, _, _)| {
-        return str!("test\\ value", pos!(col, line));
+        return str!("test\\ value", pos!(col + 1, line));
       },
-      "\"test\\\\ value\"",
+      "(\"test\\\\ value\")",
     );
   }
 
@@ -1146,9 +1146,9 @@ mod parser_test {
   fn parse_string_literal_unicode_escape_sequence_test() {
     single_expression_test(
       |(col, line, _, _)| {
-        return str!("A_B_C_D", pos!(col, line));
+        return str!("A_B_C_D", pos!(col + 1, line));
       },
-      "'\\u0041_\\u0042_\\u0043_\\u0044'",
+      "('\\u0041_\\u0042_\\u0043_\\u0044')",
     );
   }
 
@@ -1156,9 +1156,9 @@ mod parser_test {
   fn parse_string_literal_ascii_escape_sequence_test() {
     single_expression_test(
       |(col, line, _, _)| {
-        return str!("A_B_C_D", pos!(col, line));
+        return str!("A_B_C_D", pos!(col + 1, line));
       },
-      "'\\x41_\\x42_\\x43_\\x44'",
+      "('\\x41_\\x42_\\x43_\\x44')",
     );
   }
 

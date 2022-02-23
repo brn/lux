@@ -27,9 +27,9 @@ mod scanner_test {
     let source = Source::new(context, "anonymouse", &source);
     let region = Region::new();
     let error_reporter = Exotic::from(Box::new(ErrorReporter::new(source.clone())));
-    let scope = ScopeTree::new(region.clone(), ScopeFlag::ROOT_SCOPE);
+    let scope = ScopeTree::new(region.clone_weak(), ScopeFlag::ROOT_SCOPE);
     let mut scanner = Scanner::new(
-      region.clone(),
+      region.clone_weak(),
       source.clone(),
       parser_state_stack.into(),
       error_reporter,

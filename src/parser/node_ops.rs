@@ -23,7 +23,7 @@ macro_rules! new_node {
 }
 
 pub trait NodeOps {
-  fn region(&mut self) -> &mut Region;
+  fn region(&mut self) -> &mut WeakRegion;
 
   fn new_empty(&mut self, pos: Option<&RuntimeSourcePosition>) -> Expr {
     return new_node!(Empty, self.region(), pos).into();

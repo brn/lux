@@ -19,10 +19,10 @@ impl ScopeTreeLayout {
 }
 
 #[derive(Clone)]
-pub struct ScopeTree(Rc<RefCell<ScopeTreeLayout>>, Region);
+pub struct ScopeTree(Rc<RefCell<ScopeTreeLayout>>, WeakRegion);
 
 impl ScopeTree {
-  pub fn new(region: Region, flag: ScopeFlag) -> Self {
+  pub fn new(region: WeakRegion, flag: ScopeFlag) -> Self {
     let scope = Scope::new(region.clone(), flag);
     return ScopeTree(Rc::new(RefCell::new(ScopeTreeLayout::new(scope))), region);
   }

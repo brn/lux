@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 use std::ptr;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 
 const BLOCK_SIZE: usize = kb!(1);
 const IDEAL_STORABLE_OBJECT_COUNT: usize = 20;
@@ -133,6 +133,18 @@ impl Region {
 
   pub fn alloc<O>(&mut self, object: O) -> Exotic<O> {
     return Exotic::new(self.0.borrow_mut().alloc(object));
+  }
+
+  pub fn clone_weak(&self) -> WeakRegion {
+    return WeakRegion(Rc::downgrade(&self.0));
+  }
+}
+
+#[derive(Clone)]
+pub struct WeakRegion(Weak<RefCell<RegionalAllocator>>);
+impl WeakRegion {
+  pub fn alloc<O>(&mut self, object: O) -> Exotic<O> {
+    return Exotic::new(self.0.upgrade().unwrap().borrow_mut().alloc(object));
   }
 }
 

@@ -684,7 +684,7 @@ impl<T: AstNode> Clone for Node<T> {
 }
 
 impl<T: AstNode> Node<T> {
-  pub fn new(region: &mut Region, object: T) -> Node<T> {
+  pub fn new(region: &mut WeakRegion, object: T) -> Node<T> {
     return Node(region.alloc(AstLayout {
       meta: AstMetadata::new(),
       kind: object,
@@ -764,7 +764,7 @@ impl_both!(
 
 impl Empty {
   #[inline]
-  pub fn new(region: &mut Region) -> Node<Empty> {
+  pub fn new(region: &mut WeakRegion) -> Node<Empty> {
     return Node::<Empty>::new(region, Empty);
   }
 }
@@ -835,7 +835,7 @@ impl_expr!(
 
 impl Expressions {
   #[inline]
-  pub fn new(region: &mut Region, items: Vec<Expr>) -> Node<Expressions> {
+  pub fn new(region: &mut WeakRegion, items: Vec<Expr>) -> Node<Expressions> {
     return Node::<Expressions>::new(
       region,
       Expressions {
@@ -908,7 +908,7 @@ impl IntoIterator for Statements {
 
 impl Statements {
   #[inline]
-  pub fn new(region: &mut Region, items: Vec<Stmt>) -> Node<Statements> {
+  pub fn new(region: &mut WeakRegion, items: Vec<Stmt>) -> Node<Statements> {
     return Node::<Statements>::new(region, Statements { items });
   }
 
@@ -955,7 +955,7 @@ impl_stmt!(
 
 impl Statement {
   #[inline]
-  pub fn new(region: &mut Region, expr: Expr) -> Node<Statement> {
+  pub fn new(region: &mut WeakRegion, expr: Expr) -> Node<Statement> {
     return Node::<Statement>::new(region, Statement { expr });
   }
 }
@@ -992,7 +992,7 @@ impl_expr!(
 
 impl BinaryExpression {
   #[inline]
-  pub fn new(region: &mut Region, op: Token, lhs: Expr, rhs: Expr) -> Node<BinaryExpression> {
+  pub fn new(region: &mut WeakRegion, op: Token, lhs: Expr, rhs: Expr) -> Node<BinaryExpression> {
     return Node::<BinaryExpression>::new(region, BinaryExpression { op, lhs, rhs });
   }
 }
@@ -1035,7 +1035,7 @@ impl_expr!(
 
 impl UnaryExpression {
   #[inline]
-  pub fn new(region: &mut Region, position: UnaryExpressionOperandPosition, op: Token, target: Expr) -> Node<UnaryExpression> {
+  pub fn new(region: &mut WeakRegion, position: UnaryExpressionOperandPosition, op: Token, target: Expr) -> Node<UnaryExpression> {
     return Node::<UnaryExpression>::new(region, UnaryExpression { position, op, target });
   }
 }
@@ -1068,7 +1068,7 @@ impl_expr!(
 
 impl ConditionalExpression {
   #[inline]
-  pub fn new(region: &mut Region, condition: Expr, then_expr: Expr, else_expr: Expr) -> Node<ConditionalExpression> {
+  pub fn new(region: &mut WeakRegion, condition: Expr, then_expr: Expr, else_expr: Expr) -> Node<ConditionalExpression> {
     return Node::<ConditionalExpression>::new(
       region,
       ConditionalExpression {
@@ -1099,7 +1099,7 @@ impl_expr!(
 );
 impl NewExpression {
   #[inline]
-  pub fn new(region: &mut Region, callee: Expr) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, callee: Expr) -> Node<Self> {
     return Node::<NewExpression>::new(region, NewExpression { callee });
   }
 }
@@ -1118,7 +1118,7 @@ impl_expr!(
 
 impl ImportMetaExpression {
   #[inline]
-  pub fn new(region: &mut Region) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion) -> Node<Self> {
     return Node::<ImportMetaExpression>::new(region, ImportMetaExpression);
   }
 }
@@ -1170,7 +1170,7 @@ impl_expr!(
 
 impl CallExpression {
   #[inline]
-  pub fn new(region: &mut Region, receiver: CallReceiverType, callee: Option<Expr>, parameters: Option<Expr>) -> Node<CallExpression> {
+  pub fn new(region: &mut WeakRegion, receiver: CallReceiverType, callee: Option<Expr>, parameters: Option<Expr>) -> Node<CallExpression> {
     return Node::<CallExpression>::new(
       region,
       CallExpression {
@@ -1234,7 +1234,7 @@ impl_expr!(
 impl PropertyAccessExpression {
   #[inline]
   pub fn new(
-    region: &mut Region,
+    region: &mut WeakRegion,
     property_access_type: PropertyAccessType,
     receiver_type: CallReceiverType,
     receiver: Option<Expr>,
@@ -1353,7 +1353,7 @@ impl_both!(
 
 impl Function {
   pub fn new(
-    region: &mut Region,
+    region: &mut WeakRegion,
     name: Option<Expr>,
     attr: FunctionAttribute,
     scope: Exotic<Scope>,
@@ -1450,7 +1450,7 @@ impl_stmt!(
 );
 
 impl ClassField {
-  pub fn new(region: &mut Region, flags: ClassFieldFlag, value: Expr) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, flags: ClassFieldFlag, value: Expr) -> Node<Self> {
     return Node::<ClassField>::new(region, ClassField { flags, value });
   }
 
@@ -1482,7 +1482,7 @@ pub struct Class {
   fields: Vec<Stmt>,
 }
 impl Class {
-  pub fn new(region: &mut Region, name: Option<Expr>, heritage: Option<Expr>, methods: Vec<Stmt>, fields: Vec<Stmt>) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, name: Option<Expr>, heritage: Option<Expr>, methods: Vec<Stmt>, fields: Vec<Stmt>) -> Node<Self> {
     return Node::<Class>::new(
       region,
       Class {
@@ -1545,7 +1545,7 @@ impl_expr!(
 );
 
 impl ObjectPropertyExpression {
-  pub fn new(region: &mut Region, key: Expr, value: Option<Expr>, init: Option<Expr>) -> Node<ObjectPropertyExpression> {
+  pub fn new(region: &mut WeakRegion, key: Expr, value: Option<Expr>, init: Option<Expr>) -> Node<ObjectPropertyExpression> {
     return Node::new(region, ObjectPropertyExpression { key, value, init });
   }
 }
@@ -1563,7 +1563,7 @@ impl_expr!(
 );
 
 impl Elision {
-  pub fn new(region: &mut Region) -> Node<Elision> {
+  pub fn new(region: &mut WeakRegion) -> Node<Elision> {
     return Node::new(region, Elision {});
   }
 }
@@ -1636,7 +1636,7 @@ impl NodeCollection<Expr> for Node<StructuralLiteral> {
 
 impl StructuralLiteral {
   #[inline]
-  pub fn new(region: &mut Region, literal_flag: StructuralLiteralFlags, properties: Vec<Expr>) -> Node<StructuralLiteral> {
+  pub fn new(region: &mut WeakRegion, literal_flag: StructuralLiteralFlags, properties: Vec<Expr>) -> Node<StructuralLiteral> {
     return Node::<StructuralLiteral>::new(
       region,
       StructuralLiteral {
@@ -1712,7 +1712,7 @@ impl_expr!(
 );
 
 impl Literal {
-  pub fn new(region: &mut Region, literal_type: Token, value: LiteralValue) -> Node<Literal> {
+  pub fn new(region: &mut WeakRegion, literal_type: Token, value: LiteralValue) -> Node<Literal> {
     return Node::new(region, Literal { literal_type, value });
   }
 
@@ -1759,7 +1759,7 @@ impl NodeCollection<Expr> for Node<TemplateLiteral> {
 }
 
 impl TemplateLiteral {
-  pub fn new(region: &mut Region, parts: Vec<Expr>) -> Node<TemplateLiteral> {
+  pub fn new(region: &mut WeakRegion, parts: Vec<Expr>) -> Node<TemplateLiteral> {
     return Node::new(region, TemplateLiteral { parts });
   }
 }
@@ -1792,7 +1792,7 @@ impl_expr!(
   }
 );
 impl ImportSpecifier {
-  pub fn new(region: &mut Region, is_namespace: bool, name: Option<Expr>, as_expr: Option<Expr>) -> Node<ImportSpecifier> {
+  pub fn new(region: &mut WeakRegion, is_namespace: bool, name: Option<Expr>, as_expr: Option<Expr>) -> Node<ImportSpecifier> {
     return Node::new(
       region,
       ImportSpecifier {
@@ -1838,7 +1838,7 @@ impl NodeCollection<Expr> for Node<NamedImportList> {
 }
 
 impl NamedImportList {
-  pub fn new(region: &mut Region, list: Vec<Expr>) -> Node<NamedImportList> {
+  pub fn new(region: &mut WeakRegion, list: Vec<Expr>) -> Node<NamedImportList> {
     return Node::new(region, NamedImportList { list });
   }
 }
@@ -1869,7 +1869,11 @@ impl_expr!(
   }
 );
 impl ImportBinding {
-  pub fn new(region: &mut Region, default_binding: Option<Expr>, namesapce_or_named_import_specifier: Option<Expr>) -> Node<ImportBinding> {
+  pub fn new(
+    region: &mut WeakRegion,
+    default_binding: Option<Expr>,
+    namesapce_or_named_import_specifier: Option<Expr>,
+  ) -> Node<ImportBinding> {
     return Node::new(
       region,
       ImportBinding {
@@ -1904,7 +1908,7 @@ impl_stmt!(
   }
 );
 impl ImportDeclaration {
-  pub fn new(region: &mut Region, import_binding: Option<Expr>, module_specifier: Expr) -> Node<ImportDeclaration> {
+  pub fn new(region: &mut WeakRegion, import_binding: Option<Expr>, module_specifier: Expr) -> Node<ImportDeclaration> {
     return Node::new(
       region,
       ImportDeclaration {
@@ -1959,7 +1963,7 @@ impl_stmt!(
 impl ExportDeclaration {
   #[inline]
   pub fn new(
-    region: &mut Region,
+    region: &mut WeakRegion,
     export_type: ExportDeclarationType,
     export_clause: Option<Ast>,
     from_clause: Option<Ast>,
@@ -2006,7 +2010,7 @@ impl_stmt!(
   }
 );
 impl BlockStatement {
-  pub fn new(region: &mut Region, stmt: Stmt, scope: Exotic<Scope>) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, stmt: Stmt, scope: Exotic<Scope>) -> Node<Self> {
     return Node::<Self>::new(region, BlockStatement { stmt, scope });
   }
 }
@@ -2038,7 +2042,7 @@ impl_stmt!(
   }
 );
 impl ForStatement {
-  pub fn new(region: &mut Region, declarations: Ast, condition: Expr, computation: Expr, body: Stmt) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, declarations: Ast, condition: Expr, computation: Expr, body: Stmt) -> Node<Self> {
     return Node::<Self>::new(
       region,
       ForStatement {
@@ -2077,7 +2081,7 @@ impl_stmt!(
   }
 );
 impl ForInStatement {
-  pub fn new(region: &mut Region, lhs: Ast, rhs: Expr, body: Stmt) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, lhs: Ast, rhs: Expr, body: Stmt) -> Node<Self> {
     return Node::<Self>::new(region, ForInStatement { lhs, rhs, body });
   }
 }
@@ -2116,7 +2120,7 @@ impl_stmt!(
   }
 );
 impl ForOfStatement {
-  pub fn new(region: &mut Region, is_await: bool, lhs: Ast, rhs: Expr, body: Stmt) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, is_await: bool, lhs: Ast, rhs: Expr, body: Stmt) -> Node<Self> {
     return Node::<Self>::new(region, ForOfStatement { lhs, rhs, is_await, body });
   }
 }
@@ -2139,7 +2143,7 @@ impl_stmt!(
   }
 );
 impl WhileStatement {
-  pub fn new(region: &mut Region, condition: Expr, body: Stmt) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, condition: Expr, body: Stmt) -> Node<Self> {
     return Node::<Self>::new(region, WhileStatement { condition, body });
   }
 }
@@ -2162,7 +2166,7 @@ impl_stmt!(
   }
 );
 impl DoWhileStatement {
-  pub fn new(region: &mut Region, condition: Expr, body: Stmt) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, condition: Expr, body: Stmt) -> Node<Self> {
     return Node::<Self>::new(region, DoWhileStatement { condition, body });
   }
 }
@@ -2195,7 +2199,7 @@ impl_stmt!(
   }
 );
 impl IfStatement {
-  pub fn new(region: &mut Region, condition: Expr, then_stmt: Stmt, else_stmt: Option<Stmt>) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, condition: Expr, then_stmt: Stmt, else_stmt: Option<Stmt>) -> Node<Self> {
     return Node::<Self>::new(
       region,
       IfStatement {
@@ -2232,7 +2236,7 @@ impl_stmt!(
   }
 );
 impl SwitchStatement {
-  pub fn new(region: &mut Region, scope: Exotic<Scope>, condition: Expr, cases: Vec<Stmt>) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, scope: Exotic<Scope>, condition: Expr, cases: Vec<Stmt>) -> Node<Self> {
     return Node::<Self>::new(region, SwitchStatement { scope, condition, cases });
   }
 }
@@ -2262,7 +2266,7 @@ impl_stmt!(
   }
 );
 impl SwitchCase {
-  pub fn new(region: &mut Region, condition: Option<Expr>, body: Stmt) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, condition: Option<Expr>, body: Stmt) -> Node<Self> {
     return Node::<Self>::new(region, SwitchCase { condition, body });
   }
 }
@@ -2290,7 +2294,7 @@ impl_stmt!(
   }
 );
 impl BreakStatement {
-  pub fn new(region: &mut Region, label_name: Option<FixedU16CodePointArray>) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, label_name: Option<FixedU16CodePointArray>) -> Node<Self> {
     return Node::<Self>::new(region, BreakStatement { label_name });
   }
 }
@@ -2318,7 +2322,7 @@ impl_stmt!(
   }
 );
 impl ContinueStatement {
-  pub fn new(region: &mut Region, label_name: Option<FixedU16CodePointArray>) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, label_name: Option<FixedU16CodePointArray>) -> Node<Self> {
     return Node::<Self>::new(region, ContinueStatement { label_name });
   }
 }
@@ -2341,7 +2345,7 @@ impl_stmt!(
   }
 );
 impl ReturnStatement {
-  pub fn new(region: &mut Region, expr: Option<Expr>) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, expr: Option<Expr>) -> Node<Self> {
     return Node::<Self>::new(region, ReturnStatement { expr });
   }
 }
@@ -2368,7 +2372,7 @@ impl_stmt!(
 );
 
 impl LabelledStatement {
-  pub fn new(region: &mut Region, identifier: Expr, stmt: Stmt) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, identifier: Expr, stmt: Stmt) -> Node<Self> {
     return Node::<Self>::new(region, LabelledStatement { identifier, stmt });
   }
 }
@@ -2392,7 +2396,7 @@ impl_stmt!(
 );
 
 impl ThrowStatement {
-  pub fn new(region: &mut Region, expr: Expr) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, expr: Expr) -> Node<Self> {
     return Node::<Self>::new(region, ThrowStatement { expr });
   }
 }
@@ -2422,7 +2426,7 @@ impl_stmt!(
 );
 
 impl CatchBlock {
-  pub fn new(region: &mut Region, parameter: Option<Expr>, block: Stmt) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, parameter: Option<Expr>, block: Stmt) -> Node<Self> {
     debug_assert!(Node::<BlockStatement>::is(block));
     return Node::<Self>::new(region, CatchBlock { block, parameter });
   }
@@ -2459,7 +2463,7 @@ impl_stmt!(
 );
 
 impl TryCatchStatement {
-  pub fn new(region: &mut Region, try_block: Stmt, catch_block: Option<Stmt>, finally_block: Option<Stmt>) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, try_block: Stmt, catch_block: Option<Stmt>, finally_block: Option<Stmt>) -> Node<Self> {
     debug_assert!(Node::<BlockStatement>::is(try_block));
     catch_block.map(|b| debug_assert!(Node::<CatchBlock>::is(b)));
     finally_block.map(|b| debug_assert!(Node::<BlockStatement>::is(b)));
@@ -2496,7 +2500,7 @@ impl_stmt!(
   }
 );
 impl WithStatement {
-  pub fn new(region: &mut Region, expr: Expr, body: Stmt) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, expr: Expr, body: Stmt) -> Node<Self> {
     return Node::<Self>::new(region, WithStatement { expr, body });
   }
 }
@@ -2513,7 +2517,7 @@ impl_stmt!(
   }
 );
 impl DebuggerStatement {
-  pub fn new(region: &mut Region) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion) -> Node<Self> {
     return Node::<Self>::new(region, DebuggerStatement);
   }
 }
@@ -2535,7 +2539,7 @@ impl_stmt!(
   }
 );
 impl VariableDeclarations {
-  pub fn new(region: &mut Region, decls: Vec<Stmt>) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, decls: Vec<Stmt>) -> Node<Self> {
     return Node::<VariableDeclarations>::new(region, VariableDeclarations { decls });
   }
 }
@@ -2576,7 +2580,7 @@ impl_stmt!(
   }
 );
 impl VariableDeclaration {
-  pub fn new(region: &mut Region, decl_type: VariableDeclarationType, binding: Expr, initializer: Option<Expr>) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, decl_type: VariableDeclarationType, binding: Expr, initializer: Option<Expr>) -> Node<Self> {
     return Node::<VariableDeclaration>::new(
       region,
       VariableDeclaration {
@@ -2614,7 +2618,7 @@ bitflags! {
 }
 pub struct SkipExpr(SkipExprType);
 impl SkipExpr {
-  pub fn new(region: &mut Region, skip_expr_type: SkipExprType) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, skip_expr_type: SkipExprType) -> Node<Self> {
     return Node::<Self>::new(region, SkipExpr(skip_expr_type));
   }
 
@@ -2717,7 +2721,7 @@ pub struct SkipStmt {
   flag: SkipStmtType,
 }
 impl SkipStmt {
-  pub fn new(region: &mut Region, flag: SkipStmtType) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, flag: SkipStmtType) -> Node<Self> {
     return Node::<Self>::new(region, SkipStmt { flag });
   }
 
@@ -2767,7 +2771,7 @@ pub struct SkipAny {
   flag: SkipAnyType,
 }
 impl SkipAny {
-  pub fn new(region: &mut Region, flag: SkipAnyType) -> Node<Self> {
+  pub fn new(region: &mut WeakRegion, flag: SkipAnyType) -> Node<Self> {
     return Node::<Self>::new(region, SkipAny { flag });
   }
 
@@ -2797,9 +2801,10 @@ mod ast_test {
   #[test]
   fn expressions_test() {
     let mut region = Region::new();
-    let mut expressions = Expressions::new(&mut region, Vec::new());
-    let elision = Elision::new(&mut region);
-    let elision2 = Elision::new(&mut region);
+    let mut weak_region = region.clone_weak();
+    let mut expressions = Expressions::new(&mut weak_region, Vec::new());
+    let elision = Elision::new(&mut weak_region);
+    let elision2 = Elision::new(&mut weak_region);
     expressions.push(elision.into());
     expressions.push(elision2.into());
     match compare_node(

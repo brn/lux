@@ -3,12 +3,15 @@ use super::source::*;
 use crate::context::LuxContext;
 use std::fs;
 use std::io;
+use std::io::Write;
 use std::path::PathBuf;
+use threadpool::ThreadPool;
 
 fn parse(filename: &str, content: &str, parser_option: ParserOption, should_fail: bool) {
   let context = LuxContext::new();
   let source = Source::new(context, filename, content);
   let mut parser = Parser::new(context, source.clone(), parser_option.clone());
+  let stdout = io::stdout();
   match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| parser.parse())) {
     Ok(r) => match r {
       Ok(ast) => {
@@ -30,27 +33,33 @@ fn parse(filename: &str, content: &str, parser_option: ParserOption, should_fail
           println!("code: \n{}", content);
           panic!("{}", err.error_message());
         }
-        println!(" ... ok");
+        let _ = writeln!(&mut stdout.lock(), " ... ok");
       }
     },
     Err(err) => {
       println!(" ... failed");
       parser.print_stack_trace();
-      panic!("{:?}", err);
+      println!("{:?}", err);
     }
   }
 }
 
-fn get_test_files<F: Fn(&fs::DirEntry)>(dir: &str, cb: F) -> io::Result<()> {
+fn get_test_files<F: Fn(&fs::DirEntry) + Send + Sync + 'static + Copy>(dir: &str, cb: F) -> io::Result<()> {
   let mut d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
   let path = format!("tools/test262-parser-tests/{}", dir);
   d.push(&path);
+  let pool = ThreadPool::new(10);
   for entry in fs::read_dir(d.to_str().unwrap())? {
     let entry = entry?;
     let path = entry.path().clone();
     if !path.is_dir() {
-      cb(&entry);
+      //      cb(&entry);
+      pool.execute(move || cb(&entry));
     }
+  }
+  pool.join();
+  if pool.panic_count() > 0 {
+    panic!("Failed");
   }
   Ok(())
 }
@@ -69,15 +78,17 @@ const SHOULD_RUN_UNDER_STRICT_MODE_CASES: [&'static str; 9] = [
 const EXCLUDES_CASES: [&'static str; 2] = ["early/0f5f47108da5c34e.js", "early/4de83a7417cd30dd.js"];
 
 fn run_tc39_parser_test(dir: &str, should_fail: bool) {
-  if let Err(e) = get_test_files(dir, |entry| {
+  if let Err(e) = get_test_files(dir, move |entry| {
     let path = entry.path();
     let content = fs::read_to_string(entry.path()).unwrap();
     let path_str = path.to_str().unwrap();
     let is_module = path_str.ends_with("module.js");
     let mut should_run_under_strict_mode = false;
+    let stdout = io::stdout();
+    let mut lock = stdout.lock();
     for file in EXCLUDES_CASES.iter() {
       if path_str.ends_with(file) {
-        println!("skip tc39_parer_test {}", path_str);
+        let _ = writeln!(&mut stdout.lock(), "skip tc39_parer_test {}", path_str);
         return;
       }
     }
@@ -110,6 +121,7 @@ fn run_tc39_parser_test(dir: &str, should_fail: bool) {
       },
       should_fail,
     );
+    write!(&mut lock, "");
   }) {
     panic!("{:?}", e);
   }
@@ -117,7 +129,7 @@ fn run_tc39_parser_test(dir: &str, should_fail: bool) {
 
 #[test]
 fn extract_test() {
-  parse("anonymous", "'use strict';'\\001'", ParserOptionBuilder::default().build(), true);
+  parse("anonymous", "'use strict';00", ParserOptionBuilder::default().build(), true);
 }
 
 #[test]

@@ -552,6 +552,7 @@ pub fn parse_numeric_value<'a>(
 
       while let Some(next) = iter.peek().cloned() {
         if ch(next) == '0' {
+          digits_len += 1;
           iter.next();
         } else {
           break;
@@ -561,11 +562,15 @@ pub fn parse_numeric_value<'a>(
 
     if let Some(next) = iter.peek().cloned() {
       if is_decimal_digits(next) {
-        if is_leading_zeros && ch(next) >= '0' && ch(next) <= '7' {
-          kind = ImplicitOctal;
+        if is_leading_zeros && is_octal_digits(next) {
           while let Some(u) = iter.peek().cloned() {
-            if !is_octal_digits(u) {
+            if !is_decimal_digits(u) {
               break;
+            } else if !is_octal_digits(u) {
+              kind = DecimalLeadingZero;
+              break;
+            } else {
+              kind = ImplicitOctal;
             }
             iter.next();
             char_count += 1;
@@ -672,8 +677,6 @@ pub fn parse_numeric_value<'a>(
           }
         }
       }
-    } else if kind == DecimalLeadingZero {
-      kind = Decimal;
     }
 
     return match kind {

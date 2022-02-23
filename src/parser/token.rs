@@ -224,6 +224,7 @@ token_enum! {
     (Public,               false, true,  true,  false, "public"),
     (Static,               false, true,  true,  false, "static"),
     (StringLiteralES,      true,  true,  true,  false, "$StringLiteralES"),
+    (StringLiteralLO,      true,  true,  true,  false, "$StringLiteralLegacyOctal"),
     (Of,                   false, true,  true,  false, "of"),
   }
 }

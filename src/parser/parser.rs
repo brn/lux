@@ -107,9 +107,7 @@ impl DeclarationParseOption {
   }
 
   fn from_named_export_stmt() -> Self {
-    return DeclarationParseOption::CONST_INITIALIZER_REQUIRED
-      | DeclarationParseOption::IGNORE_TERMINATION
-      | DeclarationParseOption::EXPORT_RHS;
+    return DeclarationParseOption::CONST_INITIALIZER_REQUIRED | DeclarationParseOption::EXPORT_RHS;
   }
 }
 
@@ -443,7 +441,7 @@ pub enum ParserType {
 pub struct Parser {
   context: LuxContext,
   parser_state: Exotic<ParserStateStack>,
-  scanner: Exotic<Scanner>,
+  scanner: Scanner,
   region: Region,
   result: ParseResult<Ast>,
   source: Source,
@@ -539,11 +537,12 @@ impl ReportSyntaxError for Parser {
 impl Parser {
   pub fn new(context: impl Context, source: Source, parser_option: ParserOption) -> Self {
     let mut region = Region::new();
-    let empty = Empty::new(&mut region);
+    let mut weak_region = region.clone_weak();
+    let empty = Empty::new(&mut weak_region);
     let parser_state = region.alloc(ParserStateStack::new());
     let error_reporter = region.alloc(ErrorReporter::new(source.clone()));
     let scope = ScopeTree::new(
-      region.clone(),
+      region.clone_weak(),
       ScopeFlag::OPAQUE
         | ScopeFlag::ROOT_SCOPE
         | if parser_option.is_root_super_allowed() {
@@ -570,13 +569,7 @@ impl Parser {
     return Parser {
       context: LuxContext::from_allocation_only_context(context),
       parser_state,
-      scanner: region.alloc(Scanner::new(
-        region.clone(),
-        source.clone(),
-        parser_state,
-        error_reporter,
-        scope.clone(),
-      )),
+      scanner: Scanner::new(region.clone_weak(), source.clone(), parser_state, error_reporter, scope.clone()),
       region: region.clone(),
       result: Ok(empty.into()),
       source: source.clone(),
@@ -586,9 +579,9 @@ impl Parser {
       empty,
       scope,
       expression_context: ExprCtx::Expr(ExpressionContext::new()),
-      ast_builder: region.alloc(AstBuilder::new(region.clone())),
-      skip_tree_builder: region.alloc(SkipTreeBuilder::new(region.clone())),
-      err: SyntaxErrorFactory::new(region.clone()),
+      ast_builder: region.alloc(AstBuilder::new(region.clone_weak())),
+      skip_tree_builder: region.alloc(SkipTreeBuilder::new(region.clone_weak())),
+      err: SyntaxErrorFactory::new(region.clone_weak()),
       parser_option,
       statement_block: StatementBlock::new(),
     };
@@ -907,23 +900,33 @@ impl Parser {
   }
 
   fn parse_directive_prologue(&mut self, mut scope: Exotic<Scope>) -> ParseResult<Expr> {
-    if self.cur() == Token::StringLiteral
-      && self.contextual_keyword() != Token::StringLiteralES
-      && self.is_value_match_with(self.context.static_names().use_strict_str())
-    {
+    let mut has_legacy_octal_sequence_position: Option<SourcePosition> = None;
+    while self.cur() == Token::StringLiteral {
+      if self.contextual_keyword() == Token::StringLiteralLO {
+        has_legacy_octal_sequence_position = Some(self.source_position().clone());
+      }
       let source_position = self.source_position().clone();
       if !self.has_line_break_after() && !self.peek()?.one_of(&[Token::RightBrace, Token::End, Token::Terminate]) {
         return Ok(self.empty.into());
       }
-      scope.mark_as_strict_mode();
+      if self.is_value_match_with(self.context.static_names().use_strict_str()) && self.contextual_keyword() != Token::StringLiteralES {
+        scope.mark_as_strict_mode();
+        if !self.scope.current().is_simple_parameter() {
+          return self.err.use_strict_after_non_simple_param(source_position);
+        }
+        if has_legacy_octal_sequence_position.is_some() {
+          return parse_error!(
+            self.region,
+            "Implicit octal escape sequence not allowed in string mode code",
+            has_legacy_octal_sequence_position.as_ref().unwrap()
+          );
+        }
+        self.parser_state.enter_state(ParserState::InStrictMode);
+      }
       if self.peek()? == Token::Terminate {
         self.advance()?;
       }
       self.advance()?;
-      if !self.scope.current().is_simple_parameter() {
-        return self.err.use_strict_after_non_simple_param(source_position);
-      }
-      self.parser_state.enter_state(ParserState::InStrictMode);
     }
     return Ok(self.empty.into());
   }
@@ -1266,14 +1269,17 @@ impl Parser {
           builder.push_expr(&mut properties, a);
         } else {
           self.invalidate_cover_binding_name(builder);
-          if parse_option.is_binding_pattern_in_decl()
-            && (!self
-              .cur()
-              .one_of(&[Token::LeftBracket, Token::LeftBrace, Token::Identifier, Token::Yield, Token::Await])
-              || (self.cur().one_of(&[Token::Identifier, Token::Yield, Token::Await])
-                && !self.peek()?.one_of(&[Token::OpAssign, Token::RightBracket, Token::Comma])))
+          if !self
+            .cur()
+            .one_of(&[Token::LeftBracket, Token::LeftBrace, Token::Identifier, Token::Yield, Token::Await])
+            || (self.cur().one_of(&[Token::Identifier, Token::Yield, Token::Await])
+              && !self.peek()?.one_of(&[Token::OpAssign, Token::RightBracket, Token::Comma]))
           {
-            return parse_error!(self.region, "'Identifier' or 'Pattern' expected", self.source_position());
+            let e = parse_error!(@raw, self.region, "'Identifier' or 'Pattern' expected", self.source_position());
+            if parse_option.is_binding_pattern_in_decl() {
+              return Err(e);
+            }
+            self.expression_context.set_first_pattern_in_decl_error(e);
           }
           append_var_if!(self, self.cur(), self.value(), self.source_position());
           let expr_start = self.source_position().clone();
@@ -2560,6 +2566,9 @@ impl Parser {
     if is_paren_start && self.cur() == Token::ArrowFunctionGlyph {
       if self.has_line_break_before() {
         return parse_error!(self.region, "Unexpected token found", self.source_position());
+      }
+      if let Some(e) = self.expression_context.first_pattern_in_decl_error() {
+        return Err(e);
       }
       self.expression_context.set_assignment_target_type(AssignmentTargetType::Invalid);
       let mut attr = FunctionAttribute::NONE;

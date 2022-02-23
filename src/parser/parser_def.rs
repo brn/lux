@@ -1,7 +1,7 @@
 use super::ast::*;
 use super::error_reporter::ErrorDescriptor;
 use super::source_position::{RuntimeSourcePosition, SourcePosition};
-use crate::utility::{Exotic, Region};
+use crate::utility::{Exotic, WeakRegion};
 
 pub type ParseResult<T> = Result<T, Exotic<ErrorDescriptor>>;
 
@@ -89,6 +89,9 @@ pub struct ExpressionContext {
   first_pattern_error: Option<Exotic<ErrorDescriptor>>,
 
   #[property(skip)]
+  first_pattern_in_decl_error: Option<Exotic<ErrorDescriptor>>,
+
+  #[property(skip)]
   first_value_error: Option<Exotic<ErrorDescriptor>>,
 
   #[property(skip)]
@@ -143,6 +146,7 @@ impl ExpressionContext {
   pub fn new() -> Self {
     ExpressionContext {
       first_pattern_error: None,
+      first_pattern_in_decl_error: None,
       first_value_error: None,
       first_strict_mode_error: None,
       first_async_context_error: None,
@@ -176,6 +180,9 @@ impl ExpressionContext {
     if self.first_pattern_error.is_some() {
       ec.first_pattern_error = self.first_pattern_error.clone();
     }
+    if self.first_pattern_in_decl_error.is_some() {
+      ec.first_pattern_in_decl_error = self.first_pattern_in_decl_error.clone();
+    }
     if self.first_value_error.is_some() {
       ec.first_value_error = self.first_value_error.clone();
     }
@@ -205,6 +212,7 @@ impl ExpressionContext {
   }
 
   _get_set!(first_pattern_error);
+  _get_set!(first_pattern_in_decl_error);
   _get_set!(first_value_error);
   _get_set!(first_strict_mode_error);
   _get_set!(first_async_context_error);
@@ -217,8 +225,9 @@ impl std::fmt::Debug for ExpressionContext {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     return write!(
       f,
-      "pattern_error = {} value_errr = {} strict_mode_error = {}, imm_fn = {} in = {} assignment_target_type = {:?}",
+      "pattern_error = {} pattern_in_decl_error = {} value_errr = {} strict_mode_error = {}, imm_fn = {} in = {} assignment_target_type = {:?}",
       self.first_pattern_error.is_some(),
+      self.first_pattern_in_decl_error.is_some(),
       self.first_value_error.is_some(),
       self.first_strict_mode_error.is_some(),
       self.is_maybe_immediate_function,
@@ -486,7 +495,7 @@ impl StatementBlock {
 }
 
 pub struct SyntaxErrorFactory {
-  region: Region,
+  region: WeakRegion,
 }
 
 macro_rules! error_def {
@@ -503,7 +512,7 @@ macro_rules! error_def {
   };
 }
 impl SyntaxErrorFactory {
-  pub fn new(region: Region) -> Self {
+  pub fn new(region: WeakRegion) -> Self {
     SyntaxErrorFactory { region: region.clone() }
   }
   error_def!(invalid_token_found, "Invalid token found");

@@ -1,7 +1,7 @@
 use super::ast::*;
 use super::source_position::*;
 use crate::structs::FixedU16CodePointArray;
-use crate::utility::{Exotic, Region};
+use crate::utility::{Exotic, WeakRegion};
 use property::Property;
 use std::collections::HashMap;
 
@@ -75,7 +75,7 @@ pub struct Scope {
 }
 
 impl Scope {
-  pub fn new(mut region: Region, scope_flag: ScopeFlag) -> Exotic<Self> {
+  pub fn new(mut region: WeakRegion, scope_flag: ScopeFlag) -> Exotic<Self> {
     return region.alloc(Scope {
       scope_flag,
       children: Vec::new(),

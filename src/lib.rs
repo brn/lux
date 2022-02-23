@@ -47,3 +47,5 @@ pub mod parser;
 #[cfg(test)]
 #[macro_use]
 extern crate indoc;
+
+extern crate threadpool;

@@ -204,7 +204,6 @@ pub struct Scanner {
   token: Token,
   lookahead_token: Token,
   iter: SourceCursor,
-  region: Region,
   source: Source,
   contextual_keywords: [Token; 2],
   numeric_value: [f64; 2],
@@ -220,6 +219,7 @@ pub struct Scanner {
   last_cursor: isize,
   current_line_first_token: [Token; 2],
   scope: ScopeTree,
+  region: WeakRegion,
 }
 
 impl ReportSyntaxError for Scanner {
@@ -234,7 +234,7 @@ impl ReportSyntaxError for Scanner {
 
 impl Scanner {
   pub fn new(
-    region: Region,
+    region: WeakRegion,
     source: Source,
     parser_state_stack: Exotic<ParserStateStack>,
     error_reporter: Exotic<ErrorReporter>,
@@ -1070,6 +1070,8 @@ impl Scanner {
                         self.current_position(),
                         Token::Invalid
                       );
+                    } else {
+                      self.contextual_keywords[self.mode as usize] = Token::StringLiteralLO;
                     }
                     let octal_value = self.decode_octal_escape();
                     self.current_literal_buffer_mut().push(octal_value);
@@ -1115,7 +1117,7 @@ impl Scanner {
           if value == start {
             if !is_escaped {
               self.advance();
-              if has_escape_sequence {
+              if has_escape_sequence && self.contextual_keywords[self.mode as usize] != Token::StringLiteralLO {
                 self.contextual_keywords[self.mode as usize] = Token::StringLiteralES;
               }
               return Token::StringLiteral;
@@ -1362,8 +1364,10 @@ impl Scanner {
     };
     self.current_position_mut().add_end_col(next_pos);
     self.advance();
-
     if let Ok((value, kind)) = result {
+      if chars::is_identifier_continue(self.iter.uc32().code(), false) {
+        report_error!(self, "Unexpected token found", self.source_position(), Token::Invalid);
+      }
       self.set_current_numeric_value(value);
       if kind == chars::NumericValueKind::ImplicitOctal {
         return Token::ImplicitOctalLiteral;
