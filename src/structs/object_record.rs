@@ -1196,7 +1196,6 @@ impl FullObjectRecord {
     return BareHeapLayout::<FastPropertiesLayout>::wrap(unsafe { this.raw_heap().offset(FULL_OBJECT_RECORD_LAYOUT_SIZE as isize) });
   }
 
-  #[cfg(debug_assertions)]
   fn short_description(&self) -> String {
     return format!("FullObjectRecord {{ {:?} }}", self.header.shape());
   }

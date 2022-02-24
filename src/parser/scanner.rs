@@ -1137,10 +1137,10 @@ impl Scanner {
   fn tokenize_identifier(&mut self, disallow_escape_sequence: bool) -> Token {
     let mut value = self.iter.uc32();
     self.current_literal_buffer_mut().clear();
-    if !chars::is_identifier_start(value.code()) {
+    if !chars::is_identifier_start(value.code(), true) {
       return if self.has_more() { Token::Invalid } else { Token::End };
     }
-    while self.has_more() && chars::is_identifier_continue(value.code(), false) {
+    while self.has_more() && chars::is_identifier_continue(value.code(), true) {
       if !value.is_surrogate_pair() && chars::ch(value.code() as u16) == '\\' {
         self.advance();
         let unicode_keyword = self.iter.uc32();
@@ -1179,6 +1179,7 @@ impl Scanner {
                 Token::Invalid
               );
             }
+            self.contextual_keywords[self.mode as usize] = Token::IdentifierES;
           } else {
             self.current_literal_buffer_mut().clear();
             report_error!(
@@ -1201,6 +1202,9 @@ impl Scanner {
         self.advance();
       }
       value = self.iter.uc32();
+    }
+    if self.contextual_keywords[self.mode as usize] == Token::IdentifierES {
+      return Token::Identifier;
     }
     let token = self.get_identifier_type();
     if token.is_contextual_keyword() {
@@ -1365,7 +1369,7 @@ impl Scanner {
     self.current_position_mut().add_end_col(next_pos);
     self.advance();
     if let Ok((value, kind)) = result {
-      if chars::is_identifier_continue(self.iter.uc32().code(), false) {
+      if chars::is_identifier_continue(self.iter.uc32().code(), true) {
         report_error!(self, "Unexpected token found", self.source_position(), Token::Invalid);
       }
       self.set_current_numeric_value(value);

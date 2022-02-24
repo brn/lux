@@ -201,9 +201,9 @@ pub const fn char_safe(u: u16) -> Result<char, u16> {
 
 // http://www.ecma-international.org/ecma-262/9.0/index.html#sec-names-and-keywords
 #[inline]
-pub fn is_identifier_start(value: u32) -> bool {
-  // [:ID_Start:] + $ + _ + \\
-  if value == 36 || value == 95 || value == 92 {
+pub fn is_identifier_start(value: u32, should_includes_reverse_solidus: bool) -> bool {
+  // [:ID_Start:] + $ + _ or \\
+  if value == 36 || value == 95 || (should_includes_reverse_solidus && value == 92) {
     return true;
   }
   return Ucd::get_id_property(value) == UcdIdProperty::IdStart;
@@ -211,21 +211,16 @@ pub fn is_identifier_start(value: u32) -> bool {
 
 // http://www.ecma-international.org/ecma-262/9.0/index.html#sec-names-and-keywords
 #[inline]
-pub fn is_identifier_continue(value: u32, is_unicode_escape_seq: bool) -> bool {
-  if is_unicode_escape_seq {
-    return is_hex_digits(value as u16);
-  }
-
+pub fn is_identifier_continue(value: u32, should_includes_reverse_solidus: bool) -> bool {
   // in https://262.ecma-international.org/12.0/ 12.1 Unicode Format-Control Characaters
   // <ZWNJ> + <ZWJ>
   if value == 0x200C || value == 0x200D {
     return true;
   }
 
-  if is_identifier_start(value) {
+  if is_identifier_start(value, should_includes_reverse_solidus) {
     return true;
   }
-
   return Ucd::get_id_property(value) == UcdIdProperty::IdContinue;
 }
 
@@ -724,12 +719,12 @@ mod chars_test {
           if let Some(low) = iter.next() {
             count += 1;
             let uc = join_surrogate_pair(*c, *low);
-            assert!(is_identifier_start(uc));
+            assert!(is_identifier_start(uc, false));
           } else {
             unreachable!();
           }
         } else {
-          assert!(is_identifier_start((*c) as u32));
+          assert!(is_identifier_start((*c) as u32, false));
         }
         count += 1;
       } else {

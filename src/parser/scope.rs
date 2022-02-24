@@ -151,17 +151,15 @@ impl Scope {
     return self.scope_flag.contains(ScopeFlag::ASYNC_CONTEXT);
   }
 
-  pub fn is_generator_context_origin(&self) -> bool {
-    return self.scope_flag.contains(ScopeFlag::GENERATOR_CONTEXT);
-  }
-
   pub fn is_generator_context(&self) -> bool {
-    return self.is_generator_context_origin()
-      || if let Some(p) = self.parent_scope {
-        p.is_generator_context()
-      } else {
-        false
-      };
+    if self.is_class_scope() {
+      if let Some(p) = self.parent_scope {
+        return p.is_generator_context();
+      }
+    } else {
+      return self.scope_flag.contains(ScopeFlag::GENERATOR_CONTEXT);
+    }
+    return false;
   }
 
   pub fn is_strict_mode_origin(&self) -> bool {

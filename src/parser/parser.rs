@@ -522,6 +522,13 @@ macro_rules! scoped_expr_ctx {
     $self.set_expression_context(p);
     r
   }};
+  (@propagate_assignment_target, $self:expr, $item:block) => {{
+    let mut p = $self.new_expression_context();
+    let r = $item;
+    p.set_assignment_target_type($self.expression_context.assignment_target_type());
+    $self.set_expression_context(p);
+    r
+  }};
 }
 
 impl ReportSyntaxError for Parser {
@@ -747,6 +754,9 @@ impl Parser {
 
   fn invalidate_arrow_parameters(&self, ec: &ExprCtx) -> Result<(), Exotic<ErrorDescriptor>> {
     if let Err(e) = self.invalidate_pattern(ec) {
+      return Err(e);
+    }
+    if let Some(e) = ec.first_pattern_in_decl_error() {
       return Err(e);
     }
     if let Ok(ctx) = ec.to_arrow_ctx() {
@@ -1540,9 +1550,9 @@ impl Parser {
           Parser::utf8_to_utf16(self.cur().symbol())
         };
 
-        if self.cur() == Token::Yield && self.scope.current().is_generator_context_origin() && self.peek()? != Token::Colon {
+        if self.cur() == Token::Yield && self.scope.current().is_generator_context() && self.peek()? != Token::Colon {
           let e = parse_error!(@raw, self.region, "Yield not allowed here", self.source_position());
-          self.expression_context.set_first_generator_context_origin_error(e);
+          self.expression_context.set_first_generator_context_error(e);
         }
 
         let key = if self.peek_with_regexp()? != Token::OpAssign {
@@ -1632,14 +1642,31 @@ impl Parser {
     let value_start_pos = self.source_position().clone();
     let ident_value = self.value().clone();
     let next_token = self.cur();
-    if next_token.one_of(&[Token::Identifier, Token::Yield, Token::Await]) {
-      self.invalidate_cover_binding_name(builder);
-    }
 
     let mut parent_ctx = self.new_expression_context();
-    let value = next_parse!(self, self.parse_assignment_expression(builder))?;
+    let mut should_record_pattern_error = false;
+    if !self
+      .cur()
+      .one_of(&[Token::LeftBracket, Token::LeftBrace, Token::Identifier, Token::Yield, Token::Await])
+      || (self.cur().one_of(&[Token::Identifier, Token::Yield, Token::Await])
+        && !self
+          .peek()?
+          .one_of(&[Token::OpAssign, Token::RightBracket, Token::RightBrace, Token::Comma]))
+    {
+      should_record_pattern_error = true;
+    } else if next_token.one_of(&[Token::Identifier, Token::Yield, Token::Await]) {
+      self.invalidate_cover_binding_name(builder);
+    }
+    let value = next_parse!(self, self.parse_assignment_expression_with_option(builder, true))?;
     let value_end_pos = self.prev_source_position().clone();
-    if builder.is_identifier(value) || (!value.is_parenthesized() && builder.is_initializer(value)) {
+    if should_record_pattern_error {
+      let e = parse_error!(@raw, self.region, "'Identifier' or 'Pattern' expected", &pos_range!(@start value_start_pos, value_end_pos));
+      if parse_option.is_binding_pattern_in_decl() {
+        return Err(e);
+      }
+      self.expression_context.set_first_pattern_in_decl_error(e);
+    }
+    if builder.is_identifier(value) || builder.is_initializer(value) {
       append_var_if!(self, next_token, ident_value, &value_start_pos);
     } else if !builder.is_structural_literal(value) {
       let e = parse_error!(@raw, self.region, "'Identifier' or 'Pattern' expected", &pos_range!(@start value_start_pos, value_end_pos));
@@ -1819,6 +1846,8 @@ impl Parser {
       if let Some(e) = self.expression_context.first_value_error() {
         return Err(e);
       }
+      self.expression_context.clear_first_pattern_error();
+      self.expression_context.clear_first_pattern_in_decl_error();
       if builder.is_structural_literal(expr) {
         let e = parse_error!(@raw, self.region, "Unexpected destructuring assignment target found", &expr_pos);
         self.expression_context.set_first_pattern_error(e);
@@ -1964,7 +1993,7 @@ impl Parser {
         Token::LeftBracket => {
           self.expression_context.clear_first_pattern_error();
           self.advance()?;
-          let n = scoped_expr_ctx!(@propagate, self, {
+          let n = scoped_expr_ctx!(self, {
             self.expression_context.set_is_in_allowed(true);
             next_parse!(self, self.parse_expression(builder, false))?
           });
@@ -2093,13 +2122,14 @@ impl Parser {
       return parse_error!(self.region, "import.meta? identifier meta expected", self.source_position());
     }
     expect!(self, self.cur(), Token::LeftParen);
-    let expr = scoped_expr_ctx!(@propagate, self, {
+    let expr = scoped_expr_ctx!(self, {
       self.expression_context.set_is_in_allowed(true);
-      next_parse!(self, self.parse_assignment_expression(builder))?
+      let expr = next_parse!(self, self.parse_assignment_expression(builder))?;
+      if let Some(e) = self.expression_context.first_value_error() {
+        return Err(e);
+      }
+      expr
     });
-    if let Some(e) = self.expression_context.first_value_error() {
-      return Err(e);
-    }
     expect!(self, self.cur(), Token::RightParen);
     return Ok(build!(self, builder, call_expression, CallReceiverType::Import, None, Some(expr)));
   }
@@ -2474,7 +2504,6 @@ impl Parser {
   fn parse_conditional_expression<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
     let bin_expr = next_parse!(self, self.parse_binary_expression(builder))?;
     if self.cur() == Token::Question {
-      self.expression_context.set_assignment_target_type(AssignmentTargetType::Invalid);
       self.advance()?;
       let lhs = scoped_expr_ctx!(@propagate, self, {
         self.expression_context.set_is_in_allowed(true);
@@ -2491,6 +2520,7 @@ impl Parser {
       if let Some(e) = self.expression_context.first_value_error() {
         return Err(e);
       }
+      self.expression_context.set_assignment_target_type(AssignmentTargetType::Invalid);
       return Ok(build!(@runtime_pos,
         builder,
         conditional_expression,
@@ -2504,6 +2534,14 @@ impl Parser {
   }
 
   fn parse_assignment_expression<Builder: NodeOps>(&mut self, mut builder: Exotic<Builder>) -> ParseResult<Expr> {
+    return next_parse!(self, self.parse_assignment_expression_with_option(builder, false));
+  }
+
+  fn parse_assignment_expression_with_option<Builder: NodeOps>(
+    &mut self,
+    mut builder: Exotic<Builder>,
+    is_pattern_rhs: bool,
+  ) -> ParseResult<Expr> {
     if self.cur() == Token::Yield && self.scope.current().is_generator_context() {
       return next_parse!(self, self.parse_yield_expression(builder));
     }
@@ -2613,16 +2651,6 @@ impl Parser {
 
     if token.is_assignment_operator() {
       ec.set_assignment_target_type(AssignmentTargetType::Invalid);
-      if token == Token::OpAssign {
-        if let Err(e) = self.invalidate_pattern(&self.expression_context) {
-          return Err(e);
-        }
-
-        if let Ok(arrow) = self.expression_context.to_arrow_ctx_mut() {
-          arrow.set_is_simple_parameter(false);
-          arrow.propagate_arrow(&mut ec);
-        }
-      }
       if self.expression_context.assignment_target_type() == AssignmentTargetType::Invalid {
         if self.cur() == Token::OpAssign {
           if !builder.is_structural_literal(expr) {
@@ -2634,6 +2662,16 @@ impl Parser {
           return self
             .err
             .invalid_left_hand_side_expression(pos_range!(@just &expr_start_pos, &expr_end_pos));
+        }
+      }
+      if token == Token::OpAssign {
+        if let Err(e) = self.invalidate_pattern(&self.expression_context) {
+          return Err(e);
+        }
+
+        if let Ok(arrow) = self.expression_context.to_arrow_ctx_mut() {
+          arrow.set_is_simple_parameter(false);
+          arrow.propagate_arrow(&mut ec);
         }
       }
       self.advance()?;
@@ -2651,7 +2689,13 @@ impl Parser {
       }
       self.set_expression_context(ec);
       return Ok(build!(@runtime_pos, builder, binary_expr, expr.source_position(), token, expr, assignment));
+    } else if is_pattern_rhs {
+      if !self.expression_context.is_simple_assignment_target() && !builder.is_structural_literal(expr) {
+        let e = parse_error!(@raw, self.region, "Invalid pattern found", &pos_range!(@just &expr_start_pos, &expr_end_pos));
+        self.expression_context.set_first_pattern_error(e);
+      }
     }
+
     self.expression_context.propagate(&mut ec);
     self.set_expression_context(ec);
     return Ok(expr);
@@ -2694,7 +2738,6 @@ impl Parser {
     }
     let expr = next_parse!(self, self.parse_assignment_expression(builder))?;
     if self.cur() == Token::Comma {
-      self.expression_context.set_assignment_target_type(AssignmentTargetType::Invalid);
       let mut items = Vec::<Expr>::new();
       builder.push_expr(&mut items, expr);
       while self.cur() == Token::Comma {
@@ -2725,6 +2768,7 @@ impl Parser {
           builder.push_expr(&mut items, assignment_expr);
         }
       }
+      self.expression_context.set_assignment_target_type(AssignmentTargetType::Invalid);
       return Ok(build!(@pos, builder, expressions, start_pos, items));
     }
 
@@ -3014,13 +3058,16 @@ impl Parser {
         );
       }
 
-      self.expression_context.reset();
+      self.expression_context.to_arrow_ctx_mut_unchecked().reset_var_list();
       let rhs = if self.cur() == Token::OpAssign {
         self.advance()?;
-        let rhs = next_parse!(self, self.parse_assignment_expression(builder))?;
-        if let Some(e) = self.expression_context.first_value_error() {
-          return Err(e);
-        }
+        let rhs = scoped_expr_ctx!(self, {
+          let rhs = next_parse!(self, self.parse_assignment_expression(builder))?;
+          if let Some(e) = self.expression_context.first_value_error() {
+            return Err(e);
+          }
+          rhs
+        });
         let e = parse_error!(@raw, self.region, "Unexpected initializer", self.source_position());
         self.expression_context.set_first_for_in_of_lhs_error(e);
         Some(rhs)
@@ -3078,6 +3125,8 @@ impl Parser {
         is_vars = true;
         builder.push_stmt(&mut vars, var);
         self.advance()?;
+        let e = parse_error!(@raw, self.region, "Invalid left-hand-side expression", &pos_range!(@just start_pos, self.source_position()));
+        self.expression_context.set_first_for_in_of_lhs_error(e);
       }
     }
   }
@@ -3955,8 +4004,6 @@ impl Parser {
     self.statement_block.set_is_continuable(false);
     self.parser_state.enter_state(ParserState::InFunction);
     let start = self.source_position().clone();
-    let is_async = attr.contains(FunctionAttribute::ASYNC);
-    let is_generator = attr.contains(FunctionAttribute::GENERATOR);
     if attr.contains(FunctionAttribute::ASYNC) {
       self.advance()?;
     }
@@ -3968,6 +4015,8 @@ impl Parser {
       self.advance()?;
       attr |= FunctionAttribute::GENERATOR;
     }
+    let is_generator = attr.contains(FunctionAttribute::GENERATOR);
+    let is_async = attr.contains(FunctionAttribute::ASYNC);
     let parent_ctx = self.new_arrow_context();
     if self.cur().one_of(&[Token::Identifier, Token::Yield, Token::Await]) {
       let val = self.value().clone();
@@ -4040,7 +4089,7 @@ impl Parser {
       self.parse_formal_parameters(builder, attr.contains(FunctionAttribute::GENERATOR), false)
     )?;
     if attr.contains(FunctionAttribute::GENERATOR) {
-      if let Some(e) = self.expression_context.first_generator_context_origin_error() {
+      if let Some(e) = self.expression_context.first_generator_context_error() {
         return Err(e);
       }
     }
@@ -4123,6 +4172,7 @@ impl Parser {
   ) -> ParseResult<Expr> {
     let start_pos = self.source_position().clone();
     let mut params = Vec::<Expr>::new();
+
     loop {
       let mut next_expr;
       let expr_start_pos = self.source_position().clone();
@@ -4158,6 +4208,13 @@ impl Parser {
           return parse_error!(self.region, "Super not allowed here", self.source_position());
         }
         Token::Spread => {
+          if is_setter {
+            return parse_error!(
+              self.region,
+              "Setter function may not receive spread parameter",
+              self.source_position()
+            );
+          }
           append_var_if!(self, self.peek_with_regexp()?, self.peek_value(), self.source_position());
           let start = self.source_position().clone();
           let rp = next_parse!(self, self.parse_function_rest_parameter(builder))?;
@@ -4469,7 +4526,7 @@ impl Parser {
     }
 
     if attr.contains(FunctionAttribute::GENERATOR) {
-      if let Some(e) = self.expression_context.first_generator_context_origin_error() {
+      if let Some(e) = self.expression_context.first_generator_context_error() {
         return Err(e);
       }
     }

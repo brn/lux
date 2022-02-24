@@ -64,7 +64,7 @@ fn get_test_files<F: Fn(&fs::DirEntry) + Send + Sync + 'static + Copy>(dir: &str
   Ok(())
 }
 
-const SHOULD_RUN_UNDER_STRICT_MODE_CASES: [&'static str; 9] = [
+const SHOULD_RUN_UNDER_STRICT_MODE_CASES: [&'static str; 11] = [
   "early/1aff49273f3e3a98.js",
   "early/12a74c60f52a60de.js",
   "early/be7329119eaa3d47.js",
@@ -74,6 +74,8 @@ const SHOULD_RUN_UNDER_STRICT_MODE_CASES: [&'static str; 9] = [
   "fail/3990bb94b19b1071.module.js",
   "fail/79f882da06f88c9f.js",
   "fail/92b6af54adef3624.js",
+  "fail/748656edbfb2d0bb.js",
+  "fail/0d5e450f1da8a92a.js",
 ];
 const EXCLUDES_CASES: [&'static str; 2] = ["early/0f5f47108da5c34e.js", "early/4de83a7417cd30dd.js"];
 
@@ -129,7 +131,7 @@ fn run_tc39_parser_test(dir: &str, should_fail: bool) {
 
 #[test]
 fn extract_test() {
-  parse("anonymous", "'use strict';00", ParserOptionBuilder::default().build(), true);
+  parse("anonymous", r#"(function*yield(){})"#, ParserOptionBuilder::default().build(), true);
 }
 
 #[test]

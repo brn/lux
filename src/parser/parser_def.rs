@@ -107,9 +107,6 @@ pub struct ExpressionContext {
   first_generator_context_error: Option<Exotic<ErrorDescriptor>>,
 
   #[property(skip)]
-  first_generator_context_origin_error: Option<Exotic<ErrorDescriptor>>,
-
-  #[property(skip)]
   first_for_in_of_lhs_error: Option<Exotic<ErrorDescriptor>>,
 
   #[property(get(type = "copy"), set(type = "ref"))]
@@ -120,6 +117,9 @@ pub struct ExpressionContext {
 
   #[property(get(type = "copy"), set(type = "ref"))]
   is_maybe_immediate_function: bool,
+
+  #[property(get(type = "copy"), set(type = "ref"))]
+  is_binding_pattern_required: bool,
 }
 
 macro_rules! _get_set {
@@ -151,11 +151,11 @@ impl ExpressionContext {
       first_strict_mode_error: None,
       first_async_context_error: None,
       first_generator_context_error: None,
-      first_generator_context_origin_error: None,
       first_global_error: None,
       first_for_in_of_lhs_error: None,
       is_maybe_immediate_function: false,
       is_in_allowed: true,
+      is_binding_pattern_required: false,
       assignment_target_type: AssignmentTargetType::Simple,
     }
   }
@@ -164,6 +164,7 @@ impl ExpressionContext {
     let mut child = ExpressionContext::new();
     child.set_is_in_allowed(self.is_in_allowed);
     child.set_is_maybe_immediate_function(self.is_maybe_immediate_function());
+    child.set_is_binding_pattern_required(self.is_binding_pattern_required());
     return child;
   }
 
@@ -173,6 +174,9 @@ impl ExpressionContext {
     child
       .expression_context
       .set_is_maybe_immediate_function(self.is_maybe_immediate_function);
+    child
+      .expression_context
+      .set_is_binding_pattern_required(self.is_binding_pattern_required());
     return child;
   }
 
@@ -195,9 +199,6 @@ impl ExpressionContext {
     if self.first_generator_context_error.is_some() {
       ec.first_generator_context_error = self.first_generator_context_error.clone();
     }
-    if self.first_generator_context_origin_error.is_some() {
-      ec.first_generator_context_origin_error = self.first_generator_context_origin_error.clone();
-    }
     if self.first_global_error.is_some() {
       ec.first_global_error = self.first_global_error.clone();
     }
@@ -211,6 +212,10 @@ impl ExpressionContext {
     return std::mem::replace(self, ExpressionContext::new());
   }
 
+  pub fn is_simple_assignment_target(&self) -> bool {
+    return self.assignment_target_type == AssignmentTargetType::Simple;
+  }
+
   _get_set!(first_pattern_error);
   _get_set!(first_pattern_in_decl_error);
   _get_set!(first_value_error);
@@ -218,16 +223,16 @@ impl ExpressionContext {
   _get_set!(first_async_context_error);
   _get_set!(first_global_error);
   _get_set!(first_generator_context_error);
-  _get_set!(first_generator_context_origin_error);
   _get_set!(first_for_in_of_lhs_error);
 }
 impl std::fmt::Debug for ExpressionContext {
   fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
     return write!(
       f,
-      "pattern_error = {} pattern_in_decl_error = {} value_errr = {} strict_mode_error = {}, imm_fn = {} in = {} assignment_target_type = {:?}",
+      "pattern_error = {} pattern_in_decl_error = {} for_in_of_lhs_error = {} value_errr = {} strict_mode_error = {}, imm_fn = {} in = {} assignment_target_type = {:?}",
       self.first_pattern_error.is_some(),
       self.first_pattern_in_decl_error.is_some(),
+      self.first_for_in_of_lhs_error.is_some(),
       self.first_value_error.is_some(),
       self.first_strict_mode_error.is_some(),
       self.is_maybe_immediate_function,
@@ -320,6 +325,10 @@ impl ArrowFunctionContext {
 
   pub fn set_var_list(&mut self, v: &Vec<(Vec<u16>, SourcePosition)>) {
     self.var_list = v.clone();
+  }
+
+  pub fn reset_var_list(&mut self) {
+    self.var_list = Vec::new();
   }
 
   pub fn var_list_mut(&mut self) -> &mut Vec<(Vec<u16>, SourcePosition)> {

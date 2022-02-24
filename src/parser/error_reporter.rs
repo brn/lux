@@ -167,7 +167,7 @@ macro_rules! report_error {
     let message = $message;
     _base_report_error!($self, pos, message);
   };
-  ($self, $message:expr, $pos:expr, $return_value:expr) => {{
+  ($self:expr, $message:expr, $pos:expr, $return_value:expr) => {{
     report_error!(noreturn $self, $message, $pos);
     return $return_value;
   }};
@@ -182,7 +182,7 @@ macro_rules! parse_error {
     let pos = $pos;
     let message = $message;
     let mut e = $region.alloc(ErrorDescriptor::new($pos));
-    e.append_message(message);
+    e.append_message(&message);
     e
   }};
 }
