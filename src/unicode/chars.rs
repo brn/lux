@@ -536,12 +536,6 @@ pub fn parse_numeric_value<'a>(
             Ok(val) => Ok((val as f64, NumericValueKind::Octal)),
             Err(e) => Err(e),
           };
-        } else if ch(*next) == '.' {
-          iter.next();
-          is_leading_zeros = false;
-          is_period_seen = true;
-          kind = Decimal;
-          char_count += 1;
         }
       }
 
@@ -551,6 +545,16 @@ pub fn parse_numeric_value<'a>(
           iter.next();
         } else {
           break;
+        }
+      }
+
+      if let Some(next) = iter.peek() {
+        if ch(*next) == '.' {
+          iter.next();
+          is_leading_zeros = false;
+          is_period_seen = true;
+          kind = Decimal;
+          char_count += 1;
         }
       }
     }

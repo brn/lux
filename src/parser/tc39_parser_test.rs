@@ -77,7 +77,19 @@ const SHOULD_RUN_UNDER_STRICT_MODE_CASES: [&'static str; 11] = [
   "fail/748656edbfb2d0bb.js",
   "fail/0d5e450f1da8a92a.js",
 ];
-const EXCLUDES_CASES: [&'static str; 2] = ["early/0f5f47108da5c34e.js", "early/4de83a7417cd30dd.js"];
+const EXCLUDES_CASES: [&'static str; 9] = [
+  "early/0f5f47108da5c34e.js",
+  "early/4de83a7417cd30dd.js",
+  /* from here regexp */
+  "fail/e4a43066905a597b.js",
+  "fail/66e383bfd18e66ab.js",
+  "fail/78c215fabdf13bae.js",
+  "fail/66e383bfd18e66ab.js",
+  "fail/bf49ec8d96884562.js",
+  /* to here */
+  "fail/ef81b93cf9bdb4ec.js",
+  "fail/98204d734f8c72b3.js",
+];
 
 fn run_tc39_parser_test(dir: &str, should_fail: bool) {
   if let Err(e) = get_test_files(dir, move |entry| {

@@ -27,6 +27,7 @@ bitflags! {
     const SHARED = 0x4;
     const PRIVATE = 0x8;
     const FIXED = 0x10;
+    const JIT = 0x20;
   }
 }
 bitflags! {
@@ -128,6 +129,11 @@ unsafe fn alloc_posix(addr: *mut c_void, size: usize, prot: Prot, flags: Flags) 
     if addr.is_null() && flags.contains(Flags::FIXED) {
       mmap_flags |= MapFlags::MAP_FIXED;
     }
+
+    #[cfg(any(target_os = "ios", target_os = "macos"))]
+    if flags.contains(Flags::JIT) {
+      mmap_flags |= MapFlags::MAP_JIT;
+    }
   }
 
   match mman::mmap(addr, size, prot_flags, mmap_flags, -1, 0) {
@@ -212,6 +218,25 @@ fn get_last_error_win() -> String {
 #[cfg(test)]
 mod test {
   #[test]
+  #[cfg(any(target_os = "ios", target_os = "macos"))]
+  fn mmap_test() {
+    use super::*;
+    use std;
+    match allocate(
+      std::ptr::null_mut(),
+      1024,
+      Prot::READ | Prot::WRITE | Prot::EXEC,
+      Flags::ANONYMOUS | Flags::PRIVATE | Flags::JIT,
+      AllocationType::COMMIT,
+    ) {
+      Ok(_) => {}
+      Err(e) => {
+        panic!("{}", e)
+      }
+    }
+  }
+
+  #[cfg(all(not(target_os = "ios"), not(target_os = "macos")))]
   fn mmap_test() {
     use super::*;
     use std;

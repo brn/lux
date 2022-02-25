@@ -1088,7 +1088,7 @@ impl Parser {
           let await_error = parse_error!(@raw, self.region, "await is not allowed here", self.source_position());
           self.expression_context.set_first_global_error(await_error);
           self.expression_context.set_first_async_context_error(await_error);
-          if (self.scope.current().is_root_scope() && self.scope.root().is_module()) || self.scope.current().is_async_context() {
+          if self.scope.root().is_module() || self.scope.current().is_async_context() {
             return Err(await_error);
           }
         }
@@ -1279,24 +1279,30 @@ impl Parser {
           builder.push_expr(&mut properties, a);
         } else {
           self.invalidate_cover_binding_name(builder);
+          let mut should_record_pattern_error = false;
           if !self
             .cur()
             .one_of(&[Token::LeftBracket, Token::LeftBrace, Token::Identifier, Token::Yield, Token::Await])
             || (self.cur().one_of(&[Token::Identifier, Token::Yield, Token::Await])
               && !self.peek()?.one_of(&[Token::OpAssign, Token::RightBracket, Token::Comma]))
           {
-            let e = parse_error!(@raw, self.region, "'Identifier' or 'Pattern' expected", self.source_position());
-            if parse_option.is_binding_pattern_in_decl() {
-              return Err(e);
-            }
-            self.expression_context.set_first_pattern_in_decl_error(e);
+            should_record_pattern_error = true;
           }
           append_var_if!(self, self.cur(), self.value(), self.source_position());
           let expr_start = self.source_position().clone();
           let expr = scoped_expr_ctx!(@propagate, self, {
             self.expression_context.set_is_in_allowed(true);
-            next_parse!(self, self.parse_assignment_expression(builder))?
+            next_parse!(self, self.parse_assignment_expression_with_option(builder, true))?
           });
+          let expr_end = self.source_position().clone();
+
+          if should_record_pattern_error {
+            let e = parse_error!(@raw, self.region, "'Identifier' or 'Pattern' expected", &pos_range!(@start expr_start, expr_end));
+            if parse_option.is_binding_pattern_in_decl() {
+              return Err(e);
+            }
+            self.expression_context.set_first_pattern_in_decl_error(e);
+          }
 
           if !builder.is_structural_literal(expr)
             && !builder.is_initializer(expr)
@@ -3188,10 +3194,8 @@ impl Parser {
           }
           self.expression_context.set_first_strict_mode_error(e);
         }
-        if ((self.scope.current().is_root_scope() && self.scope.root().is_module())
-          || option.contains(IdentifierParseOption::ASYNC_CONTEXT))
-          && self.cur() == Token::Await
-        {
+
+        if (self.scope.root().is_module() || option.contains(IdentifierParseOption::ASYNC_CONTEXT)) && self.cur() == Token::Await {
           return parse_error!(self.region, "await is not allowed here", self.source_position());
         }
 
@@ -3853,6 +3857,7 @@ impl Parser {
     let start_pos = self.source_position().clone();
     expect!(self, self.cur(), Token::Try);
     let try_block = next_parse!(self, self.parse_block_statement(builder))?;
+    let next_start_pos = self.source_position().clone();
     let catch_block = if self.cur() == Token::Catch {
       Some(next_parse!(self, self.parse_catch(builder))?)
     } else {
@@ -3863,6 +3868,10 @@ impl Parser {
     } else {
       None
     };
+
+    if catch_block.is_none() && finally_block.is_none() {
+      return parse_error!(self.region, "catch or finally is requried", &next_start_pos);
+    }
 
     return Ok(build!(
       @pos,

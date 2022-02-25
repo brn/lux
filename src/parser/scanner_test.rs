@@ -64,15 +64,17 @@ mod scanner_test {
 
   #[test]
   fn scanner_all_token_test() {
-    for token in Token::values().filter(|token| !token.is_pseudo_token() && !token.is_contextual_keyword()) {
+    for token in Token::values().filter(|token| !token.is_pseudo_token() && !token.is_contextual_keyword() && **token != Token::OpDivAssign)
+    {
       scan_test(*token);
     }
   }
 
   #[test]
   fn scanner_all_token_once_test() {
-    let base_iter =
-      Token::values().filter(|token| !token.is_pseudo_token() && !token.is_contextual_keyword() && **token != Token::BackQuote);
+    let base_iter = Token::values().filter(|token| {
+      !token.is_pseudo_token() && !token.is_contextual_keyword() && **token != Token::BackQuote && **token != Token::OpDivAssign
+    });
     let source: String = base_iter.clone().map(|token| token.symbol()).intersperse(" ").collect();
     let results = scan(&source);
     let mut expected = base_iter.clone().collect::<Vec<_>>();
@@ -465,14 +467,6 @@ mod scanner_test {
     init_scanner("0002396", None, |mut scanner| {
       assert_eq!(scanner.next(), Token::NumericLiteral);
       assert_eq!(scanner.current_numeric_value(), 2396 as f64);
-    });
-  }
-
-  #[test]
-  fn scanner_scan_digit_leading_zeroes_with_dot() {
-    init_scanner("0002.396", None, |mut scanner| {
-      assert_eq!(scanner.next(), Token::NumericLiteral);
-      assert_eq!(scanner.current_numeric_value(), 2.396 as f64);
     });
   }
 
