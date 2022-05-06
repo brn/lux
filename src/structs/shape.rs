@@ -34,6 +34,7 @@ pub enum ShapeTag {
   PropertyDescriptor,
   Property,
   InternalArray,
+  BytecodeVector,
   StringPiece,
   FixedU16Array,
   StringRope,
@@ -208,6 +209,12 @@ impl Shape {
   pub const fn internal_array() -> Shape {
     return Shape {
       tag: ShapeTag::InternalArray,
+    };
+  }
+
+  pub const fn bytecode_vector() -> Shape {
+    return Shape {
+      tag: ShapeTag::BytecodeVector,
     };
   }
 

@@ -1,6 +1,7 @@
 use super::super::structs::FixedU16CodePointArray;
 use super::super::unicode::chars;
 use super::error_reporter::*;
+use super::parser_range::ParserRange;
 use super::parser_state::{ParserState, ParserStateStack};
 use super::scope_tree::ScopeTree;
 use super::source::Source;
@@ -55,13 +56,25 @@ impl Uc32 {
 struct SourceCursor {
   source: FixedU16CodePointArray,
   index: isize,
+  parser_range: ParserRange,
 }
 
 const INVALID: u16 = 0xFFFF;
 const INVALID_CHAR: char = chars::ch(INVALID);
 impl SourceCursor {
-  fn new(source: FixedU16CodePointArray) -> SourceCursor {
-    return SourceCursor { source, index: -1 };
+  fn new(source: FixedU16CodePointArray, parser_range: ParserRange) -> SourceCursor {
+    return SourceCursor {
+      source,
+      index: -1,
+      parser_range: ParserRange::new(
+        parser_range.begin(),
+        if parser_range.end() == 0 {
+          source.len() as u32
+        } else {
+          parser_range.end()
+        },
+      ),
+    };
   }
 
   fn uc32(&mut self) -> Uc32 {
@@ -98,24 +111,28 @@ impl SourceCursor {
     }
     if self.index > 0 {
       self.index -= 1;
-      return Some(self.source[self.index as usize]);
+      return Some(self.source[self.pos() as usize]);
     }
-    return Some(self.source[0]);
+    return Some(self.source[self.pos() as usize]);
   }
 
   #[inline]
   fn pos(&self) -> isize {
-    return self.index;
+    return if self.index < 0 {
+      -1
+    } else {
+      self.index + self.parser_range.begin() as isize
+    };
   }
 
   #[inline]
   fn val(&self) -> u16 {
-    return self.get_val(self.index).cloned().unwrap_or(INVALID);
+    return self.get_val(self.pos()).cloned().unwrap_or(INVALID);
   }
 
   #[inline]
   fn val_ref(&self) -> &u16 {
-    return self.get_val(self.index).unwrap_or(&INVALID);
+    return self.get_val(self.pos()).unwrap_or(&INVALID);
   }
 
   #[inline]
@@ -138,12 +155,12 @@ impl SourceCursor {
 
   #[inline]
   fn peek(&self) -> Option<u16> {
-    return self.get_val(self.index + 1).cloned();
+    return self.get_val(self.pos() + 1).cloned();
   }
 
   #[inline]
   fn peek_as_char(&self) -> Option<char> {
-    return match self.get_val(self.index + 1).cloned() {
+    return match self.get_val(self.pos() + 1).cloned() {
       Some(uc) => Some(chars::ch(uc)),
       _ => None,
     };
@@ -151,7 +168,7 @@ impl SourceCursor {
 
   #[inline]
   fn peek_as_char_safe(&self) -> Option<Result<char, u16>> {
-    return match self.get_val(self.index + 1).cloned() {
+    return match self.get_val(self.pos() + 1).cloned() {
       Some(uc) => Some(chars::char_safe(uc)),
       _ => None,
     };
@@ -159,7 +176,7 @@ impl SourceCursor {
 
   #[inline]
   fn get_val(&self, i: isize) -> Option<&u16> {
-    return if i >= 0 && self.source.len() as isize > i {
+    return if i >= 0 && self.parser_range.end() as isize > i {
       Some(&self.source[i as usize])
     } else {
       None
@@ -170,11 +187,11 @@ impl SourceCursor {
 impl Iterator for SourceCursor {
   type Item = u16;
   fn next(&mut self) -> Option<Self::Item> {
-    if self.index < (self.source.len() as isize) {
+    if self.pos() < (self.parser_range.end() as isize) {
       self.index += 1;
     }
-    return if self.source.len() as isize > self.index {
-      return Some(self.source[self.index as usize]);
+    return if self.parser_range.end() as isize > self.pos() {
+      return Some(self.source[self.pos() as usize]);
     } else {
       None
     };
@@ -239,13 +256,14 @@ impl Scanner {
     parser_state_stack: Exotic<ParserStateStack>,
     error_reporter: Exotic<ErrorReporter>,
     scope: ScopeTree,
+    parser_range: ParserRange,
   ) -> Scanner {
     let mut scanner = Scanner {
       token: Token::Invalid,
       lookahead_token: Token::Invalid,
       region: region.clone(),
       source: source.clone(),
-      iter: SourceCursor::new(source.source_code()),
+      iter: SourceCursor::new(source.source_code(), parser_range),
       contextual_keywords: [Token::Invalid, Token::Invalid],
       literal_buffer: [Vec::<u16>::new(), Vec::<u16>::new()],
       scanner_state: [Bitset::<u8>::new(), Bitset::<u8>::new()],
@@ -320,7 +338,7 @@ impl Scanner {
 
   #[inline(always)]
   pub fn source_index(&self) -> isize {
-    return self.iter.index();
+    return self.iter.pos();
   }
 
   #[inline(always)]

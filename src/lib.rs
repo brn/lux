@@ -1,3 +1,8 @@
+extern crate enum_index;
+
+#[macro_use]
+extern crate enum_index_derive;
+
 #[macro_use]
 extern crate bitflags;
 
@@ -22,6 +27,8 @@ extern crate termion;
 
 extern crate byteorder;
 
+extern crate inkwell;
+
 #[macro_use]
 mod debug_tools;
 
@@ -39,6 +46,8 @@ pub mod structs;
 pub mod unicode;
 #[macro_use]
 pub mod context;
+
+mod vm;
 
 pub mod heap;
 

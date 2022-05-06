@@ -29,7 +29,7 @@ const BOOLEAN: u64 = (TRUE | FALSE) & LOWER_STRANGERS_MASK;
 
 const _MAX_SAFE_INTEGER: u64 = 0x1fffffffffffff;
 
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub struct Repr(f64);
 
 impl Repr {
@@ -358,6 +358,12 @@ impl From<Addr> for Repr {
 impl From<Repr> for Addr {
   fn from(r: Repr) -> Addr {
     return r.unbox().unwrap();
+  }
+}
+
+impl std::cmp::PartialEq for Repr {
+  fn eq(&self, other: &Repr) -> bool {
+    return self.0 == other.0;
   }
 }
 

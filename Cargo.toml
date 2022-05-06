@@ -24,6 +24,9 @@ paste = "1.0"
 termion = "1.5.6"
 byteorder = "1"
 threadpool = "1.0"
+inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm13-0"] }
+enum_index = "0.2.0"
+enum_index_derive = "0.2.0"
 
 [build-dependencies]
 paste = "1.0"
@@ -46,3 +49,9 @@ harness = false
 [[bin]]
 name = "lux"
 path = "src/main.rs"
+
+[env]
+LLVM_SYS_130_PREFIX = {value = './llvm/13.0.0', relative = true}
+RUST_MIN_STACK = 8388608
+RUST_BACKTRACE = 1
+RUSTFLAGS = '-Awarnings'

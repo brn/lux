@@ -7,6 +7,7 @@ use super::repr::*;
 use super::shape::*;
 use super::string::*;
 use crate::context::*;
+use crate::vm::BytecodeVector;
 use property::Property;
 use std::mem::size_of;
 
@@ -15,6 +16,9 @@ use std::mem::size_of;
 pub struct ObjectRecordsLayout {
   #[property(get(type = "copy"))]
   internal_array_record: ObjectRecord,
+
+  #[property(get(type = "copy"))]
+  bytecode_vector_record: ObjectRecord,
 
   #[property(get(type = "copy"))]
   root_object_record: FullObjectRecord,
@@ -94,6 +98,7 @@ impl ObjectRecords {
 
   pub fn initialize_internal_structs(&mut self, context: impl ObjectRecordsInitializedContext) {
     self.internal_array_record = ObjectRecord::new(context, 0, Shape::internal_array());
+    self.bytecode_vector_record = ObjectRecord::new(context, BytecodeVector::SIZE, Shape::bytecode_vector());
     self.hash_map_entry_record = ObjectRecord::new(context, 0, Shape::hash_map_entry());
     self.hash_map_record = ObjectRecord::new(context, 0, Shape::hash_map());
     self.property_record = ObjectRecord::new(context, Property::SIZE as u32, Shape::property());

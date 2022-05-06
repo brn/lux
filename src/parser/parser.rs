@@ -5,6 +5,7 @@ use super::error_formatter::*;
 use super::error_reporter::*;
 use super::node_ops::*;
 use super::parser_def::*;
+use super::parser_range::ParserRange;
 use super::parser_state::{ParserState, ParserStateStack};
 use super::scanner::*;
 use super::scope::*;
@@ -356,6 +357,9 @@ pub struct ParserOption {
 
   #[property(get(type = "copy"), set(disable))]
   is_module: bool,
+
+  #[property(get(type = "ref"), set(disable))]
+  parser_range: ParserRange,
 }
 impl ParserOption {
   pub fn with_disable_skip_parser(mut self) -> Self {
@@ -393,6 +397,7 @@ impl Default for ParserOption {
       is_root_super_allowed: false,
       is_strict_mode: false,
       is_module: false,
+      parser_range: ParserRange::default(),
     }
   }
 }
@@ -405,6 +410,7 @@ pub struct ParserOptionBuilder {
   pub is_root_new_target_allowed: bool,
   pub is_strict_mode: bool,
   pub is_module: bool,
+  pub parser_range: ParserRange,
 }
 impl Default for ParserOptionBuilder {
   fn default() -> Self {
@@ -416,6 +422,7 @@ impl Default for ParserOptionBuilder {
       is_strict_mode: false,
       is_module: false,
       allow_undefined_named_module: false,
+      parser_range: ParserRange::default(),
     }
   }
 }
@@ -429,6 +436,7 @@ impl ParserOptionBuilder {
       is_strict_mode: self.is_strict_mode,
       is_module: self.is_module,
       allow_undefined_named_module: self.allow_undefined_named_module,
+      parser_range: self.parser_range,
     }
   }
 }
@@ -576,7 +584,14 @@ impl Parser {
     return Parser {
       context: LuxContext::from_allocation_only_context(context),
       parser_state,
-      scanner: Scanner::new(region.clone_weak(), source.clone(), parser_state, error_reporter, scope.clone()),
+      scanner: Scanner::new(
+        region.clone_weak(),
+        source.clone(),
+        parser_state,
+        error_reporter,
+        scope.clone(),
+        parser_option.parser_range,
+      ),
       region: region.clone(),
       result: Ok(empty.into()),
       source: source.clone(),

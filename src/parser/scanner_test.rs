@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod scanner_test {
   use super::super::error_reporter::{ErrorReporter, ReportSyntaxError};
+  use super::super::parser_range::*;
   use super::super::parser_state::{ParserState, ParserStateStack};
   use super::super::scanner::*;
   use super::super::scope::*;
@@ -34,6 +35,7 @@ mod scanner_test {
       parser_state_stack.into(),
       error_reporter,
       scope.clone(),
+      ParserRange::default(),
     );
     return cb(scanner);
   }
