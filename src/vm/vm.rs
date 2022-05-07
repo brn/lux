@@ -36,11 +36,15 @@ impl VM {
     // 型関係の変数
     let i32_type = self.context.i32_type();
     let i8_type = self.context.i8_type();
+    let void_type = self.context.void_type();
     let i8_ptr_type = i8_type.ptr_type(inkwell::AddressSpace::Generic);
 
     // printf関数を宣言
     let printf_fn_type = i32_type.fn_type(&[i8_ptr_type.into()], true);
     let printf_function = module.add_function("printf", printf_fn_type, None);
+
+    let rust_fn_type = void_type.fn_type(&[i8_ptr_type.into()], false);
+    let rust_function = module.add_function("rust_function", rust_fn_type, None);
 
     // main関数を宣言
     let main_fn_type = i32_type.fn_type(&[], false);
@@ -55,7 +59,7 @@ impl VM {
     // globalに文字列を宣言
     let hw_string_ptr = builder.build_global_string_ptr("Hello, world!", "hw");
     // printfをcall
-    builder.build_call(printf_function, &[hw_string_ptr.as_pointer_value().into()], "call");
+    builder.build_call(rust_function, &[hw_string_ptr.as_pointer_value().into()], "call");
     // main関数は0を返す
     builder.build_return(Some(&i32_type.const_int(0, false)));
 
@@ -82,6 +86,16 @@ impl VM {
     // unsafe {
     //   execution_engine.get_function::<unsafe extern "C" fn()>("main").unwrap().call();
     // }
+  }
+}
+
+use std::os::raw::c_char;
+
+#[no_mangle]
+pub extern "C" fn rust_function(data: *const c_char) {
+  unsafe {
+    let cs = std::ffi::CStr::from_ptr(data);
+    println!("rust_function {:?}", cs.to_string_lossy().into_owned());
   }
 }
 
