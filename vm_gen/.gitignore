@@ -1,0 +1,4 @@
+/llvm
+/bitcode
+*.ll
+/*_asm

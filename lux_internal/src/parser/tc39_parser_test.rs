@@ -46,7 +46,7 @@ fn parse(filename: &str, content: &str, parser_option: ParserOption, should_fail
 
 fn get_test_files<F: Fn(&fs::DirEntry) + Send + Sync + 'static + Copy>(dir: &str, cb: F) -> io::Result<()> {
   let mut d = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
-  let path = format!("tools/test262-parser-tests/{}", dir);
+  let path = format!("../tools/test262-parser-tests/{}", dir);
   d.push(&path);
   let pool = ThreadPool::new(10);
   for entry in fs::read_dir(d.to_str().unwrap())? {

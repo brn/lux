@@ -1,0 +1,16 @@
+[package]
+name = "vm_gen"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+bitflags = "1.2"
+lux_internal = {path = "../lux_internal"}
+inkwell = { git = "https://github.com/TheDan64/inkwell", branch = "master", features = ["llvm13-0"] }
+property = "0.3.3"
+
+[[bin]]
+name = "vm_gen"
+path = "src/main.rs"

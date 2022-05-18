@@ -3,31 +3,31 @@ use super::object_record::{ObjectRecord, ObjectSkin};
 use super::shape::ShapeTag;
 use crate::def::*;
 
-const NAN_BIT: u64 = 0xfff8000000000000;
-const NAN_MASK: u64 = !NAN_BIT;
-const UPPER_STRANGERS_MASK: u64 = 0xfff0000000000000;
-const UPPER_STRANGERS_MASK_RESULT: u64 = 0x7ff0000000000000;
-const LOWER_STRANGERS_MASK: u64 = !0xfff8000000000000;
-const INFINITY: u64 = 0x7ff0000000000002;
-const HEAP_OBJECT_MASK: u64 = 0xfff8000000000000;
-const NAN: f64 = unsafe { std::mem::transmute(!0_u64) };
+pub const NAN_BIT: u64 = 0xfff8000000000000;
+pub const NAN_MASK: u64 = !NAN_BIT;
+pub const UPPER_STRANGERS_MASK: u64 = 0xfff0000000000000;
+pub const UPPER_STRANGERS_MASK_RESULT: u64 = 0x7ff0000000000000;
+pub const LOWER_STRANGERS_MASK: u64 = !0xfff8000000000000;
+pub const INFINITY: u64 = 0x7ff0000000000002;
+pub const HEAP_OBJECT_MASK: u64 = 0xfff8000000000000;
+pub const NAN: f64 = unsafe { std::mem::transmute(!0_u64) };
 
-const INVALID_VALUE: f64 = unsafe { std::mem::transmute(NAN_BIT) };
-const INFINITY_VALUE: f64 = unsafe { std::mem::transmute(INFINITY) };
+pub const INVALID_VALUE: f64 = unsafe { std::mem::transmute(NAN_BIT) };
+pub const INFINITY_VALUE: f64 = unsafe { std::mem::transmute(INFINITY) };
 
-const UNDEFINED: u64 = 0x7ff0000000000004;
-const NULL: u64 = 0x7ff0000000000008;
-const NULL_OR_UNDEFINED: u64 = (UNDEFINED | NULL) & LOWER_STRANGERS_MASK;
-const NULL_VALUE: f64 = unsafe { std::mem::transmute(NULL) };
-const UNDEFINED_VALUE: f64 = unsafe { std::mem::transmute(UNDEFINED) };
+pub const UNDEFINED: u64 = 0x7ff0000000000004;
+pub const NULL: u64 = 0x7ff0000000000008;
+pub const NULL_OR_UNDEFINED: u64 = (UNDEFINED | NULL) & LOWER_STRANGERS_MASK;
+pub const NULL_VALUE: f64 = unsafe { std::mem::transmute(NULL) };
+pub const UNDEFINED_VALUE: f64 = unsafe { std::mem::transmute(UNDEFINED) };
 
-const TRUE: u64 = 0x7ff0000000000010;
-const FALSE: u64 = 0x7ff0000000000020;
-const TRUE_VALUE: f64 = unsafe { std::mem::transmute(TRUE) };
-const FALSE_VALUE: f64 = unsafe { std::mem::transmute(FALSE) };
-const BOOLEAN: u64 = (TRUE | FALSE) & LOWER_STRANGERS_MASK;
+pub const TRUE: u64 = 0x7ff0000000000010;
+pub const FALSE: u64 = 0x7ff0000000000020;
+pub const TRUE_VALUE: f64 = unsafe { std::mem::transmute(TRUE) };
+pub const FALSE_VALUE: f64 = unsafe { std::mem::transmute(FALSE) };
+pub const BOOLEAN: u64 = (TRUE | FALSE) & LOWER_STRANGERS_MASK;
 
-const _MAX_SAFE_INTEGER: u64 = 0x1fffffffffffff;
+pub const MAX_SAFE_INTEGER: u64 = 0x1fffffffffffff;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Repr(f64);

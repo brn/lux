@@ -6,13 +6,13 @@ use inkwell::targets::{CodeModel, FileType, InitializationConfig, RelocMode, Tar
 use inkwell::OptimizationLevel;
 use std::path::{Path, PathBuf};
 
-pub struct VM {
+pub struct VMGenContext {
   context: Context,
 }
 
-impl VM {
+impl VMGenContext {
   pub fn new() -> Self {
-    VM {
+    VMGenContext {
       context: Context::create(),
     }
   }
@@ -87,26 +87,4 @@ impl VM {
     //   execution_engine.get_function::<unsafe extern "C" fn()>("main").unwrap().call();
     // }
   }
-}
-
-use std::os::raw::c_char;
-
-#[no_mangle]
-pub extern "C" fn rust_function(data: *const c_char) {
-  unsafe {
-    let cs = std::ffi::CStr::from_ptr(data);
-    println!("rust_function {:?}", cs.to_string_lossy().into_owned());
-  }
-}
-
-global_asm!(include_str!("../../bitcode"));
-extern "C" {
-  fn test_print();
-}
-
-#[test]
-fn test_run_inkwell() {
-  let mut vm = VM::new();
-  vm.run();
-  unsafe { test_print() };
 }

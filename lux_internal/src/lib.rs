@@ -27,8 +27,6 @@ extern crate termion;
 
 extern crate byteorder;
 
-extern crate inkwell;
-
 #[macro_use]
 mod debug_tools;
 
@@ -43,11 +41,13 @@ pub mod utility;
 #[macro_use]
 pub mod structs;
 
-pub mod unicode;
+#[macro_use]
+mod vm;
+
 #[macro_use]
 pub mod context;
 
-mod vm;
+pub mod unicode;
 
 pub mod heap;
 
