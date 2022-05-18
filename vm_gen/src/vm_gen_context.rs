@@ -126,8 +126,8 @@ impl<'ctx> VMGenContext<'ctx> {
             &TargetMachine::get_host_cpu_name().to_string(),
             &TargetMachine::get_host_cpu_features().to_string(),
             OptimizationLevel::Aggressive,
-            RelocMode::Default,
-            CodeModel::JITDefault,
+            RelocMode::PIC,
+            CodeModel::Large,
           ) {
             target_machine.write_to_file(&*self.module(), FileType::Assembly, &d);
             return Ok(());
